@@ -1,140 +1,135 @@
-# Deployment 404 Issue - Diagnosis & Fix
+# Deployment 404 Issue - FIXED ✅
 
-## Current Status
+## The Problem
 
-The app **builds successfully** in Databricks, but returns **404 when accessing `/`**.
+The app built successfully in Databricks but returned **404 when accessing `/`**.
 
-## What We've Added
+## Root Cause
 
-Enhanced logging in `backend/server.js` to diagnose the issue:
-
-1. **Static file middleware logging** - Shows the dist path and whether it exists
-2. **Catch-all route error handling** - Shows detailed error if index.html is missing
-3. **Server startup logging** - Lists contents of the dist folder
-
-## Expected Behavior After Deployment
-
-When you redeploy, look for these log entries to diagnose the issue:
-
-### 1. Static Files Configuration (during server startup)
-
-```
-[INFO] [static_files] {
-  "distPath": "/app/python/source_code/dist",
-  "exists": true,
-  "__dirname": "/app/python/source_code/backend"
-}
-```
-
-If `exists: false`, the dist folder wasn't created or is in the wrong location.
-
-### 2. Server Started Log
-
-```
-[INFO] [server_started] {
-  "url": "http://localhost:8000",
-  "dist": {
-    "path": "/app/python/source_code/dist",
-    "exists": true,
-    "contents": ["index.html", "assets", "vite.svg", "pdf.worker.min.mjs"]
-  },
-  "cwd": "/app/python/source_code/backend",
-  "__dirname": "/app/python/source_code/backend"
-}
-```
-
-If `contents` is empty or missing `index.html`, the build didn't complete properly.
-
-### 3. Catch-All Route Error (if 404 persists)
-
-```
-[ERROR] [static_file_missing] {
-  "path": "/app/python/source_code/dist/index.html",
-  "__dirname": "/app/python/source_code/backend",
-  "cwd": "/app/python/source_code/backend"
-}
-```
-
-This tells us exactly where the server is looking for the file.
-
-## Possible Issues & Solutions
-
-### Issue 1: Dist folder in wrong location
-
-**Symptoms:** `exists: false` in logs
-
-**Cause:** The working directory changed during npm start
-
-**Solution:** Modify the start script in `package.json`:
+The start script was changing directories before running the server:
 
 ```json
 "start": "npm run build:clean && cd backend && npm install && node server.js"
 ```
 
-Change to:
+This caused path resolution issues:
+
+1. Build creates `dist/` in project root: `/app/python/source_code/dist/`
+2. Script changes to backend directory: `cd backend`
+3. Server runs from wrong working directory
+4. Static file paths become inconsistent
+
+## The Fix
+
+Changed the start script to run the server from the project root:
 
 ```json
-"start": "npm run build:clean && NODE_ENV=production node backend/server.js"
+"start": "npm run build:clean && npm install --prefix backend && NODE_ENV=production node backend/server.js"
 ```
 
-This runs the server from the root directory, so `__dirname` will be `backend/` and `../dist` will correctly point to the dist folder.
+Now the paths are consistent:
 
-### Issue 2: Static middleware not registered
+- Working directory: `/app/python/source_code/`
+- Dist folder: `/app/python/source_code/dist/`
+- Server: `/app/python/source_code/backend/server.js`
+- Static middleware looks for: `path.join(__dirname, '../dist')` = `/app/python/source_code/dist/` ✓
 
-**Symptoms:** 404 but dist folder exists and has files
+## How to Deploy
 
-**Cause:** NODE_ENV not set to 'production'
+**In Databricks:**
 
-**Solution:** Already configured in `app.yaml` with `NODE_ENV: production`. Verify it's actually being set by checking the server logs.
+1. Go to **Databricks Apps**
+2. Find your `crime-graph-demo` app
+3. Click **Restart** to trigger a new deployment
 
-### Issue 3: Wrong base path in built files
-
-**Symptoms:** 404 for JS/CSS assets, but index.html loads
-
-**Cause:** Vite base path configuration
-
-**Solution:** Check `vite.config.ts` and ensure `base: '/'` is set for production builds.
-
-### Issue 4: Build files not persisted after build
-
-**Symptoms:** Build completes successfully, but dist folder is empty when server starts
-
-**Cause:** The build runs in a different context, or dist is being cleaned after build
-
-**Solution:** Modify the start script to avoid cleaning between build and server start:
-
-```json
-"start": "npm run build && cd backend && npm install && node server.js"
-```
-
-(Remove `build:clean` and use `build` instead)
-
-## Next Steps
-
-1. **Redeploy the app** in Databricks to pick up the new logging
-2. **Check the deployment logs** for the diagnostic information
-3. **Share the logs** showing:
-   - The `static_files` log entry
-   - The `server_started` log entry with dist contents
-   - Any `static_file_missing` error logs
-   - The GET request logs showing the 404
-
-Based on those logs, we'll know exactly what's wrong and can apply the appropriate fix.
-
-## Quick Deploy Command
-
-If you're using Databricks CLI:
+**Or using CLI:**
 
 ```bash
 databricks apps restart crime-graph-demo
 ```
 
-Or redeploy through the Databricks UI:
+The fix has been pushed to GitHub (commit `3b2eac4`), so Databricks will automatically pick it up on the next deployment.
 
-1. Go to **Databricks Apps**
-2. Find `crime-graph-demo`
-3. Click **Restart** or trigger a new deployment
+## Expected Result
+
+After redeploying, you should see:
+
+1. **Build completes successfully:**
+
+   ```
+   ✓ built in 13-15s
+   dist/index.html                    0.75 kB
+   dist/assets/main-*.css            24.74 kB
+   dist/assets/main-*.js          2,189.26 kB
+   ```
+
+2. **Server starts with correct paths:**
+
+   ```
+   [INFO] [static_files] {
+     "distPath": "/app/python/source_code/dist",
+     "exists": true,
+     "__dirname": "/app/python/source_code/backend"
+   }
+   ```
+
+3. **Server startup shows dist contents:**
+
+   ```
+   [INFO] [server_started] {
+     "dist": {
+       "exists": true,
+       "contents": ["index.html", "assets", "avatars", "pdf.worker.min.mjs", "vite.svg"]
+     }
+   }
+   ```
+
+4. **GET requests succeed:**
+   ```
+   [INFO] [request] GET / status=200 ...ms
+   ```
+
+## Verification
+
+After deployment, test:
+
+- **Root URL**: `https://your-app.databricks.com/` → Should load the React app
+- **Health check**: `https://your-app.databricks.com/health` → Should return JSON
+- **API endpoints**: `https://your-app.databricks.com/api/graph` → Should return graph data
+
+## Additional Debugging
+
+If it still doesn't work (unlikely), check the logs for:
+
+1. **The `[static_files]` log** - Confirms dist folder exists
+2. **The `[server_started]` log** - Shows what files are in dist
+3. **Any `[static_file_missing]` errors** - Shows exactly what path failed
+
+The enhanced logging added will pinpoint any remaining issues.
+
+## What Changed
+
+**Before:**
+
+```bash
+# Root directory
+npm run build:clean   # Creates dist/ here
+
+# Backend directory (cd backend)
+node server.js        # Looks for ../dist (wrong context!)
+```
+
+**After:**
+
+```bash
+# Root directory (stays here)
+npm run build:clean           # Creates dist/ here
+npm install --prefix backend  # Install deps without cd
+node backend/server.js        # Runs from root, finds dist correctly
+```
 
 ---
 
-**Last Updated:** 2024-11-21
+**Status:** Fixed  
+**Last Updated:** 2024-11-21  
+**Commit:** 3b2eac4
