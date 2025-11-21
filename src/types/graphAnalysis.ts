@@ -1,7 +1,5 @@
 // Type definitions for graph analysis algorithms
 
-import type { GraphNode, GraphEdge } from './graph';
-
 /**
  * Centrality scores for nodes
  * Maps nodeId to centrality score
@@ -11,12 +9,7 @@ export type CentralityScores = Map<string, number>;
 /**
  * Centrality type options
  */
-export type CentralityType = 
-  | 'betweenness'
-  | 'closeness'
-  | 'eigenvector'
-  | 'pagerank'
-  | 'degree';
+export type CentralityType = 'betweenness' | 'closeness' | 'eigenvector' | 'pagerank' | 'degree';
 
 /**
  * Result of shortest path finding
@@ -110,5 +103,3 @@ export interface GraphAnalysisResults {
   clustering: Map<string, number>; // nodeId -> clustering coefficient
   paths?: Map<string, PathResult>; // Cache of computed paths
 }
-
-

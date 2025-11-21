@@ -3,6 +3,7 @@
 ## 🚀 How to Test the Improved Flow
 
 ### Prerequisites
+
 ```bash
 # Make sure dev server is running
 npm run dev
@@ -13,6 +14,7 @@ npm run dev
 ## 🧭 Navigation Test Sequence
 
 ### Test 1: Dashboard Landing (30 seconds)
+
 1. Open `http://localhost:5173/`
 2. **Verify:**
    - ✓ Dashboard page loads
@@ -27,6 +29,7 @@ npm run dev
 ---
 
 ### Test 2: Top Navigation (1 minute)
+
 1. From Dashboard, click each nav tab:
    - **Cases** → Should load cases page
    - **Graph** → Should load graph visualization
@@ -45,6 +48,7 @@ npm run dev
 ---
 
 ### Test 3: Sidebar Behavior (1 minute)
+
 1. Navigate to **Dashboard** → No sidebar
 2. Navigate to **Cases** → No sidebar
 3. Navigate to **Graph** → Sidebar appears
@@ -57,6 +61,7 @@ npm run dev
 ---
 
 ### Test 4: Case Selection and URL (2 minutes)
+
 1. Go to **Graph** page
 2. Open sidebar (should be visible)
 3. Click "Detect Communities" button
@@ -76,6 +81,7 @@ npm run dev
 ---
 
 ### Test 5: Cross-View Case Persistence (2 minutes)
+
 1. From Graph, select a case (URL: `/graph?case=ID`)
 2. Click **Timeline** in top nav
 3. **Verify:**
@@ -97,6 +103,7 @@ npm run dev
 ---
 
 ### Test 6: Cases Page → Graph Flow (2 minutes)
+
 1. Go to **Cases** page
 2. **Verify:**
    - ✓ Board view or List view toggles
@@ -120,6 +127,7 @@ npm run dev
 ---
 
 ### Test 7: Create Case from Sidebar (1 minute)
+
 1. Go to Graph page
 2. Open sidebar
 3. Click "New Case" button
@@ -136,6 +144,7 @@ npm run dev
 ---
 
 ### Test 8: Manage Cases Button (30 seconds)
+
 1. From Graph/Timeline/Map with sidebar open
 2. Click "Manage Cases" button at top of sidebar
 3. **Verify:**
@@ -146,6 +155,7 @@ npm run dev
 ---
 
 ### Test 9: Dashboard Quick Actions (1 minute)
+
 1. Go to Dashboard
 2. Click "View All Cases"
    - **Verify:** Goes to `/cases`
@@ -159,6 +169,7 @@ npm run dev
 ---
 
 ### Test 10: URL Bookmarking (1 minute)
+
 1. Navigate to `/graph?case=SOME_CASE_ID`
 2. Copy URL from browser
 3. Open new browser tab/window
@@ -172,6 +183,7 @@ npm run dev
 ---
 
 ### Test 11: Browser Navigation (1 minute)
+
 1. Start at Dashboard
 2. Navigate: Dashboard → Cases → Graph → Timeline → Map
 3. Click browser **back button** 4 times
@@ -186,6 +198,7 @@ npm run dev
 ---
 
 ### Test 12: Mobile Responsiveness (30 seconds)
+
 1. Open browser dev tools (F12)
 2. Toggle device toolbar (mobile view)
 3. Navigate through pages
@@ -199,6 +212,7 @@ npm run dev
 ## 🎯 Expected User Flow Summary
 
 ### Analyst Workflow
+
 ```
 1. Land on Dashboard
    ↓
@@ -218,6 +232,7 @@ npm run dev
 ```
 
 ### Key Benefits Demonstrated
+
 - ✅ Clear entry point (Dashboard)
 - ✅ Easy case management (Cases page)
 - ✅ Quick navigation (Top nav + sidebar)
@@ -230,21 +245,25 @@ npm run dev
 ## 🐛 Common Issues to Check
 
 ### If pages don't load:
+
 - Check console for errors (F12)
 - Verify dev server is running (`npm run dev`)
 - Clear browser cache
 
 ### If case filtering doesn't work:
+
 - Check URL has `?case=ID` parameter
 - Verify case exists in context
 - Check sidebar shows selected case
 
 ### If navigation breaks:
+
 - Check for console errors
 - Verify React Router is installed
 - Check all imports are correct
 
 ### If sidebar doesn't show/hide:
+
 - Check current route (`/graph`, `/timeline`, `/map` = sidebar)
 - Other routes should have no sidebar
 
@@ -274,7 +293,7 @@ Date: ___________
 Tester: ___________
 
 ✅ Test 1: Dashboard Landing - PASS / FAIL
-✅ Test 2: Top Navigation - PASS / FAIL  
+✅ Test 2: Top Navigation - PASS / FAIL
 ✅ Test 3: Sidebar Behavior - PASS / FAIL
 ✅ Test 4: Case Selection and URL - PASS / FAIL
 ✅ Test 5: Cross-View Case Persistence - PASS / FAIL
@@ -297,5 +316,3 @@ _________________________________
 **Total Testing Time: ~15 minutes for comprehensive walkthrough**
 
 🎉 **Happy Testing!**
-
-

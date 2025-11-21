@@ -5,6 +5,7 @@
 If you're seeing a white screen, try these steps in order:
 
 ### 1. Clear Browser Storage (Most Common Fix)
+
 ```javascript
 // Open browser console (F12) and run:
 localStorage.clear();
@@ -13,18 +14,21 @@ sessionStorage.clear();
 ```
 
 ### 2. Hard Refresh
+
 ```
 Windows/Linux: Ctrl + Shift + R
 Mac: Cmd + Shift + R
 ```
 
 ### 3. Check Browser Console
+
 ```
 F12 → Console tab
 Look for red errors
 ```
 
 ### 4. Restart Dev Server
+
 ```bash
 # Kill the current server (Ctrl+C in terminal)
 npm run dev
@@ -33,44 +37,53 @@ npm run dev
 ## Common Issues After Redux Migration
 
 ### Issue: "A non-serializable value was detected"
+
 **Fix:** Already handled in the code with proper serialization
 
 ### Issue: "Cannot read property of undefined"
+
 **Cause:** Old localStorage data from Context version
 **Fix:** Clear localStorage (see Quick Fix #1)
 
 ### Issue: "Module not found"
+
 **Fix:** Reinstall dependencies
+
 ```bash
 rm -rf node_modules package-lock.json
 npm install
 ```
 
 ### Issue: White screen, no errors in console
+
 **Fix:** Check if React is rendering
+
 ```javascript
 // In browser console:
-document.getElementById('root').innerHTML
+document.getElementById('root').innerHTML;
 // Should show content, not empty
 ```
 
 ## Debug Steps
 
 ### Step 1: Check if Redux store exists
+
 ```javascript
 // Browser console:
-window.__REDUX_DEVTOOLS_EXTENSION__
+window.__REDUX_DEVTOOLS_EXTENSION__;
 // Should return object or function
 ```
 
 ### Step 2: Check if React is mounted
+
 ```javascript
 // Browser console:
-document.querySelector('[data-reactroot]') || document.querySelector('#root').hasChildNodes()
+document.querySelector('[data-reactroot]') || document.querySelector('#root').hasChildNodes();
 // Should return true
 ```
 
 ### Step 3: Check for JavaScript errors
+
 ```
 F12 → Console tab
 Look for:
@@ -80,6 +93,7 @@ Look for:
 ```
 
 ### Step 4: Check Network tab
+
 ```
 F12 → Network tab → Refresh page
 Look for:
@@ -109,6 +123,7 @@ npm run dev
 ## What Changed (Redux Migration)
 
 The white screen is likely caused by:
+
 1. **Old localStorage data** - Context format vs Redux format
 2. **Serialization** - Dates stored in old format
 3. **Provider order** - Redux needs to wrap everything
@@ -149,11 +164,13 @@ After clearing localStorage:
 ## Still Stuck?
 
 Check these files were updated correctly:
+
 - `src/App.tsx` - Has Redux Provider?
 - `src/store/index.ts` - Store configured?
 - `src/main.tsx` - Has BrowserRouter?
 
 Or restart fresh:
+
 ```bash
 # In browser console
 localStorage.clear()
@@ -168,5 +185,3 @@ npm run dev
 ---
 
 **TL;DR: Run `localStorage.clear()` in browser console, then refresh page.**
-
-

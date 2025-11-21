@@ -105,11 +105,11 @@ const CaseEditDialog: React.FC<CaseEditDialogProps> = ({ open, caseData, onClose
   };
 
   const handleRemoveTag = (tagToRemove: string) => {
-    setTags(tags.filter(tag => tag !== tagToRemove));
+    setTags(tags.filter((tag) => tag !== tagToRemove));
   };
 
   const currentStepIndex = statusOrder.indexOf(status);
-  
+
   const canMoveToNextStatus = currentStepIndex < statusOrder.length - 1;
   const nextStatus = canMoveToNextStatus ? statusOrder[currentStepIndex + 1] : null;
 
@@ -121,11 +121,16 @@ const CaseEditDialog: React.FC<CaseEditDialogProps> = ({ open, caseData, onClose
 
   const getStatusColor = (s: CaseStatus) => {
     switch (s) {
-      case CaseStatus.LEADS: return '#78909c';
-      case CaseStatus.ACTIVE_INVESTIGATION: return '#1976d2';
-      case CaseStatus.PROSECUTION: return '#f57c00';
-      case CaseStatus.CLOSED: return '#388e3c';
-      default: return '#757575';
+      case CaseStatus.LEADS:
+        return '#78909c';
+      case CaseStatus.ACTIVE_INVESTIGATION:
+        return '#1976d2';
+      case CaseStatus.PROSECUTION:
+        return '#f57c00';
+      case CaseStatus.CLOSED:
+        return '#388e3c';
+      default:
+        return '#757575';
     }
   };
 
@@ -152,7 +157,7 @@ const CaseEditDialog: React.FC<CaseEditDialogProps> = ({ open, caseData, onClose
             <Stepper activeStep={currentStepIndex} alternativeLabel sx={{ mt: 2 }}>
               {statusOrder.map((s, index) => (
                 <Step key={s} completed={index < currentStepIndex}>
-                  <StepButton 
+                  <StepButton
                     onClick={() => setStatus(s)}
                     sx={{
                       '& .MuiStepLabel-label': {
@@ -173,11 +178,11 @@ const CaseEditDialog: React.FC<CaseEditDialogProps> = ({ open, caseData, onClose
                 </Step>
               ))}
             </Stepper>
-            
+
             {/* Quick Status Transition */}
             {canMoveToNextStatus && (
-              <Alert 
-                severity="info" 
+              <Alert
+                severity="info"
                 sx={{ mt: 2 }}
                 action={
                   <Button
@@ -195,7 +200,7 @@ const CaseEditDialog: React.FC<CaseEditDialogProps> = ({ open, caseData, onClose
                 </Typography>
               </Alert>
             )}
-            
+
             {status === CaseStatus.CLOSED && (
               <Alert severity="success" sx={{ mt: 2 }} icon={<CheckIcon />}>
                 Case is closed
@@ -287,12 +292,7 @@ const CaseEditDialog: React.FC<CaseEditDialogProps> = ({ open, caseData, onClose
             </Box>
             <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
               {tags.map((tag) => (
-                <Chip
-                  key={tag}
-                  label={tag}
-                  size="small"
-                  onDelete={() => handleRemoveTag(tag)}
-                />
+                <Chip key={tag} label={tag} size="small" onDelete={() => handleRemoveTag(tag)} />
               ))}
             </Stack>
           </Box>
@@ -325,5 +325,3 @@ const CaseEditDialog: React.FC<CaseEditDialogProps> = ({ open, caseData, onClose
 };
 
 export default CaseEditDialog;
-
-

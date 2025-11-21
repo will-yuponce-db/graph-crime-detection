@@ -1,4 +1,5 @@
-import type { Case, CreateCaseInput, UpdateCaseInput } from '../types/case';
+import type { Case } from '../types/case';
+// import type { CreateCaseInput, UpdateCaseInput } from '../types/case';
 
 /**
  * Backend API URL
@@ -71,7 +72,9 @@ export const fetchCaseById = async (caseId: string): Promise<Case | null> => {
 /**
  * Create a new case in the database
  */
-export const createCaseInDB = async (caseData: Case): Promise<{ success: boolean; message: string }> => {
+export const createCaseInDB = async (
+  caseData: Case
+): Promise<{ success: boolean; message: string }> => {
   if (!USE_BACKEND_API) {
     // In mock mode, just return success
     return {
@@ -90,15 +93,18 @@ export const createCaseInDB = async (caseData: Case): Promise<{ success: boolean
       body: JSON.stringify({
         ...caseData,
         // Convert Date objects to ISO strings
-        createdDate: caseData.createdDate instanceof Date 
-          ? caseData.createdDate.toISOString() 
-          : caseData.createdDate,
-        updatedDate: caseData.updatedDate instanceof Date 
-          ? caseData.updatedDate.toISOString() 
-          : caseData.updatedDate,
-        targetDate: caseData.targetDate instanceof Date 
-          ? caseData.targetDate.toISOString() 
-          : caseData.targetDate,
+        createdDate:
+          caseData.createdDate instanceof Date
+            ? caseData.createdDate.toISOString()
+            : caseData.createdDate,
+        updatedDate:
+          caseData.updatedDate instanceof Date
+            ? caseData.updatedDate.toISOString()
+            : caseData.updatedDate,
+        targetDate:
+          caseData.targetDate instanceof Date
+            ? caseData.targetDate.toISOString()
+            : caseData.targetDate,
       }),
     });
 
@@ -147,15 +153,18 @@ export const updateCaseInDB = async (
       body: JSON.stringify({
         ...updates,
         // Convert Date objects to ISO strings
-        createdDate: updates.createdDate instanceof Date 
-          ? updates.createdDate.toISOString() 
-          : updates.createdDate,
-        updatedDate: updates.updatedDate instanceof Date 
-          ? updates.updatedDate.toISOString() 
-          : updates.updatedDate,
-        targetDate: updates.targetDate instanceof Date 
-          ? updates.targetDate.toISOString() 
-          : updates.targetDate,
+        createdDate:
+          updates.createdDate instanceof Date
+            ? updates.createdDate.toISOString()
+            : updates.createdDate,
+        updatedDate:
+          updates.updatedDate instanceof Date
+            ? updates.updatedDate.toISOString()
+            : updates.updatedDate,
+        targetDate:
+          updates.targetDate instanceof Date
+            ? updates.targetDate.toISOString()
+            : updates.targetDate,
       }),
     });
 
@@ -182,7 +191,9 @@ export const updateCaseInDB = async (
 /**
  * Delete a case from the database
  */
-export const deleteCaseFromDB = async (caseId: string): Promise<{ success: boolean; message: string }> => {
+export const deleteCaseFromDB = async (
+  caseId: string
+): Promise<{ success: boolean; message: string }> => {
   if (!USE_BACKEND_API) {
     // In mock mode, just return success
     return {
@@ -216,5 +227,3 @@ export const deleteCaseFromDB = async (caseId: string): Promise<{ success: boole
     };
   }
 };
-
-

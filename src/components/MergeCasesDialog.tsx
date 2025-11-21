@@ -26,7 +26,6 @@ import {
   MergeType as MergeIcon,
   Close as CloseIcon,
   Warning as WarningIcon,
-  CheckCircle as CheckIcon,
 } from '@mui/icons-material';
 import type { Case } from '../types/case';
 
@@ -35,7 +34,11 @@ interface MergeCasesDialogProps {
   cases: Case[];
   preSelectedCaseIds?: string[];
   onClose: () => void;
-  onMerge: (targetCaseId: string, sourceCaseIds: string[], options: { keepSourceCases: boolean; newName?: string; newDescription?: string }) => void;
+  onMerge: (
+    targetCaseId: string,
+    sourceCaseIds: string[],
+    options: { keepSourceCases: boolean; newName?: string; newDescription?: string }
+  ) => void;
 }
 
 const MergeCasesDialog: React.FC<MergeCasesDialogProps> = ({
@@ -53,9 +56,9 @@ const MergeCasesDialog: React.FC<MergeCasesDialogProps> = ({
   const [newDescription, setNewDescription] = useState('');
 
   const handleToggleCase = (caseId: string) => {
-    setSelectedCaseIds(prev => {
+    setSelectedCaseIds((prev) => {
       if (prev.includes(caseId)) {
-        const updated = prev.filter(id => id !== caseId);
+        const updated = prev.filter((id) => id !== caseId);
         // If removed case was target, set new target
         if (caseId === targetCaseId && updated.length > 0) {
           setTargetCaseId(updated[0]);
@@ -82,7 +85,7 @@ const MergeCasesDialog: React.FC<MergeCasesDialogProps> = ({
   const handleMerge = () => {
     if (!targetCaseId || selectedCaseIds.length < 2) return;
 
-    const sourceCaseIds = selectedCaseIds.filter(id => id !== targetCaseId);
+    const sourceCaseIds = selectedCaseIds.filter((id) => id !== targetCaseId);
 
     onMerge(targetCaseId, sourceCaseIds, {
       keepSourceCases,
@@ -100,25 +103,25 @@ const MergeCasesDialog: React.FC<MergeCasesDialogProps> = ({
     onClose();
   };
 
-  const targetCase = cases.find(c => c.id === targetCaseId);
-  const sourceCases = cases.filter(c => selectedCaseIds.includes(c.id) && c.id !== targetCaseId);
+  const targetCase = cases.find((c) => c.id === targetCaseId);
+  const sourceCases = cases.filter((c) => selectedCaseIds.includes(c.id) && c.id !== targetCaseId);
 
   // Calculate merged stats
   const totalEntities = new Set(
-    selectedCaseIds.flatMap(id => {
-      const c = cases.find(x => x.id === id);
+    selectedCaseIds.flatMap((id) => {
+      const c = cases.find((x) => x.id === id);
       return c?.entityIds || [];
     })
   ).size;
 
   const totalDocuments = selectedCaseIds.reduce((sum, id) => {
-    const c = cases.find(x => x.id === id);
+    const c = cases.find((x) => x.id === id);
     return sum + (c?.documents?.length || 0);
   }, 0);
 
   const totalAgents = new Set(
-    selectedCaseIds.flatMap(id => {
-      const c = cases.find(x => x.id === id);
+    selectedCaseIds.flatMap((id) => {
+      const c = cases.find((x) => x.id === id);
       return c?.assignedAgents || [];
     })
   ).size;
@@ -147,8 +150,10 @@ const MergeCasesDialog: React.FC<MergeCasesDialogProps> = ({
               How to merge cases:
             </Typography>
             <Typography variant="body2">
-              1. Select cases to merge (minimum 2)<br />
-              2. Choose target case (keeps its ID and case number)<br />
+              1. Select cases to merge (minimum 2)
+              <br />
+              2. Choose target case (keeps its ID and case number)
+              <br />
               3. Entities, documents, and metadata will be combined
             </Typography>
           </Alert>
@@ -158,7 +163,15 @@ const MergeCasesDialog: React.FC<MergeCasesDialogProps> = ({
             <Typography variant="subtitle2" gutterBottom fontWeight={600}>
               Select Cases to Merge ({selectedCaseIds.length} selected)
             </Typography>
-            <List sx={{ maxHeight: 300, overflow: 'auto', border: 1, borderColor: 'divider', borderRadius: 1 }}>
+            <List
+              sx={{
+                maxHeight: 300,
+                overflow: 'auto',
+                border: 1,
+                borderColor: 'divider',
+                borderRadius: 1,
+              }}
+            >
               {cases.map((caseItem) => {
                 const isSelected = selectedCaseIds.includes(caseItem.id);
                 const isTarget = targetCaseId === caseItem.id;
@@ -182,12 +195,7 @@ const MergeCasesDialog: React.FC<MergeCasesDialogProps> = ({
                   >
                     <ListItemButton onClick={() => handleToggleCase(caseItem.id)} dense>
                       <ListItemIcon>
-                        <Checkbox
-                          edge="start"
-                          checked={isSelected}
-                          tabIndex={-1}
-                          disableRipple
-                        />
+                        <Checkbox edge="start" checked={isSelected} tabIndex={-1} disableRipple />
                       </ListItemIcon>
                       <ListItemText
                         primary={
@@ -202,8 +210,16 @@ const MergeCasesDialog: React.FC<MergeCasesDialogProps> = ({
                           <Box sx={{ display: 'flex', gap: 1, mt: 0.5 }}>
                             <Chip label={caseItem.caseNumber} size="small" variant="outlined" />
                             <Chip label={caseItem.status} size="small" />
-                            <Chip label={`${caseItem.entityIds.length} entities`} size="small" variant="outlined" />
-                            <Chip label={`${caseItem.documents?.length || 0} docs`} size="small" variant="outlined" />
+                            <Chip
+                              label={`${caseItem.entityIds.length} entities`}
+                              size="small"
+                              variant="outlined"
+                            />
+                            <Chip
+                              label={`${caseItem.documents?.length || 0} docs`}
+                              size="small"
+                              variant="outlined"
+                            />
                           </Box>
                         }
                       />
@@ -237,7 +253,7 @@ const MergeCasesDialog: React.FC<MergeCasesDialogProps> = ({
                       <Typography variant="caption" color="text.secondary">
                         Source Cases (will be merged into target):
                       </Typography>
-                      {sourceCases.map(c => (
+                      {sourceCases.map((c) => (
                         <Typography key={c.id} variant="body2">
                           • {c.name} ({c.caseNumber})
                         </Typography>
@@ -346,7 +362,8 @@ const MergeCasesDialog: React.FC<MergeCasesDialogProps> = ({
               {!keepSourceCases && (
                 <Alert severity="warning" icon={<WarningIcon />}>
                   <Typography variant="body2">
-                    <strong>Warning:</strong> Source cases will be permanently deleted. All their data will be merged into the target case.
+                    <strong>Warning:</strong> Source cases will be permanently deleted. All their
+                    data will be merged into the target case.
                   </Typography>
                 </Alert>
               )}
@@ -371,5 +388,3 @@ const MergeCasesDialog: React.FC<MergeCasesDialogProps> = ({
 };
 
 export default MergeCasesDialog;
-
-

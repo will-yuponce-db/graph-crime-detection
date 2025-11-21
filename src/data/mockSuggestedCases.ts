@@ -6,7 +6,8 @@ export const mockSuggestedCases: CaseSuggestion[] = [
   {
     id: 'suggestion_001',
     name: 'Suspected Money Laundering Ring',
-    description: 'AI detected a cluster of 8 entities with unusual financial transaction patterns involving Viktor Petrov, offshore accounts, and shell companies. High confidence of coordinated money laundering activity.',
+    description:
+      'AI detected a cluster of 8 entities with unusual financial transaction patterns involving Viktor Petrov, offshore accounts, and shell companies. High confidence of coordinated money laundering activity.',
     entityIds: [
       'suspect_002', // Viktor Petrov
       'suspect_007', // Isabella Romano
@@ -18,12 +19,14 @@ export const mockSuggestedCases: CaseSuggestion[] = [
       'asset_002', // Private Jet
     ],
     priority: CasePriority.HIGH,
-    reasoning: 'Pattern analysis shows frequent large transfers between these accounts with cryptocurrency mixing. Shell company ownership links all entities.',
+    reasoning:
+      'Pattern analysis shows frequent large transfers between these accounts with cryptocurrency mixing. Shell company ownership links all entities.',
   },
   {
     id: 'suggestion_002',
     name: 'Drug Distribution Network',
-    description: 'Community detection algorithm identified a tightly connected group of entities involved in drug trafficking operations between Mexico, Hong Kong, and the US.',
+    description:
+      'Community detection algorithm identified a tightly connected group of entities involved in drug trafficking operations between Mexico, Hong Kong, and the US.',
     entityIds: [
       'suspect_001', // Miguel Sandoval
       'suspect_004', // Chen Wei
@@ -36,24 +39,28 @@ export const mockSuggestedCases: CaseSuggestion[] = [
       'event_003', // Shipment - Hong Kong
     ],
     priority: CasePriority.CRITICAL,
-    reasoning: 'High frequency of communications and logistics coordination detected. Recent shipment intercept intelligence corroborates network activity.',
+    reasoning:
+      'High frequency of communications and logistics coordination detected. Recent shipment intercept intelligence corroborates network activity.',
   },
   {
     id: 'suggestion_003',
     name: 'Arms Trafficking Investigation',
-    description: 'Link analysis reveals potential arms trafficking network connecting Middle Eastern dealer with South American cartels.',
+    description:
+      'Link analysis reveals potential arms trafficking network connecting Middle Eastern dealer with South American cartels.',
     entityIds: [
       'suspect_006', // Ahmed Hassan
       'suspect_001', // Miguel Sandoval
       'org_001', // Sinaloa Cartel
     ],
     priority: CasePriority.HIGH,
-    reasoning: 'Communications intercepts show weapons discussions. Financial transactions match typical arms deal patterns.',
+    reasoning:
+      'Communications intercepts show weapons discussions. Financial transactions match typical arms deal patterns.',
   },
   {
     id: 'suggestion_004',
     name: 'Cryptocurrency Laundering Cell',
-    description: 'Blockchain analysis identified a new cryptocurrency laundering operation potentially connected to existing cases.',
+    description:
+      'Blockchain analysis identified a new cryptocurrency laundering operation potentially connected to existing cases.',
     entityIds: [
       'suspect_008', // David Park
       'suspect_003', // Maria Santos
@@ -61,9 +68,7 @@ export const mockSuggestedCases: CaseSuggestion[] = [
       'account_004', // Panama Account
     ],
     priority: CasePriority.MEDIUM,
-    reasoning: 'Multiple cryptocurrency tumbling operations detected. Wallet analysis shows connection to known cartel financial coordinator.',
+    reasoning:
+      'Multiple cryptocurrency tumbling operations detected. Wallet analysis shows connection to known cartel financial coordinator.',
   },
 ];
-
-
-

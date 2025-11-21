@@ -5,6 +5,7 @@ Welcome to the Crime Graph Intelligence Platform documentation.
 ## 📚 Documentation Structure
 
 ### Features
+
 - **[Case Filters](features/CASE_FILTERS_GUIDE.md)** - Filtering and sorting cases
 - **[Case Lifecycle](features/CASE_LIFECYCLE_GUIDE.md)** - Managing cases through investigation stages
 - **[Case Merging](features/MERGE_CASES_GUIDE.md)** - Combining related cases
@@ -12,11 +13,13 @@ Welcome to the Crime Graph Intelligence Platform documentation.
 - **[Global Case Filter](features/GLOBAL_CASE_FILTER_GUIDE.md)** - (Deprecated - now in sidebar)
 
 ### Integration Guides
+
 - **[Databricks Integration](guides/DATABRICKS_INTEGRATION.md)** - Connecting to Databricks data sources
 - **[Databricks Deployment](guides/DATABRICKS_APPS_DEPLOYMENT.md)** - Deploying to Databricks Apps
 - **[Neo4j Workflow](guides/NEO4J_WORKFLOW.md)** - Working with Neo4j graph database
 
 ### Technical Documentation
+
 - **[Redux Migration](technical/REDUX_MIGRATION.md)** - State management architecture
 - **[State Management Upgrade](technical/STATE_MANAGEMENT_UPGRADE.md)** - Redux Toolkit implementation
 - **[Dynamic Types](technical/DYNAMIC_TYPES_IMPLEMENTATION.md)** - Scalable type system for graph nodes
@@ -58,5 +61,3 @@ See [CHANGELOG.md](../CHANGELOG.md) for version history and recent changes.
 - Review error messages in browser console
 - Check Redux DevTools for state issues
 - Look at network tab for API issues
-
-

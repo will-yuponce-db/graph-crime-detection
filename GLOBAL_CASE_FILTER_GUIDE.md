@@ -7,6 +7,7 @@ A powerful, always-visible case filter in the top navigation bar that filters **
 ### 🎯 What It Does
 
 The Global Case Filter allows you to:
+
 - **Select a case** from anywhere in the app
 - **Filter all visualizations** automatically (Graph, Timeline, Map)
 - **See at a glance** which case is currently active
@@ -36,11 +37,12 @@ Always visible on every page!
 **Step 1:** Click the dropdown in the top nav bar
 
 **Step 2:** See all available cases with details:
+
 ```
 📁 Operation El Lobo
    CASE-2024-001 | Critical | 8 entities
 
-📁 Red Square Financial Network  
+📁 Red Square Financial Network
    CASE-2024-002 | High | 10 entities
 
 📁 Cross-Pacific Logistics
@@ -64,29 +66,38 @@ Always visible on every page!
 ## 🔍 What Gets Filtered
 
 ### Graph View
+
 **Before Filter:**
+
 - Shows all 100+ nodes and edges
 
 **With Filter (e.g., Operation El Lobo):**
+
 - Shows 8 case entities
 - Shows connected nodes (1-hop neighbors)
 - Shows all edges connecting these nodes
 - Result: Focused network view
 
 ### Timeline View
+
 **Before Filter:**
+
 - Shows all activities from all entities
 
 **With Filter:**
+
 - Shows only activities involving case entities
 - Grouped by date
 - Chronological case timeline
 
 ### Map View
+
 **Before Filter:**
+
 - Shows all locations with all markers
 
 **With Filter:**
+
 - Shows only locations with case-related activities
 - Markers for case entity locations
 - Activity dots filtered to case
@@ -111,10 +122,12 @@ Appears below the dropdown to confirm active filter.
 ### Dropdown Appearance
 
 **No Filter:**
+
 - Grey filter icon
 - Shows "Filter by Case"
 
 **Filter Active:**
+
 - Blue filter icon (highlighted)
 - Shows case name
 - ❌ clear button visible
@@ -122,6 +135,7 @@ Appears below the dropdown to confirm active filter.
 ### Color-Coded Cases
 
 Each case shows status color:
+
 - 🔵 **Blue** - Active Investigation
 - 🟢 **Green** - Closed
 - 🟠 **Orange** - Prosecution
@@ -146,6 +160,7 @@ Each case shows status color:
 ### URL Synchronization
 
 Filter updates the URL automatically:
+
 ```
 /graph               → No filter
 /graph?case=case_001 → Filtered to case_001
@@ -164,6 +179,7 @@ Filter updates the URL automatically:
 **Situation:** Working on one case, need tunnel vision
 
 **Action:**
+
 1. Select case from global filter
 2. Navigate between Graph/Timeline/Map
 3. Only see relevant entities everywhere
@@ -175,6 +191,7 @@ Filter updates the URL automatically:
 **Situation:** Want to see if case entities connect to others
 
 **Action:**
+
 1. Clear global filter (see all data)
 2. Note all connections
 3. Select case (see filtered view)
@@ -187,6 +204,7 @@ Filter updates the URL automatically:
 **Situation:** Briefing stakeholders on specific case
 
 **Action:**
+
 1. Select case before presentation
 2. Navigate through views (all filtered)
 3. Show graph network
@@ -200,6 +218,7 @@ Filter updates the URL automatically:
 **Situation:** Managing multiple cases simultaneously
 
 **Action:**
+
 1. Work on Case A (select from filter)
 2. Review graph, add notes
 3. Switch to Case B (select from filter)
@@ -224,6 +243,7 @@ Each case in the dropdown shows:
 ```
 
 **Information Shown:**
+
 - 📁 Folder icon with status color
 - Case name (truncated if long)
 - Case number
@@ -237,11 +257,13 @@ Each case in the dropdown shows:
 ### State Management
 
 **Redux Store:**
+
 ```typescript
 state.cases.selectedCaseId: string | null
 ```
 
 **Filtering Functions:**
+
 - `filterGraphByCase(graphData, selectedCase, includeConnections)`
 - `filterActivitiesByCase(activities, selectedCase)`
 - `filterMarkersByCase(markers, selectedCase)`
@@ -249,6 +271,7 @@ state.cases.selectedCaseId: string | null
 ### Real-Time Updates
 
 Changes are **instant**:
+
 1. Select case in filter
 2. Redux state updates
 3. All components re-render
@@ -258,12 +281,14 @@ Changes are **instant**:
 ### Persistence
 
 Filter persists through:
+
 - ✅ Page navigation
 - ✅ Page refresh (Redux persist)
 - ✅ Browser back/forward
 - ✅ URL sharing
 
 Filter clears on:
+
 - ❌ Explicitly clicking clear
 - ❌ Selecting "All Entities"
 - ❌ Clearing local storage
@@ -273,6 +298,7 @@ Filter clears on:
 ## 🆚 Global Filter vs. Sidebar
 
 ### Global Filter (Top Nav)
+
 - ✅ Always visible
 - ✅ Quick selection
 - ✅ Shows filtered status
@@ -280,6 +306,7 @@ Filter clears on:
 - ✅ One-click clear
 
 ### Case Sidebar (Left Panel)
+
 - ✅ Full case list with details
 - ✅ Case creation
 - ✅ Case management
@@ -287,6 +314,7 @@ Filter clears on:
 - ✅ Only on Graph/Timeline/Map
 
 **Use Both Together:**
+
 - Sidebar for case management
 - Global filter for quick filtering
 
@@ -297,12 +325,14 @@ Filter clears on:
 ### Example: Operation El Lobo
 
 **Unfiltered:**
+
 - 150 total nodes
 - 300 total edges
 - 50 activities
 - 15 locations
 
 **Filtered:**
+
 - 8 case nodes
 - 12 connected nodes (20 total shown)
 - 35 edges
@@ -318,6 +348,7 @@ Filter clears on:
 ### Tip 1: Use for Data Entry
 
 When adding entities to graph:
+
 1. Select target case
 2. Add nodes/edges
 3. They're automatically associated
@@ -325,6 +356,7 @@ When adding entities to graph:
 ### Tip 2: Visual Comparison
 
 Switch filter on/off rapidly:
+
 1. Note filtered view
 2. Clear filter (see all)
 3. Select filter again
@@ -333,14 +365,17 @@ Switch filter on/off rapidly:
 ### Tip 3: Share Filtered Views
 
 Copy URL with filter active:
+
 ```
 /graph?case=case_001
 ```
+
 Send to colleague → They see same filtered view
 
 ### Tip 4: Multi-Case Review
 
 Review multiple cases systematically:
+
 1. Open case list
 2. Select Case 1 from global filter
 3. Review all views
@@ -351,6 +386,7 @@ Review multiple cases systematically:
 ### Tip 5: Check Entity Associations
 
 Unsure which case an entity belongs to?
+
 1. Clear filter (see all)
 2. Select entity
 3. Try each case filter
@@ -363,6 +399,7 @@ Unsure which case an entity belongs to?
 ### "Filter not working"
 
 **Check:**
+
 1. Is a case actually selected? (Check dropdown)
 2. Does case have entities assigned?
 3. Are you viewing the right page? (Graph/Timeline/Map)
@@ -371,6 +408,7 @@ Unsure which case an entity belongs to?
 ### "Can't see any entities after filtering"
 
 **Possible Causes:**
+
 1. Case has no entities assigned → Add entities
 2. Wrong case selected → Check case name
 3. Entities not on current view → Check other views
@@ -380,6 +418,7 @@ Unsure which case an entity belongs to?
 ### "Filter not persisting"
 
 **Check:**
+
 1. Browser local storage enabled?
 2. Redux DevTools → Check `state.cases.selectedCaseId`
 3. Try hard refresh (Cmd+Shift+R)
@@ -389,6 +428,7 @@ Unsure which case an entity belongs to?
 **Cause:** No cases created yet
 
 **Solution:**
+
 1. Go to Cases page
 2. Click "New Case" or "Detect Communities"
 3. Return and filter will work
@@ -398,6 +438,7 @@ Unsure which case an entity belongs to?
 ## 🎯 Best Practices
 
 ### DO:
+
 - ✅ Use global filter for focused analysis
 - ✅ Clear filter when doing broad exploration
 - ✅ Filter before presentations
@@ -405,6 +446,7 @@ Unsure which case an entity belongs to?
 - ✅ Use in combination with sidebar
 
 ### DON'T:
+
 - ❌ Leave filter active and forget
 - ❌ Filter then wonder why entities missing
 - ❌ Ignore the filter status banner
@@ -456,6 +498,7 @@ Unsure which case an entity belongs to?
 ## ✅ Summary
 
 **Global Case Filter:**
+
 - ✅ **Location:** Top navigation bar (always visible)
 - ✅ **Function:** Filters Graph, Timeline, Map views
 - ✅ **Persistence:** Survives navigation and refresh
@@ -465,6 +508,7 @@ Unsure which case an entity belongs to?
 - ✅ **Integration:** Works with sidebar and URL
 
 **Key Benefits:**
+
 - 🎯 **Focus** on specific investigations
 - ⚡ **Fast** case switching
 - 🔄 **Consistent** filtering across all views
@@ -478,11 +522,10 @@ Unsure which case an entity belongs to?
 ## 🔜 Coming Soon
 
 Potential enhancements:
+
 - 📌 Pin multiple cases (multi-select filter)
 - 📊 Filter statistics dashboard
 - 🔍 Search cases in filter dropdown
 - ⭐ Favorite/recent cases quick access
 - 🏷️ Filter by tags alongside cases
 - 📈 Filter impact preview
-
-

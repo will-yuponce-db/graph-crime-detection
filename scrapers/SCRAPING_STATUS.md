@@ -10,11 +10,11 @@
 
 ## Quick Stats (as of start + 2 min)
 
-| Metric | Value |
-|--------|-------|
-| Documents Downloaded | 20+ |
-| Data Size | 2.2 MB |
-| Districts Processed | 2 / 10 |
+| Metric               | Value                |
+| -------------------- | -------------------- |
+| Documents Downloaded | 20+                  |
+| Data Size            | 2.2 MB               |
+| Districts Processed  | 2 / 10               |
 | Estimated Completion | ~15-20 minutes total |
 
 ---
@@ -37,12 +37,14 @@
 ## 📊 Monitor Progress
 
 ### Option 1: Real-time Monitor
+
 ```bash
 cd scrapers
 ./monitor_progress.sh
 ```
 
 ### Option 2: Manual Checks
+
 ```bash
 # Count documents
 find data/reports/doj -type f | wc -l
@@ -55,6 +57,7 @@ tail -f logs/doj_multi_*.log
 ```
 
 ### Option 3: Quick Status
+
 ```bash
 ls -lh data/reports/doj
 ```
@@ -80,6 +83,7 @@ data/reports/doj/
 
 **Total Documents:** 150-200  
 **Categories:**
+
 - RICO / Organized Crime
 - Drug Trafficking
 - Fraud / White Collar Crime
@@ -89,6 +93,7 @@ data/reports/doj/
 - Money Laundering
 
 **File Types:**
+
 - HTML (press releases with full details)
 - PDF (indictments, attachments)
 
@@ -122,12 +127,14 @@ kill <PID>
 ## ✅ When Complete
 
 You'll have:
+
 1. **150-200 HTML documents** with case details
 2. **Metadata JSON** with structured info
 3. **Organized by district** for easy access
 4. **Full download logs** for verification
 
 ### Next Steps After Completion:
+
 1. Extract text from HTML/PDFs
 2. Run NLP to identify defendants, charges, relationships
 3. Build graph data structures
@@ -145,6 +152,3 @@ You'll have:
 ---
 
 **Last Updated:** November 17, 2025 @ 17:02
-
-
-

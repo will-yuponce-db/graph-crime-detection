@@ -3,17 +3,20 @@
 ## ✨ New Features
 
 ### 1. **Three-Dots Menu (⋮) on Each Status Panel**
+
 - Located in the top-right corner of each status column
 - Works in Board View (Kanban)
 - Provides filtering and sorting options
 
 ### 2. **Comprehensive Filtering**
+
 - Filter by Priority (Critical, High, Medium, Low)
 - Filter by Tags (all available tags)
 - Multiple filters can be active simultaneously
 - Filters apply across all status columns
 
 ### 3. **Smart Sorting**
+
 - Sort by Recent (date updated)
 - Sort by Priority (Critical first)
 - Sort by Name (A-Z)
@@ -24,10 +27,12 @@
 ### Accessing the Menu
 
 **Step 1: Open Board View**
+
 - Click "Board View" tab on Cases page
 - See status columns: Leads, Investigation, Prosecution, Closed
 
 **Step 2: Click Three Dots (⋮)**
+
 - Each column header has a three-dots icon
 - Click it to open the filter menu
 - Menu shows all available options
@@ -52,11 +57,13 @@ Filter cases by importance level:
 ```
 
 **How It Works:**
+
 - ✅ Check boxes to include that priority
 - Multiple priorities can be selected
 - Example: Check "Critical" + "High" = shows only critical and high-priority cases
 
 **Use Cases:**
+
 - Focus on urgent cases: Check "Critical" only
 - Review high-value cases: Check "Critical" + "High"
 - See all active work: Check all except "Low"
@@ -75,11 +82,13 @@ Filter by case tags:
 ```
 
 **How It Works:**
+
 - ✅ Check tags to show only cases with those tags
 - Cases with ANY checked tag will appear (OR logic)
 - First 10 tags shown, with indication of more
 
 **Use Cases:**
+
 - View all cartel cases: Check "cartel"
 - See community-detected cases: Check "community-detected"
 - Find specific investigation types: Check relevant tags
@@ -95,11 +104,13 @@ Change how cases are ordered:
 ```
 
 **How It Works:**
+
 - Radio button selection (only one at a time)
 - Applies to ALL status columns
 - Persistent until changed
 
 **Use Cases:**
+
 - Find recent activity: Use "Recent" (default)
 - Triage urgent cases: Use "Priority"
 - Locate specific case: Use "Name (A-Z)"
@@ -124,11 +135,13 @@ Remove all active filters:
 When filters are active, the count chip changes color:
 
 **No Filters:**
+
 ```
 Leads  [5]  ← Grey chip, shows total
 ```
 
 **With Filters:**
+
 ```
 Leads  [3/5]  ← Blue chip, shows filtered/total
 ```
@@ -166,6 +179,7 @@ Each column shows how many cases match filters:
 Filters apply to **all status columns** simultaneously:
 
 **Example:**
+
 - Filter: Priority = "Critical"
 - Result:
   - Leads: Shows only Critical cases in Leads
@@ -178,6 +192,7 @@ Filters apply to **all status columns** simultaneously:
 Filters work with pagination:
 
 **Example:**
+
 - 45 total cases
 - Filter by "cartel" tag
 - 12 cases match
@@ -254,21 +269,25 @@ Filters also apply in List View:
 Combine priorities for custom views:
 
 **Critical + High:**
+
 ```
 ☑ Critical
 ☑ High
 ☐ Medium
 ☐ Low
 ```
+
 Shows: Urgent and important cases only
 
 **Medium + Low:**
+
 ```
 ☐ Critical
 ☐ High
 ☑ Medium
 ☑ Low
 ```
+
 Shows: Lower-priority background work
 
 ### Multiple Tag Filters
@@ -276,10 +295,12 @@ Shows: Lower-priority background work
 Combine tags to narrow results:
 
 **Example: High-value cartel cases**
+
 ```
 ☑ cartel
 ☑ high-priority
 ```
+
 Shows: Cases tagged with "cartel" OR "high-priority"
 
 **Note:** Tag filters use OR logic (any match shows case)
@@ -301,6 +322,7 @@ Sort: Recent
 ### Case Counts
 
 **Before Filters:**
+
 ```
 Leads:         15 cases
 Investigation: 12 cases
@@ -310,6 +332,7 @@ Total:         55 cases
 ```
 
 **After Filtering (Priority: Critical):**
+
 ```
 Leads:         2/15 cases
 Investigation: 3/12 cases
@@ -321,6 +344,7 @@ Total:         6/55 cases
 ### Filter Impact
 
 See immediately how many cases match:
+
 - Column chips show filtered/total
 - Banner shows number of active filters
 - Pagination updates to filtered count
@@ -331,10 +355,11 @@ See immediately how many cases match:
 ### Filter State
 
 Filters are stored in component state:
+
 ```typescript
-priorityFilters: Set<CasePriority>
-tagFilters: Set<string>
-sortBy: 'date' | 'priority' | 'name'
+priorityFilters: Set<CasePriority>;
+tagFilters: Set<string>;
+sortBy: 'date' | 'priority' | 'name';
 ```
 
 ### Filter Logic
@@ -342,24 +367,25 @@ sortBy: 'date' | 'priority' | 'name'
 ```typescript
 // Priority filter (AND within priorities, OR across)
 if (priorityFilters.size > 0) {
-  filtered = filtered.filter(c => priorityFilters.has(c.priority))
+  filtered = filtered.filter((c) => priorityFilters.has(c.priority));
 }
 
 // Tag filter (OR logic)
 if (tagFilters.size > 0) {
-  filtered = filtered.filter(c => 
-    c.tags.some(tag => tagFilters.has(tag))
-  )
+  filtered = filtered.filter((c) => c.tags.some((tag) => tagFilters.has(tag)));
 }
 
 // Sort
 filtered.sort((a, b) => {
   switch (sortBy) {
-    case 'name': return a.name.localeCompare(b.name)
-    case 'priority': return priorityOrder[a.priority] - priorityOrder[b.priority]
-    case 'date': return b.updatedDate - a.updatedDate
+    case 'name':
+      return a.name.localeCompare(b.name);
+    case 'priority':
+      return priorityOrder[a.priority] - priorityOrder[b.priority];
+    case 'date':
+      return b.updatedDate - a.updatedDate;
   }
-})
+});
 ```
 
 ### Performance
@@ -372,22 +398,26 @@ filtered.sort((a, b) => {
 ## 🐛 Troubleshooting
 
 ### "Three dots don't appear"
+
 - Make sure you're in Board View (not List View)
 - Check if columns are rendering
 - Refresh page (F5)
 
 ### "Filters don't work"
+
 - Check if filters are actually applied (look for blue chip)
 - Try clearing filters and reapplying
 - Verify cases have the tags/priorities you're filtering for
 
 ### "No cases show after filtering"
+
 - Normal if no cases match criteria
 - Check the X/Y counts in chips
 - Try broader filters
 - Click "Clear Filters" to reset
 
 ### "Filter applies to wrong column"
+
 - Filters apply to ALL columns (this is by design)
 - Use status tabs at top to focus on one status
 - Or accept that filters are global across board
@@ -397,12 +427,14 @@ filtered.sort((a, b) => {
 ### Efficient Filtering
 
 **DO:**
+
 - ✅ Use priority filters for triage
 - ✅ Use tag filters for themed reviews
 - ✅ Sort by priority when prioritizing work
 - ✅ Clear filters when done with focused view
 
 **DON'T:**
+
 - ❌ Leave filters active when browsing all cases
 - ❌ Forget why cases are "missing" (check filters)
 - ❌ Over-filter (too narrow = empty results)
@@ -410,13 +442,14 @@ filtered.sort((a, b) => {
 ### Organizing Tags
 
 For best filtering experience:
+
 ```
 Good tags:
   - "cartel"
   - "high-priority"
   - "multi-agency"
   - "international"
-  
+
 Bad tags:
   - "case" (too broad)
   - "misc" (not useful)
@@ -426,6 +459,7 @@ Bad tags:
 ### Workflow Integration
 
 **Morning Review:**
+
 ```
 1. Sort by Recent
 2. Filter: Critical + High
@@ -434,6 +468,7 @@ Bad tags:
 ```
 
 **Weekly Planning:**
+
 ```
 1. Filter by each priority level
 2. Review case distribution
@@ -442,6 +477,7 @@ Bad tags:
 ```
 
 **Themed Investigation Day:**
+
 ```
 1. Filter by tag (e.g., "cartel")
 2. Review all related cases
@@ -452,6 +488,7 @@ Bad tags:
 ## 🎉 Summary
 
 **New Features:**
+
 - ✅ Three-dots menu on each status column
 - ✅ Priority filters (Critical/High/Medium/Low)
 - ✅ Tag filters (all case tags)
@@ -463,6 +500,7 @@ Bad tags:
 - ✅ Works in Board & List views
 
 **Benefits:**
+
 - 🎯 Focus on urgent cases
 - 🔍 Find cases by theme
 - 📊 Better case visibility
@@ -471,5 +509,3 @@ Bad tags:
 - 📈 Improved productivity
 
 **Your case management just got a major upgrade!** 🚀
-
-

@@ -1,21 +1,25 @@
 # Quick Fix Applied - PayloadAction Import Error
 
 ## Issue
+
 ```
 Uncaught SyntaxError: The requested module does not provide an export named 'PayloadAction'
 ```
 
 ## Root Cause
+
 `PayloadAction` is a **TypeScript type**, not a runtime value. It cannot be imported as a regular export in Vite/ESM builds.
 
 ## Fix Applied
 
 ### Before (❌ Wrong):
+
 ```typescript
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 ```
 
 ### After (✅ Correct):
+
 ```typescript
 import { createSlice } from '@reduxjs/toolkit';
 import type { PayloadAction } from '@reduxjs/toolkit';
@@ -36,6 +40,7 @@ import type { PayloadAction } from '@reduxjs/toolkit';
 ## Why This Happened
 
 Vite/ESM build is stricter than TypeScript compiler:
+
 - TypeScript compiler: Erases types, doesn't care about type-only imports
 - Vite/ESM: Tries to import `PayloadAction` at runtime, fails because it's a type
 
@@ -44,6 +49,7 @@ Vite/ESM build is stricter than TypeScript compiler:
 ## If Still Seeing White Screen
 
 Run in browser console:
+
 ```javascript
 localStorage.clear();
 location.reload();
@@ -59,5 +65,3 @@ location.reload();
 ---
 
 **You should now see the Dashboard page!**
-
-

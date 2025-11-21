@@ -89,8 +89,16 @@ app.use((req, res, next) => {
 // Serve static files from React app in production
 const path = require('path');
 if (process.env.NODE_ENV === 'production') {
+  const distPath = path.join(__dirname, '../dist');
+  logger.info({
+    type: 'static_files',
+    distPath,
+    exists: fs.existsSync(distPath),
+    __dirname,
+  });
+
   app.use(
-    express.static(path.join(__dirname, '../dist'), {
+    express.static(distPath, {
       setHeaders: (res, filePath) => {
         // Prevent caching of HTML files to ensure users get latest frontend code
         if (filePath.endsWith('.html')) {
@@ -1321,7 +1329,7 @@ app.get('/api/cases/:caseId', async (req, res) => {
 
   try {
     const caseData = getCaseById(db, caseId);
-    
+
     if (!caseData) {
       return res.status(404).json({
         success: false,
@@ -1621,9 +1629,12 @@ app.get('/api/documents', (req, res) => {
 app.get('/api/documents/:path(*)', (req, res) => {
   try {
     const requestedPath = req.params.path;
-    
+
     // Security: Prevent directory traversal
-    if (requestedPath.includes('..') || (requestedPath.includes('/') && requestedPath.startsWith('/'))) {
+    if (
+      requestedPath.includes('..') ||
+      (requestedPath.includes('/') && requestedPath.startsWith('/'))
+    ) {
       return res.status(400).json({
         success: false,
         error: 'Invalid path',
@@ -1746,7 +1757,23 @@ app.get('/health', (req, res) => {
 // Serve React app for all other routes in production
 if (process.env.NODE_ENV === 'production') {
   app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../dist/index.html'));
+    const indexPath = path.join(__dirname, '../dist/index.html');
+
+    if (!fs.existsSync(indexPath)) {
+      logger.error({
+        type: 'static_file_missing',
+        path: indexPath,
+        __dirname,
+        cwd: process.cwd(),
+      });
+      return res.status(404).json({
+        error: 'Frontend not found',
+        details: 'index.html not found at expected location',
+        expectedPath: indexPath,
+      });
+    }
+
+    res.sendFile(indexPath);
   });
 }
 
@@ -1765,6 +1792,17 @@ app.listen(PORT, () => {
   const nodeCount = getAllNodes(db).length;
   const edgeCount = getAllEdges(db).length;
 
+  // Log dist folder contents for debugging
+  const distPath = path.join(__dirname, '../dist');
+  let distContents = 'not found';
+  if (fs.existsSync(distPath)) {
+    try {
+      distContents = fs.readdirSync(distPath);
+    } catch (e) {
+      distContents = `error: ${e.message}`;
+    }
+  }
+
   logger.info({
     type: 'server_started',
     url: `http://localhost:${PORT}`,
@@ -1773,5 +1811,12 @@ app.listen(PORT, () => {
     },
     dataStrategy: 'Databricks (user OAuth) with SQLite fallback',
     authMode: 'User identity passthrough only',
+    dist: {
+      path: distPath,
+      exists: fs.existsSync(distPath),
+      contents: distContents,
+    },
+    cwd: process.cwd(),
+    __dirname,
   });
 });

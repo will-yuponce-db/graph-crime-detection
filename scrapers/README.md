@@ -12,11 +12,13 @@ pip install -r requirements.txt
 ## 🚀 Quick Start
 
 ### Scrape everything (10 docs per category):
+
 ```bash
 python main.py
 ```
 
 ### Scrape specific sources:
+
 ```bash
 # FBI Vault only
 python main.py --sources fbi --limit 20
@@ -29,6 +31,7 @@ python main.py --sources fbi doj --limit 25
 ```
 
 ### Dry run (test without downloading):
+
 ```bash
 python main.py --dry-run
 ```
@@ -62,6 +65,7 @@ scrapers/
 ## 🎯 Data Sources
 
 ### FBI Vault (`fbi`)
+
 - **URL**: https://vault.fbi.gov/
 - **Content**: Declassified FBI investigation files
 - **Categories**:
@@ -74,6 +78,7 @@ scrapers/
   - Commission Case (Mafia Commission)
 
 ### DOJ News (`doj`)
+
 - **URL**: https://www.justice.gov/news
 - **Content**: Press releases, indictments, case documents
 - **Keywords**:
@@ -148,7 +153,7 @@ from .base_scraper import BaseScraper
 class MyScraper(BaseScraper):
     def __init__(self, output_dir):
         super().__init__("my_source", "https://example.gov", output_dir)
-    
+
     def run(self):
         # Your scraping logic
         pass
@@ -188,15 +193,18 @@ SOURCES = {
 ## 🐛 Troubleshooting
 
 ### "Failed to download"
+
 - Check internet connection
 - Some documents may be temporarily unavailable
 - Check logs in `logs/` directory
 
 ### "Rate limit exceeded"
+
 - Increase `RATE_LIMIT_DELAY` in `config.py`
 - Reduce `--limit` parameter
 
 ### Missing dependencies
+
 ```bash
 pip install -r requirements.txt --upgrade
 ```
@@ -211,6 +219,7 @@ After scraping, you can:
 4. **Analyze with your Crime Graph app**
 
 Example: Convert PDFs to text for NLP processing:
+
 ```bash
 pip install pdfplumber
 python scripts/extract_text.py
@@ -219,6 +228,7 @@ python scripts/extract_text.py
 ## 🤝 Contributing
 
 To add support for new sources:
+
 1. Extend `BaseScraper` class
 2. Implement source-specific parsing
 3. Add configuration to `config.py`
@@ -227,6 +237,3 @@ To add support for new sources:
 ## 📝 License
 
 This scraper tool is MIT licensed. Downloaded government documents are public domain.
-
-
-
