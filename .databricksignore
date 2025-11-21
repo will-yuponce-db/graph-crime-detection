@@ -1,0 +1,47 @@
+# Databricks Apps Ignore File
+# Files and directories listed here will not be synced to Databricks Apps
+
+# Build outputs (regenerated on each deploy)
+dist/
+*.log
+
+# Dependency directories (reinstalled on each deploy)
+node_modules/
+backend/node_modules/
+
+# Cache directories
+.vite/
+node_modules/.vite/
+.cache/
+.turbo/
+
+# Development files
+.git/
+.vscode/
+.idea/
+
+# Local environment files
+.env
+.env.local
+.env.*.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
+
+# Database files (will be created on deploy)
+backend/db/graph.db
+backend/db/*.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+scrapers/logs/
+
+# Scraper data (too large)
+scrapers/data/
+

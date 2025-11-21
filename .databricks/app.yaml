@@ -5,4 +5,6 @@ env:
     value: production
   - name: PORT
     value: "8000"
+  - name: VITE_FORCE_OPTIMIZE_DEPS
+    value: "true"
 

@@ -7,7 +7,6 @@ import type {
   PathResult,
   BridgeResult,
   ArticulationPointResult,
-  ClusteringResult,
   NodeAnalysis,
   TopNodeResult,
   GraphAnalysisResults,
@@ -80,7 +79,6 @@ export function calculateBetweennessCentrality(graphData: GraphData): Centrality
       const paths = findAllShortestPaths(graph, source, target);
 
       if (paths.length > 0) {
-        const pathLength = paths[0].length;
         // Count how many paths each node appears in
         paths.forEach((path) => {
           // Skip source and target
@@ -95,7 +93,7 @@ export function calculateBetweennessCentrality(graphData: GraphData): Centrality
 
   // Normalize by number of pairs (n*(n-1)/2 for undirected)
   const n = nodes.length;
-  const normalization = n > 2 ? (n - 1) * (n - 2) / 2 : 1;
+  const normalization = n > 2 ? ((n - 1) * (n - 2)) / 2 : 1;
 
   nodes.forEach((node) => {
     scores.set(node, (scores.get(node) || 0) / normalization);
@@ -107,11 +105,7 @@ export function calculateBetweennessCentrality(graphData: GraphData): Centrality
 /**
  * Find all shortest paths between two nodes using BFS
  */
-function findAllShortestPaths(
-  graph: Graph,
-  source: string,
-  target: string
-): string[][] {
+function findAllShortestPaths(graph: Graph, source: string, target: string): string[][] {
   if (source === target) return [[source]];
 
   const queue: Array<{ node: string; path: string[] }> = [{ node: source, path: [source] }];
@@ -158,7 +152,7 @@ export function calculateClosenessCentrality(graphData: GraphData): CentralitySc
   nodes.forEach((node) => {
     const distances = calculateDistances(graph, node);
     const reachableNodes = Array.from(distances.values()).filter((d) => d > 0).length;
-    
+
     if (reachableNodes === 0) {
       scores.set(node, 0);
     } else {
@@ -212,7 +206,7 @@ export function calculateEigenvectorCentrality(
   if (n === 0) return new Map();
 
   // Initialize with equal values
-  let scores = new Map<string, number>();
+  const scores = new Map<string, number>();
   nodes.forEach((node) => scores.set(node, 1 / Math.sqrt(n)));
 
   for (let iter = 0; iter < maxIterations; iter++) {
@@ -227,9 +221,7 @@ export function calculateEigenvectorCentrality(
     });
 
     // Normalize
-    const norm = Math.sqrt(
-      Array.from(newScores.values()).reduce((sum, val) => sum + val * val, 0)
-    );
+    const norm = Math.sqrt(Array.from(newScores.values()).reduce((sum, val) => sum + val * val, 0));
 
     if (norm === 0) break;
 
@@ -264,7 +256,7 @@ export function calculatePageRank(
   if (n === 0) return new Map();
 
   // Initialize with equal values
-  let scores = new Map<string, number>();
+  const scores = new Map<string, number>();
   nodes.forEach((node) => scores.set(node, 1 / n));
 
   for (let iter = 0; iter < maxIterations; iter++) {
@@ -315,9 +307,7 @@ export function findShortestPath(
     };
   }
 
-  const queue: Array<{ node: string; path: string[] }> = [
-    { node: sourceId, path: [sourceId] },
-  ];
+  const queue: Array<{ node: string; path: string[] }> = [{ node: sourceId, path: [sourceId] }];
   const visited = new Set<string>([sourceId]);
 
   while (queue.length > 0) {
@@ -367,9 +357,7 @@ export function findPathsUpToLength(
   const graph = buildGraph(graphData, false);
   const paths = new Map<string, string[][]>();
 
-  const queue: Array<{ node: string; path: string[] }> = [
-    { node: sourceId, path: [sourceId] },
-  ];
+  const queue: Array<{ node: string; path: string[] }> = [{ node: sourceId, path: [sourceId] }];
 
   while (queue.length > 0) {
     const { node, path } = queue.shift()!;
@@ -606,9 +594,7 @@ export function analyzeNodeRole(
     0;
 
   const bridges = analysisResults?.bridges || findBridges(graphData);
-  const isBridgeEndpoint = bridges.some(
-    (b) => b.sourceId === nodeId || b.targetId === nodeId
-  );
+  const isBridgeEndpoint = bridges.some((b) => b.sourceId === nodeId || b.targetId === nodeId);
 
   const articulationPoints =
     analysisResults?.articulationPoints || findArticulationPoints(graphData);
@@ -645,11 +631,14 @@ export function analyzeNodeRole(
 /**
  * Calculate all analysis results at once (for caching)
  */
-export function calculateAllAnalysis(graphData: GraphData, skipExpensive: boolean = false): GraphAnalysisResults {
+export function calculateAllAnalysis(
+  graphData: GraphData,
+  skipExpensive: boolean = false
+): GraphAnalysisResults {
   // For large graphs, skip the most expensive calculations
   const emptyScores = new Map<string, number>();
-  graphData.nodes.forEach(node => emptyScores.set(node.id, 0));
-  
+  graphData.nodes.forEach((node) => emptyScores.set(node.id, 0));
+
   return {
     centrality: {
       betweenness: skipExpensive ? emptyScores : calculateBetweennessCentrality(graphData),
@@ -667,10 +656,7 @@ export function calculateAllAnalysis(graphData: GraphData, skipExpensive: boolea
 /**
  * Get centrality scores by type
  */
-export function getCentralityByType(
-  graphData: GraphData,
-  type: CentralityType
-): CentralityScores {
+export function getCentralityByType(graphData: GraphData, type: CentralityType): CentralityScores {
   switch (type) {
     case 'betweenness':
       return calculateBetweennessCentrality(graphData);
@@ -686,4 +672,3 @@ export function getCentralityByType(
       return calculateDegreeCentrality(graphData);
   }
 }
-
