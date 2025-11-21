@@ -1,5 +1,10 @@
 command: ["npm", "run", "start"]
 
+source:
+  git:
+    url: "https://github.com/will-yuponce-db/graph-crime-detection.git"
+    branch: "main"
+
 env:
   - name: NODE_ENV
     value: production
