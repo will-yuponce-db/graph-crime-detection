@@ -209,3 +209,4 @@ class DOJMultiDistrictScraper(BaseScraper):
 
 
 
+

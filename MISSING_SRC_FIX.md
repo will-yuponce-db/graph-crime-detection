@@ -1,113 +1,140 @@
-# URGENT FIX: Missing src/ Directory in Databricks Apps
+# Deployment 404 Issue - Diagnosis & Fix
 
-## The Problem
+## Current Status
 
-Your Databricks Apps deployment is **NOT syncing the `src/` directory**, which is why Vite can't find `./src/main.tsx`.
+The app **builds successfully** in Databricks, but returns **404 when accessing `/`**.
 
-Looking at your deployment logs, files being synced are:
+## What We've Added
 
-- ✅ `index.html`
-- ✅ `package.json`
-- ✅ `vite.config.ts`
-- ✅ `.md` files
-- ❌ **`src/` directory is MISSING!**
+Enhanced logging in `backend/server.js` to diagnose the issue:
 
-The logs show: `[INFO] Downloading source code from /Workspace/Users/f3f03a9e-2244-48ae-bdf5-de58c1a9d771/src/...`
+1. **Static file middleware logging** - Shows the dist path and whether it exists
+2. **Catch-all route error handling** - Shows detailed error if index.html is missing
+3. **Server startup logging** - Lists contents of the dist folder
 
-This means your app is pulling from a **Workspace Git folder**, not directly from GitHub, and that workspace folder is missing or outdated.
+## Expected Behavior After Deployment
 
-## The Fix
+When you redeploy, look for these log entries to diagnose the issue:
 
-### Option 1: Delete and Recreate the App (RECOMMENDED)
+### 1. Static Files Configuration (during server startup)
 
-This forces a fresh sync from Git:
-
-```bash
-# 1. Stop the current app
-databricks apps delete crime-graph-demo
-
-# 2. Create a new app pointing directly to GitHub
-databricks apps create \
-  --name crime-graph-demo \
-  --source-code-path https://github.com/will-yuponce-db/graph-crime-detection.git \
-  --branch main
+```
+[INFO] [static_files] {
+  "distPath": "/app/python/source_code/dist",
+  "exists": true,
+  "__dirname": "/app/python/source_code/backend"
+}
 ```
 
-### Option 2: Update the App's Git Source
+If `exists: false`, the dist folder wasn't created or is in the wrong location.
 
-Update the existing app to point to the correct Git repo:
+### 2. Server Started Log
 
-```bash
-databricks apps update crime-graph-demo \
-  --source-code-path https://github.com/will-yuponce-db/graph-crime-detection.git \
-  --branch main \
-  --restart
+```
+[INFO] [server_started] {
+  "url": "http://localhost:8000",
+  "dist": {
+    "path": "/app/python/source_code/dist",
+    "exists": true,
+    "contents": ["index.html", "assets", "vite.svg", "pdf.worker.min.mjs"]
+  },
+  "cwd": "/app/python/source_code/backend",
+  "__dirname": "/app/python/source_code/backend"
+}
 ```
 
-### Option 3: Via Databricks UI
+If `contents` is empty or missing `index.html`, the build didn't complete properly.
 
-1. Go to **Databricks Apps** in your workspace
+### 3. Catch-All Route Error (if 404 persists)
+
+```
+[ERROR] [static_file_missing] {
+  "path": "/app/python/source_code/dist/index.html",
+  "__dirname": "/app/python/source_code/backend",
+  "cwd": "/app/python/source_code/backend"
+}
+```
+
+This tells us exactly where the server is looking for the file.
+
+## Possible Issues & Solutions
+
+### Issue 1: Dist folder in wrong location
+
+**Symptoms:** `exists: false` in logs
+
+**Cause:** The working directory changed during npm start
+
+**Solution:** Modify the start script in `package.json`:
+
+```json
+"start": "npm run build:clean && cd backend && npm install && node server.js"
+```
+
+Change to:
+
+```json
+"start": "npm run build:clean && NODE_ENV=production node backend/server.js"
+```
+
+This runs the server from the root directory, so `__dirname` will be `backend/` and `../dist` will correctly point to the dist folder.
+
+### Issue 2: Static middleware not registered
+
+**Symptoms:** 404 but dist folder exists and has files
+
+**Cause:** NODE_ENV not set to 'production'
+
+**Solution:** Already configured in `app.yaml` with `NODE_ENV: production`. Verify it's actually being set by checking the server logs.
+
+### Issue 3: Wrong base path in built files
+
+**Symptoms:** 404 for JS/CSS assets, but index.html loads
+
+**Cause:** Vite base path configuration
+
+**Solution:** Check `vite.config.ts` and ensure `base: '/'` is set for production builds.
+
+### Issue 4: Build files not persisted after build
+
+**Symptoms:** Build completes successfully, but dist folder is empty when server starts
+
+**Cause:** The build runs in a different context, or dist is being cleaned after build
+
+**Solution:** Modify the start script to avoid cleaning between build and server start:
+
+```json
+"start": "npm run build && cd backend && npm install && node server.js"
+```
+
+(Remove `build:clean` and use `build` instead)
+
+## Next Steps
+
+1. **Redeploy the app** in Databricks to pick up the new logging
+2. **Check the deployment logs** for the diagnostic information
+3. **Share the logs** showing:
+   - The `static_files` log entry
+   - The `server_started` log entry with dist contents
+   - Any `static_file_missing` error logs
+   - The GET request logs showing the 404
+
+Based on those logs, we'll know exactly what's wrong and can apply the appropriate fix.
+
+## Quick Deploy Command
+
+If you're using Databricks CLI:
+
+```bash
+databricks apps restart crime-graph-demo
+```
+
+Or redeploy through the Databricks UI:
+
+1. Go to **Databricks Apps**
 2. Find `crime-graph-demo`
-3. Click **Settings** or **Configure**
-4. Under **Source Code**, verify it points to:
-   - **Repository**: `https://github.com/will-yuponce-db/graph-crime-detection.git`
-   - **Branch**: `main`
-5. If it says "Workspace" or shows a different path, **change it to Git**
-6. Click **Save** and **Restart**
-
-## Verify the Fix
-
-After recreating/updating, check the deployment logs for:
-
-```
-[INFO] Downloading source code from https://github.com/will-yuponce-db/graph-crime-detection.git
-[INFO] Updated file: python/source_code/src/App.tsx
-[INFO] Updated file: python/source_code/src/main.tsx
-[INFO] Updated file: python/source_code/src/components/...
-```
-
-You should see `src/` files being synced!
-
-## Why This Happened
-
-Databricks Apps might have been created with:
-
-- A Workspace Git folder as the source (instead of GitHub URL)
-- That Workspace folder was created before `src/` was added
-- Or the Workspace folder got out of sync with GitHub
-
-## Expected Build Output After Fix
-
-```
-✓ 12814 modules transformed.
-dist/index.html                    0.75 kB
-dist/assets/main-*.css            24.74 kB
-dist/assets/main-*.js          2,189.26 kB
-✓ built in 4-5s
-```
-
-Then the server should start successfully on port 8000!
-
-## If It Still Fails
-
-Double-check your Git repo has `src/`:
-
-```bash
-# Verify src/ is in the repo
-git ls-files src/ | head
-
-# Should show:
-# src/App.tsx
-# src/main.tsx
-# src/components/...
-```
-
-If `src/` is missing from Git, something went wrong with previous commits. Check:
-
-```bash
-git log --oneline --all -- src/
-```
+3. Click **Restart** or trigger a new deployment
 
 ---
 
-**Bottom Line:** Your app is syncing from the wrong source location. Point it directly to GitHub and it should work!
+**Last Updated:** 2024-11-21

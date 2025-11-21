@@ -16,7 +16,7 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "preview": "vite preview",
-    "start": "npm run build:clean && cd backend && npm install && node server.js",
+    "start": "npm run build:clean && npm install --prefix backend && NODE_ENV=production node backend/server.js",
     "copy-pdf-worker": "cp node_modules/react-pdf/node_modules/pdfjs-dist/build/pdf.worker.min.mjs public/pdf.worker.min.mjs || echo 'PDF worker file not found - make sure react-pdf is installed'",
     "postinstall": "npm run copy-pdf-worker"
   },
