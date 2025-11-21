@@ -4,6 +4,8 @@ import { Box, Paper, Typography, useTheme, IconButton, Stack, Tooltip } from '@m
 import { ZoomIn as ZoomInIcon, ZoomOut as ZoomOutIcon } from '@mui/icons-material';
 import type { GraphData, ForceGraphData, ForceGraphNode, ForceGraphLink } from '../types/graph';
 import { ChangeStatus, getColorForType } from '../types/graph';
+import { useAppSelector } from '../store/hooks';
+import type { CentralityScores } from '../types/graphAnalysis';
 
 interface GraphVisualizationProps {
   data: GraphData;
@@ -12,6 +14,7 @@ interface GraphVisualizationProps {
   selectedRelationshipTypes: string[];
   showNodeLabels?: boolean;
   showEdgeLabels?: boolean;
+  showCommunities?: boolean;
   edgeLength?: number;
   nodeSize?: number;
   width?: number;
@@ -21,6 +24,11 @@ interface GraphVisualizationProps {
   edgeCreateMode?: boolean;
   edgeCreateSourceId?: string | null;
   selectedNodeId?: string | null;
+  // Analysis visualization props
+  showCentrality?: boolean;
+  centralityScores?: CentralityScores;
+  highlightedPath?: string[];
+  highlightedBridges?: string[];
 }
 
 export interface GraphVisualizationRef {
@@ -39,6 +47,7 @@ const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisualizationP
       selectedRelationshipTypes,
       showNodeLabels = false,
       showEdgeLabels = false,
+      showCommunities = true,
       edgeLength = 80,
       nodeSize = 6,
       width = 800,
@@ -48,19 +57,57 @@ const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisualizationP
       edgeCreateMode = false,
       edgeCreateSourceId = null,
       selectedNodeId = null,
+      showCentrality = false,
+      centralityScores,
+      highlightedPath = [],
+      highlightedBridges = [],
     },
     ref
   ) => {
     const theme = useTheme();
+    const allCases = useAppSelector(state => state.cases?.cases || []);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const graphRef = useRef<any>(null);
     const [hoveredNode, setHoveredNode] = useState<ForceGraphNode | null>(null);
     const [graphData, setGraphData] = useState<ForceGraphData>({ nodes: [], links: [] });
     const [hasInitialized, setHasInitialized] = useState(false);
+    const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
 
-    // Color schemes for different node types - now dynamic!
+    // Create node to case color mapping
+    const nodeToCase = useCallback((nodeId: string): number | null => {
+      for (let i = 0; i < allCases.length; i++) {
+        if (allCases[i].entityIds.includes(nodeId)) {
+          return i;
+        }
+      }
+      return null;
+    }, [allCases]);
+
+    // Community colors
+    const getCommunityColor = useCallback((communityIndex: number): string => {
+      const darkColors = [
+        '#e53935', '#1e88e5', '#43a047', '#fb8c00', '#8e24aa',
+        '#00acc1', '#fdd835', '#6d4c41', '#e91e63', '#5e35b1',
+      ];
+      const lightColors = [
+        '#c62828', '#1565c0', '#2e7d32', '#ef6c00', '#6a1b9a',
+        '#00838f', '#f9a825', '#4e342e', '#ad1457', '#4527a0',
+      ];
+      const colors = theme.palette.mode === 'dark' ? darkColors : lightColors;
+      return colors[communityIndex % colors.length];
+    }, [theme.palette.mode]);
+
+    // Color schemes for different node types - now community-aware!
     const getNodeColor = useCallback(
       (node: ForceGraphNode): string => {
+        // If cases exist and node is in a case, color by community
+        if (allCases.length > 0) {
+          const communityIndex = nodeToCase(node.id as string);
+          if (communityIndex !== null) {
+            return getCommunityColor(communityIndex);
+          }
+        }
+
         if (node.status === ChangeStatus.NEW) {
           return theme.palette.mode === 'dark' ? '#4caf50' : '#2e7d32';
         }
@@ -68,17 +115,54 @@ const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisualizationP
         // Use dynamic color generation for any node type
         return getColorForType(node.type, theme.palette.mode === 'dark');
       },
-      [theme.palette.mode]
+      [theme.palette.mode, allCases, nodeToCase, getCommunityColor]
     );
 
     const getLinkColor = useCallback(
       (link: ForceGraphLink): string => {
+        // Highlight bridges
+        if (highlightedBridges.includes(link.id as string)) {
+          return theme.palette.mode === 'dark' ? '#ff6b6b' : '#d32f2f';
+        }
+        // Highlight path edges
+        if (highlightedPath.length > 0) {
+          const sourceIdx = highlightedPath.indexOf(link.source as string);
+          const targetIdx = highlightedPath.indexOf(link.target as string);
+          if (
+            sourceIdx !== -1 &&
+            targetIdx !== -1 &&
+            Math.abs(sourceIdx - targetIdx) === 1
+          ) {
+            return theme.palette.mode === 'dark' ? '#42a5f5' : '#1976d2';
+          }
+        }
         if (link.status === ChangeStatus.NEW) {
           return theme.palette.mode === 'dark' ? '#66bb6a' : '#43a047';
         }
         return theme.palette.mode === 'dark' ? '#616161' : '#9e9e9e';
       },
-      [theme.palette.mode]
+      [theme.palette.mode, highlightedBridges, highlightedPath]
+    );
+
+    // Calculate node size based on centrality if enabled
+    const getNodeSize = useCallback(
+      (node: ForceGraphNode): number => {
+        let baseSize = node.status === ChangeStatus.NEW ? nodeSize * 1.3 : nodeSize;
+        
+        if (showCentrality && centralityScores) {
+          const score = centralityScores.get(node.id as string) || 0;
+          if (score > 0) {
+            // Normalize score to 0-1 range for scaling
+            const maxScore = Math.max(...Array.from(centralityScores.values()));
+            const normalizedScore = maxScore > 0 ? score / maxScore : 0;
+            // Scale between 0.5x and 2x base size
+            baseSize = baseSize * (0.5 + normalizedScore * 1.5);
+          }
+        }
+        
+        return baseSize;
+      },
+      [nodeSize, showCentrality, centralityScores]
     );
 
     // Transform data for react-force-graph
@@ -102,14 +186,21 @@ const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisualizationP
         return true;
       });
 
-      const forceNodes: ForceGraphNode[] = filteredNodes.map((node) => ({
-        id: node.id,
-        name: node.label,
-        type: node.type,
-        status: node.status,
-        properties: node.properties,
-        val: node.status === ChangeStatus.NEW ? nodeSize * 1.3 : nodeSize,
-      }));
+      const forceNodes: ForceGraphNode[] = filteredNodes.map((node) => {
+        const forceNode: ForceGraphNode = {
+          id: node.id,
+          name: node.label,
+          type: node.type,
+          status: node.status,
+          properties: node.properties,
+          val: node.status === ChangeStatus.NEW ? nodeSize * 1.3 : nodeSize,
+        };
+        // Apply centrality-based sizing
+        if (showCentrality && centralityScores) {
+          forceNode.val = getNodeSize(forceNode);
+        }
+        return forceNode;
+      });
 
       const forceLinks: ForceGraphLink[] = filteredEdges.map((edge) => ({
         id: edge.id,
@@ -121,7 +212,16 @@ const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisualizationP
       }));
 
       setGraphData({ nodes: forceNodes, links: forceLinks });
-    }, [data, showProposed, selectedNodeTypes, selectedRelationshipTypes, nodeSize]);
+    }, [
+      data,
+      showProposed,
+      selectedNodeTypes,
+      selectedRelationshipTypes,
+      nodeSize,
+      showCentrality,
+      centralityScores,
+      getNodeSize,
+    ]);
 
     // Configure d3 forces to spread nodes farther apart
     useEffect(() => {
@@ -218,12 +318,68 @@ const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisualizationP
         const label = node.name;
         const fontSize = 11;
         const nodeRadius = node.val || 5;
+        const imageUrl = node.properties?.image_url;
 
-        // Draw node circle
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, nodeRadius, 0, 2 * Math.PI);
-        ctx.fillStyle = getNodeColor(node);
-        ctx.fill();
+        // Try to draw image if available (for suspects with photos)
+        let imageDrawn = false;
+        if (imageUrl) {
+          let img = imageCache.current.get(imageUrl);
+          
+          if (!img) {
+            // Create and cache new image (no crossOrigin needed for same-origin)
+            img = new Image();
+            img.src = imageUrl;
+            imageCache.current.set(imageUrl, img);
+            
+            // Trigger redraw when image loads
+            img.onload = () => {
+              if (graphRef.current) {
+                graphRef.current.refresh?.();
+              }
+            };
+          }
+          
+          // Draw image if loaded
+          if (img.complete && img.naturalWidth > 0) {
+            ctx.save();
+            
+            // Create circular clip path
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, nodeRadius, 0, 2 * Math.PI);
+            ctx.closePath();
+            ctx.clip();
+            
+            // Draw image
+            ctx.drawImage(
+              img,
+              node.x - nodeRadius,
+              node.y - nodeRadius,
+              nodeRadius * 2,
+              nodeRadius * 2
+            );
+            
+            ctx.restore();
+            
+            // Draw border around image
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, nodeRadius, 0, 2 * Math.PI);
+            ctx.strokeStyle = node.status === ChangeStatus.NEW 
+              ? (theme.palette.mode === 'dark' ? '#81c784' : '#1b5e20')
+              : getNodeColor(node);
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+            
+            imageDrawn = true;
+          }
+        }
+        
+        // Fallback to circle if no image or image not loaded
+        if (!imageDrawn) {
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, nodeRadius, 0, 2 * Math.PI);
+          ctx.fillStyle = getNodeColor(node);
+          ctx.fill();
+        }
 
         // Add border for new nodes
         if (node.status === ChangeStatus.NEW) {
@@ -236,7 +392,8 @@ const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisualizationP
         const isHovered = hoveredNode && hoveredNode.id === node.id;
         const isSelected = selectedNodeId && selectedNodeId === node.id;
         const isEdgeCreateSource = edgeCreateMode && edgeCreateSourceId === node.id;
-        const shouldShowLabel = showNodeLabels || isHovered || isSelected || isEdgeCreateSource;
+        const isInPath = highlightedPath.includes(node.id as string);
+        const shouldShowLabel = showNodeLabels || isHovered || isSelected || isEdgeCreateSource || isInPath;
 
         // Draw label only when appropriate
         if (shouldShowLabel) {
@@ -292,6 +449,15 @@ const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisualizationP
           ctx.lineWidth = 4;
           ctx.stroke();
         }
+
+        // Highlight nodes in path
+        if (isInPath) {
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, nodeRadius + 2, 0, 2 * Math.PI);
+          ctx.strokeStyle = theme.palette.mode === 'dark' ? '#42a5f5' : '#1976d2';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+        }
       },
       [
         hoveredNode,
@@ -301,7 +467,182 @@ const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisualizationP
         edgeCreateMode,
         edgeCreateSourceId,
         showNodeLabels,
+        highlightedPath,
       ]
+    );
+
+    // Convex hull calculation (Graham scan algorithm)
+    const getConvexHull = useCallback((points: { x: number; y: number }[]): { x: number; y: number }[] => {
+      if (points.length < 3) return points;
+
+      // Add padding to hull
+      const padding = 30;
+      const paddedPoints = points.map(p => ({ ...p }));
+
+      // Find bottom-most point (or left-most if tied)
+      let bottomMost = paddedPoints[0];
+      for (let i = 1; i < paddedPoints.length; i++) {
+        if (paddedPoints[i].y > bottomMost.y || 
+            (paddedPoints[i].y === bottomMost.y && paddedPoints[i].x < bottomMost.x)) {
+          bottomMost = paddedPoints[i];
+        }
+      }
+
+      const crossProduct = (a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }) => {
+        return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+      };
+
+      // Sort by polar angle
+      const sorted = paddedPoints.sort((a, b) => {
+        if (a === bottomMost) return -1;
+        if (b === bottomMost) return 1;
+        
+        const angleA = Math.atan2(a.y - bottomMost.y, a.x - bottomMost.x);
+        const angleB = Math.atan2(b.y - bottomMost.y, b.x - bottomMost.x);
+        
+        if (angleA !== angleB) return angleA - angleB;
+        
+        const distA = Math.hypot(a.x - bottomMost.x, a.y - bottomMost.y);
+        const distB = Math.hypot(b.x - bottomMost.x, b.y - bottomMost.y);
+        return distA - distB;
+      });
+
+      const hull: { x: number; y: number }[] = [sorted[0], sorted[1]];
+
+      for (let i = 2; i < sorted.length; i++) {
+        let top = hull.length - 1;
+        
+        while (hull.length >= 2 && crossProduct(hull[top - 1], hull[top], sorted[i]) <= 0) {
+          hull.pop();
+          top--;
+        }
+        
+        hull.push(sorted[i]);
+      }
+
+      // Expand hull outward by padding
+      const center = {
+        x: hull.reduce((sum, p) => sum + p.x, 0) / hull.length,
+        y: hull.reduce((sum, p) => sum + p.y, 0) / hull.length,
+      };
+
+      return hull.map(p => {
+        const dx = p.x - center.x;
+        const dy = p.y - center.y;
+        const dist = Math.hypot(dx, dy);
+        const ratio = (dist + padding) / dist;
+        return {
+          x: center.x + dx * ratio,
+          y: center.y + dy * ratio,
+        };
+      });
+    }, []);
+
+    // Draw community hulls
+    const drawCommunityHulls = useCallback(
+      (ctx: CanvasRenderingContext2D, globalScale: number) => {
+        if (allCases.length === 0) return;
+
+        interface NodeWithPosition {
+          id: string;
+          x: number;
+          y: number;
+        }
+
+        // Group nodes by community
+        const communities = new Map<number, NodeWithPosition[]>();
+        graphData.nodes.forEach((node) => {
+          // Skip nodes without position data
+          if (typeof node.x !== 'number' || typeof node.y !== 'number') return;
+          
+          const communityIndex = nodeToCase(node.id);
+          if (communityIndex !== null) {
+            if (!communities.has(communityIndex)) {
+              communities.set(communityIndex, []);
+            }
+            communities.get(communityIndex)!.push({
+              id: node.id,
+              x: node.x,
+              y: node.y,
+            });
+          }
+        });
+
+        // Draw hull for each community
+        communities.forEach((nodes, communityIndex) => {
+          if (nodes.length < 2) return;
+
+          const color = getCommunityColor(communityIndex);
+          
+          // Get convex hull points
+          const points = nodes.map((n) => ({ x: n.x, y: n.y }));
+          const hull = getConvexHull(points);
+          
+          if (hull.length < 3) return;
+
+          // Draw smooth curve through hull points using cardinal splines
+          const drawSmoothCurve = (isFill: boolean) => {
+            if (hull.length < 3) return;
+            
+            const tension = 0.5; // Controls smoothness (0 = straight lines, 1 = very smooth)
+            
+            ctx.beginPath();
+            ctx.moveTo(hull[0].x, hull[0].y);
+            
+            for (let i = 0; i < hull.length; i++) {
+              const p0 = hull[(i - 1 + hull.length) % hull.length];
+              const p1 = hull[i];
+              const p2 = hull[(i + 1) % hull.length];
+              const p3 = hull[(i + 2) % hull.length];
+              
+              // Calculate control points for cardinal spline
+              const cp1x = p1.x + (p2.x - p0.x) / 6 * tension;
+              const cp1y = p1.y + (p2.y - p0.y) / 6 * tension;
+              const cp2x = p2.x - (p3.x - p1.x) / 6 * tension;
+              const cp2y = p2.y - (p3.y - p1.y) / 6 * tension;
+              
+              ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+            }
+            
+            ctx.closePath();
+            
+            if (isFill) {
+              ctx.fill();
+            } else {
+              ctx.stroke();
+            }
+          };
+
+          // Draw filled hull with transparency
+          ctx.save();
+          ctx.globalAlpha = 0.15;
+          ctx.fillStyle = color;
+          drawSmoothCurve(true);
+          ctx.restore();
+
+          // Draw border
+          ctx.save();
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 3 / globalScale;
+          ctx.setLineDash([5 / globalScale, 5 / globalScale]);
+          drawSmoothCurve(false);
+          ctx.setLineDash([]);
+          ctx.restore();
+
+          // Draw community label
+          const centerX = nodes.reduce((sum: number, n) => sum + n.x, 0) / nodes.length;
+          const centerY = nodes.reduce((sum: number, n) => sum + n.y, 0) / nodes.length;
+          
+          ctx.save();
+          ctx.font = `bold ${14 / globalScale}px Sans-Serif`;
+          ctx.fillStyle = color;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(`Community ${communityIndex + 1}`, centerX, centerY - 40 / globalScale);
+          ctx.restore();
+        });
+      },
+      [allCases, graphData.nodes, nodeToCase, getCommunityColor, getConvexHull]
     );
 
     const paintLink = useCallback(
@@ -396,6 +737,7 @@ const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisualizationP
             backgroundColor={theme.palette.mode === 'dark' ? '#1a1a1a' : '#f5f5f5'}
             nodeCanvasObject={paintNode}
             linkCanvasObject={paintLink}
+            nodeCanvasObjectMode={() => 'after'}
             onNodeHover={handleNodeHover}
             onNodeClick={handleNodeClick}
             onLinkClick={handleLinkClick}
@@ -412,6 +754,11 @@ const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisualizationP
             }}
             d3AlphaDecay={0.02}
             d3VelocityDecay={0.3}
+            onRenderFramePost={(ctx, globalScale) => {
+              if (showCommunities) {
+                drawCommunityHulls(ctx, globalScale);
+              }
+            }}
           />
         </Box>
 

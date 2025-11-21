@@ -1,7 +1,7 @@
 {
-  "name": "databricks-graph-backend",
+  "name": "crime-graph-backend",
   "version": "1.0.0",
-  "description": "Backend API for Databricks SQL Warehouse integration",
+  "description": "Backend API for Crime Graph Analysis Platform with Databricks integration",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -11,8 +11,11 @@
     "seed-if-empty": "node -e \"const db = require('./db/database.js').initDatabase(); if (require('./db/database.js').isDatabaseEmpty(db)) { db.close(); require('./db/seed.js').seedDatabase(); } else { db.close(); console.log('Database already populated'); }\""
   },
   "keywords": [
-    "databricks",
+    "crime-analysis",
+    "intelligence",
     "graph",
+    "law-enforcement",
+    "databricks",
     "api"
   ],
   "author": "",
@@ -25,6 +28,6 @@
     "express": "^4.18.2"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1"
+    "nodemon": "^3.1.11"
   }
 }

@@ -163,7 +163,7 @@ export const NodeForm: React.FC<NodeFormProps> = ({
             label="Type"
             value={type}
             onChange={(e) => setType(e.target.value)}
-            placeholder="Enter a type (e.g., Person, Company)"
+            placeholder="Enter a type (e.g., Suspect, Organization, Location)"
             size="small"
             required
             fullWidth
@@ -425,7 +425,7 @@ export const EdgeForm: React.FC<EdgeFormProps> = ({
             label="Relationship Type"
             value={relationshipType}
             onChange={(e) => setRelationshipType(e.target.value)}
-            placeholder="Enter a relationship type (e.g., WORKS_AT)"
+            placeholder="Enter a relationship type (e.g., ASSOCIATES_WITH, MEMBER_OF)"
             size="small"
             required
             fullWidth

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useAppSelector } from '../store/hooks';
 import {
   Box,
   Container,
@@ -28,6 +29,7 @@ import {
   Close as CloseIcon,
   Fullscreen as FullscreenIcon,
   FullscreenExit as FullscreenExitIcon,
+  FilterList as FilterIcon,
 } from '@mui/icons-material';
 import GraphVisualization, { type GraphVisualizationRef } from '../components/GraphVisualization';
 import GraphControls from '../components/GraphControls';
@@ -36,6 +38,7 @@ import NodeSearch from '../components/NodeSearch';
 import { NodeForm, EdgeForm } from '../components/NodeEdgeForm';
 import { useGraphEditor } from '../hooks/useGraphEditor';
 import type { GraphData, GraphStats, GraphNode, GraphEdge } from '../types/graph';
+import type { Case } from '../types/case';
 import {
   writeToTable,
   fetchGraphData,
@@ -43,6 +46,7 @@ import {
   deleteEdge as apiDeleteEdge,
 } from '../services/graphApi';
 import { ChangeStatus } from '../types/graph';
+import { filterGraphByCase } from '../utils/caseFiltering';
 
 // Helper function to calculate graph stats
 const getGraphStats = (data: GraphData): GraphStats => {
@@ -64,17 +68,32 @@ const getGraphStats = (data: GraphData): GraphStats => {
 const GraphVisualizationPage: React.FC = () => {
   // Set page title
   React.useEffect(() => {
-    document.title = 'Interactive Graph Editor | Databricks';
+    document.title = 'Crime Network Analysis | Intelligence Platform';
   }, []);
 
   // Ref for graph visualization component
   const graphVisualizationRef = useRef<GraphVisualizationRef>(null);
+  
+  // Get selected case from Redux
+  const selectedCaseId = useAppSelector(state => state.cases.selectedCaseId);
+  const allCases = useAppSelector(state => state.cases.cases);
+  const selectedCase = allCases.find((caseItem: Case) => caseItem.id === selectedCaseId) || null;
+
+  // Log case selection for debugging (only when it changes)
+  useEffect(() => {
+    if (selectedCase) {
+      console.log('🎯 Case Filter Active:', selectedCase.name, '| Entities:', selectedCase.entityIds.length);
+    } else {
+      console.log('🎯 Case Filter: None (showing all entities)');
+    }
+  }, [selectedCase]);
 
   const [showProposed, setShowProposed] = useState(true);
   const [selectedNodeTypes, setSelectedNodeTypes] = useState<string[]>([]);
   const [selectedRelationshipTypes, setSelectedRelationshipTypes] = useState<string[]>([]);
   const [showNodeLabels, setShowNodeLabels] = useState(false);
   const [showEdgeLabels, setShowEdgeLabels] = useState(false);
+  const [showCommunities, setShowCommunities] = useState(true);
   const [edgeLength, setEdgeLength] = useState(80);
   const [nodeSize, setNodeSize] = useState(6);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -83,7 +102,9 @@ const GraphVisualizationPage: React.FC = () => {
   const [initialData, setInitialData] = useState<GraphData>({ nodes: [], edges: [] });
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [dataError, setDataError] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [isUsingMockData, setIsUsingMockData] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [dbMetadata, setDbMetadata] = useState<{
     source?: string;
     databricksEnabled?: boolean;
@@ -124,8 +145,19 @@ const GraphVisualizationPage: React.FC = () => {
 
   // Use the graph editor hook
   const editor = useGraphEditor({ initialData });
+  
+  // Filter graph data by selected case
+  const filteredGraphData = React.useMemo(() => {
+    const filtered = filterGraphByCase(editor.graphData, selectedCase, true); // true = include connections
+    
+    if (selectedCase) {
+      console.log(`📊 Graph Filtered: ${filtered.nodes.length}/${editor.graphData.nodes.length} nodes, ${filtered.edges.length}/${editor.graphData.edges.length} edges for case "${selectedCase.name}"`);
+    }
+    
+    return filtered;
+  }, [editor.graphData, selectedCase]);
 
-  const stats = getGraphStats(editor.graphData);
+  const stats = getGraphStats(filteredGraphData);
 
   // Fetch graph data from backend on component mount
   useEffect(() => {
@@ -280,7 +312,8 @@ const GraphVisualizationPage: React.FC = () => {
     setEdgeFormTargetId(undefined);
   };
 
-  // Edit existing node
+  // Edit existing node (currently not used - nodes are edited via context menu)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleNodeEdit = (nodeId: string) => {
     const node = editor.graphData.nodes.find((n) => n.id === nodeId);
     if (node) {
@@ -517,15 +550,49 @@ const GraphVisualizationPage: React.FC = () => {
     >
       {!isFullscreen && (
         <Box sx={{ mb: 3, flexShrink: 0 }}>
-          <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
-            <Box>
-              <Typography variant="h4" gutterBottom>
-                Graph Editor
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Create and edit graph nodes and relationships, then save to database
-              </Typography>
-            </Box>
+          {/* Case Filter Banner */}
+          {selectedCase && (
+            <Paper
+              elevation={3}
+              sx={{
+                mb: 2,
+                p: 2,
+                bgcolor: 'primary.main',
+                color: 'primary.contrastText',
+                borderLeft: '6px solid',
+                borderColor: 'secondary.main',
+              }}
+            >
+              <Box display="flex" alignItems="center" justifyContent="space-between">
+                <Box>
+                  <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
+                    🔍 Case Filter Active: {selectedCase.name}
+                  </Typography>
+                  <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                    Showing {filteredGraphData.nodes.length} entities from case "{selectedCase.caseNumber}" 
+                    {selectedCase.entityIds.length > 0 && ` (${selectedCase.entityIds.length} direct entities + connected nodes)`}
+                  </Typography>
+                </Box>
+                <Chip
+                  label="Filtering"
+                  color="secondary"
+                  size="small"
+                  icon={<FilterIcon />}
+                  sx={{ fontWeight: 600 }}
+                />
+              </Box>
+            </Paper>
+          )}
+          
+            <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
+              <Box>
+                <Typography variant="h4" gutterBottom>
+                  Crime Network Analysis
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Analyze criminal networks, identify connections, and track intelligence
+                </Typography>
+              </Box>
             <Box display="flex" gap={2} alignItems="center" flexWrap="wrap">
               <Button
                 variant="outlined"
@@ -548,47 +615,6 @@ const GraphVisualizationPage: React.FC = () => {
               </Button>
             </Box>
           </Box>
-
-          {/* Connection Info Banner */}
-          <Paper
-            sx={{
-              p: 2,
-              bgcolor: dataError ? 'error.main' : isUsingMockData ? 'warning.main' : 'info.main',
-              color: dataError
-                ? 'error.contrastText'
-                : isUsingMockData
-                  ? 'warning.contrastText'
-                  : 'info.contrastText',
-            }}
-          >
-            <Typography variant="body2">
-              {dataError ? (
-                <>
-                  <strong>Connection Error:</strong> {dataError}
-                </>
-              ) : isUsingMockData ? (
-                <>
-                  <strong>Demo Mode:</strong> Using SQLite database. Changes will be saved locally.
-                  <br />
-                  To sync with Databricks, configure DATABRICKS_CLIENT_ID and
-                  DATABRICKS_CLIENT_SECRET in backend/.env
-                </>
-              ) : (
-                <>
-                  <strong>Connected:</strong> Backend API →{' '}
-                  {dbMetadata.databricksEnabled
-                    ? 'Databricks (with SQLite fallback)'
-                    : 'SQLite only'}
-                  {dbMetadata.databricksError && (
-                    <>
-                      <br />
-                      <small>⚠️ Databricks unavailable: {dbMetadata.databricksError}</small>
-                    </>
-                  )}
-                </>
-              )}
-            </Typography>
-          </Paper>
 
           {/* Table Configuration */}
           <Paper sx={{ p: 2, mt: 2 }}>
@@ -675,7 +701,7 @@ const GraphVisualizationPage: React.FC = () => {
 
         {/* Graph Visualization */}
         <Grid
-          size={{ xs: 12, md: isFullscreen ? 12 : 7.5 }}
+          size={{ xs: 12, md: isFullscreen ? 12 : 8 }}
           sx={{
             minHeight: isFullscreen ? undefined : '700px',
             height: isFullscreen ? '100vh' : undefined,
@@ -699,7 +725,7 @@ const GraphVisualizationPage: React.FC = () => {
               mb={isFullscreen ? 1 : 2}
               sx={{ flexShrink: 0, px: isFullscreen ? 2 : 0, pt: isFullscreen ? 1 : 0 }}
             >
-              {!isFullscreen && <Typography variant="h6">Knowledge Graph Editor</Typography>}
+              {!isFullscreen && <Typography variant="h6">Intelligence Network Graph</Typography>}
               <Box
                 display="flex"
                 gap={1}
@@ -763,34 +789,35 @@ const GraphVisualizationPage: React.FC = () => {
                   </Box>
                 </Box>
               ) : (
-                <GraphVisualization
-                  ref={graphVisualizationRef}
-                  data={editor.graphData}
-                  showProposed={showProposed}
-                  selectedNodeTypes={selectedNodeTypes}
-                  selectedRelationshipTypes={selectedRelationshipTypes}
-                  showNodeLabels={showNodeLabels}
-                  showEdgeLabels={showEdgeLabels}
-                  edgeLength={edgeLength}
-                  nodeSize={nodeSize}
-                  width={isFullscreen ? graphDimensions.width : graphDimensions.width - 32}
-                  height={isFullscreen ? graphDimensions.height - 60 : graphDimensions.height - 140}
-                  onNodeClick={(nodeId) => {
-                    if (editor.isEdgeCreateMode) {
-                      handleNodeClickForEdge(nodeId);
-                    } else {
-                      handleNodeEdit(nodeId);
-                    }
-                  }}
-                  onEdgeClick={(edgeId) => {
-                    if (!editor.isEdgeCreateMode) {
-                      handleEdgeEdit(edgeId);
-                    }
-                  }}
-                  edgeCreateMode={editor.isEdgeCreateMode}
-                  edgeCreateSourceId={editor.edgeCreateSourceId}
-                  selectedNodeId={editor.selectedNodeId}
-                />
+            <GraphVisualization
+              ref={graphVisualizationRef}
+              data={filteredGraphData}
+              showProposed={showProposed}
+              selectedNodeTypes={selectedNodeTypes}
+              selectedRelationshipTypes={selectedRelationshipTypes}
+              showNodeLabels={showNodeLabels}
+              showEdgeLabels={showEdgeLabels}
+              showCommunities={showCommunities}
+              edgeLength={edgeLength}
+              nodeSize={nodeSize}
+              width={isFullscreen ? graphDimensions.width : graphDimensions.width - 32}
+              height={isFullscreen ? graphDimensions.height - 60 : graphDimensions.height - 140}
+              onNodeClick={(nodeId) => {
+                if (editor.isEdgeCreateMode) {
+                  handleNodeClickForEdge(nodeId);
+                } else {
+                  editor.selectNode(nodeId);
+                }
+              }}
+              onEdgeClick={(edgeId) => {
+                if (!editor.isEdgeCreateMode) {
+                  handleEdgeEdit(edgeId);
+                }
+              }}
+              edgeCreateMode={editor.isEdgeCreateMode}
+              edgeCreateSourceId={editor.edgeCreateSourceId}
+              selectedNodeId={editor.selectedNodeId}
+            />
               )}
             </Box>
           </Paper>
@@ -798,7 +825,7 @@ const GraphVisualizationPage: React.FC = () => {
 
         {/* Controls Panel */}
         {!isFullscreen && (
-          <Grid size={{ xs: 12, md: 2.5 }} sx={{ minHeight: '700px' }}>
+          <Grid size={{ xs: 12, md: 2 }} sx={{ minHeight: '700px' }}>
             <GraphControls
               showProposed={showProposed}
               onToggleProposed={setShowProposed}
@@ -810,6 +837,8 @@ const GraphVisualizationPage: React.FC = () => {
               onToggleNodeLabels={setShowNodeLabels}
               showEdgeLabels={showEdgeLabels}
               onToggleEdgeLabels={setShowEdgeLabels}
+              showCommunities={showCommunities}
+              onToggleCommunities={setShowCommunities}
               edgeLength={edgeLength}
               onEdgeLengthChange={setEdgeLength}
               nodeSize={nodeSize}

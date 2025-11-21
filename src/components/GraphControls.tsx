@@ -17,6 +17,9 @@ import {
   Visibility as VisibilityIcon,
   VisibilityOff as VisibilityOffIcon,
   Label as LabelIcon,
+  Workspaces as CommunitiesIcon,
+  Analytics as AnalyticsIcon,
+  Link as BridgeIcon,
 } from '@mui/icons-material';
 import {
   getUniqueNodeTypes,
@@ -36,6 +39,8 @@ interface GraphControlsProps {
   onToggleNodeLabels: (show: boolean) => void;
   showEdgeLabels: boolean;
   onToggleEdgeLabels: (show: boolean) => void;
+  showCommunities: boolean;
+  onToggleCommunities: (show: boolean) => void;
   edgeLength: number;
   onEdgeLengthChange: (length: number) => void;
   nodeSize: number;
@@ -48,6 +53,11 @@ interface GraphControlsProps {
     newNodes: number;
     newEdges: number;
   };
+  // Analysis visualization props
+  showCentrality?: boolean;
+  onToggleCentrality?: (show: boolean) => void;
+  showBridges?: boolean;
+  onToggleBridges?: (show: boolean) => void;
 }
 
 const GraphControls: React.FC<GraphControlsProps> = ({
@@ -61,6 +71,8 @@ const GraphControls: React.FC<GraphControlsProps> = ({
   onToggleNodeLabels,
   showEdgeLabels,
   onToggleEdgeLabels,
+  showCommunities,
+  onToggleCommunities,
   edgeLength,
   onEdgeLengthChange,
   nodeSize,
@@ -68,6 +80,10 @@ const GraphControls: React.FC<GraphControlsProps> = ({
   onResetView,
   graphData,
   stats,
+  showCentrality = false,
+  onToggleCentrality,
+  showBridges = false,
+  onToggleBridges,
 }) => {
   const theme = useTheme();
   const isDarkMode = theme.palette.mode === 'dark';
@@ -198,6 +214,55 @@ const GraphControls: React.FC<GraphControlsProps> = ({
             </Box>
           }
         />
+        <FormControlLabel
+          control={
+            <Switch
+              checked={showCommunities}
+              onChange={(e) => onToggleCommunities(e.target.checked)}
+              color="secondary"
+            />
+          }
+          label={
+            <Box display="flex" alignItems="center" gap={1}>
+              <CommunitiesIcon />
+              <Typography variant="body2">Show Community Boundaries</Typography>
+            </Box>
+          }
+        />
+        {onToggleCentrality && (
+          <FormControlLabel
+            control={
+              <Switch
+                checked={showCentrality}
+                onChange={(e) => onToggleCentrality(e.target.checked)}
+                color="primary"
+              />
+            }
+            label={
+              <Box display="flex" alignItems="center" gap={1}>
+                <AnalyticsIcon />
+                <Typography variant="body2">Size Nodes by Centrality</Typography>
+              </Box>
+            }
+          />
+        )}
+        {onToggleBridges && (
+          <FormControlLabel
+            control={
+              <Switch
+                checked={showBridges}
+                onChange={(e) => onToggleBridges(e.target.checked)}
+                color="warning"
+              />
+            }
+            label={
+              <Box display="flex" alignItems="center" gap={1}>
+                <BridgeIcon />
+                <Typography variant="body2">Highlight Bridge Edges</Typography>
+              </Box>
+            }
+          />
+        )}
       </Stack>
 
       <Divider sx={{ my: 2 }} />

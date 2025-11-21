@@ -18,6 +18,7 @@ const express = require('express');
 const cors = require('cors');
 const { DBSQLClient } = require('@databricks/sql');
 const logger = require('./utils/logger');
+const fs = require('fs');
 require('dotenv').config();
 
 const {
@@ -25,10 +26,15 @@ const {
   createTables,
   getAllNodes,
   getAllEdges,
+  getAllCases,
+  getCaseById,
   insertNodes,
   insertEdges,
+  insertCase,
   updateNodesStatus,
   updateEdgesStatus,
+  updateCase,
+  deleteCase,
   isDatabaseEmpty,
 } = require('./db/database');
 
@@ -1254,6 +1260,449 @@ app.get('/api/job/:jobId', (req, res) => {
     status: 'SUCCESS',
     message: 'Write operation completed successfully',
   });
+});
+
+/**
+ * GET /api/cases
+ * Fetch all cases from database
+ */
+app.get('/api/cases', async (req, res) => {
+  const startTime = Date.now();
+  const userAccessToken = req.headers['x-forwarded-access-token'];
+
+  try {
+    const cases = getAllCases(db);
+    const duration = Date.now() - startTime;
+
+    logger.info({
+      type: 'api_success',
+      method: 'GET',
+      endpoint: '/api/cases',
+      caseCount: cases.length,
+      duration,
+    });
+
+    res.json({
+      success: true,
+      source: 'SQLite',
+      userAuth: !!userAccessToken,
+      timestamp: new Date().toISOString(),
+      duration: `${duration}ms`,
+      cases,
+    });
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    logger.error({
+      type: 'api_error',
+      method: 'GET',
+      endpoint: '/api/cases',
+      error: error.message,
+      duration,
+    });
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch cases',
+      message: sanitizeErrorForClient(error),
+      timestamp: new Date().toISOString(),
+      duration: `${duration}ms`,
+    });
+  }
+});
+
+/**
+ * GET /api/cases/:caseId
+ * Fetch a single case by ID
+ */
+app.get('/api/cases/:caseId', async (req, res) => {
+  const { caseId } = req.params;
+  const startTime = Date.now();
+  const userAccessToken = req.headers['x-forwarded-access-token'];
+
+  try {
+    const caseData = getCaseById(db, caseId);
+    
+    if (!caseData) {
+      return res.status(404).json({
+        success: false,
+        error: `Case ${caseId} not found`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const duration = Date.now() - startTime;
+
+    logger.info({
+      type: 'api_success',
+      method: 'GET',
+      endpoint: '/api/cases/:caseId',
+      caseId,
+      duration,
+    });
+
+    res.json({
+      success: true,
+      source: 'SQLite',
+      userAuth: !!userAccessToken,
+      timestamp: new Date().toISOString(),
+      duration: `${duration}ms`,
+      case: caseData,
+    });
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    logger.error({
+      type: 'api_error',
+      method: 'GET',
+      endpoint: '/api/cases/:caseId',
+      error: error.message,
+      duration,
+    });
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch case',
+      message: sanitizeErrorForClient(error),
+      timestamp: new Date().toISOString(),
+      duration: `${duration}ms`,
+    });
+  }
+});
+
+/**
+ * POST /api/cases
+ * Create a new case
+ */
+app.post('/api/cases', async (req, res) => {
+  const caseData = req.body;
+  const startTime = Date.now();
+  const userAccessToken = req.headers['x-forwarded-access-token'];
+
+  if (!caseData || !caseData.id) {
+    return res.status(400).json({
+      success: false,
+      message: 'Missing case data or case ID in request body',
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  try {
+    insertCase(db, caseData);
+
+    const duration = Date.now() - startTime;
+    logger.info({
+      type: 'api_success',
+      method: 'POST',
+      endpoint: '/api/cases',
+      caseId: caseData.id,
+      duration,
+    });
+
+    res.json({
+      success: true,
+      message: `Created case ${caseData.caseNumber}`,
+      source: 'SQLite',
+      userAuth: !!userAccessToken,
+      timestamp: new Date().toISOString(),
+      duration: `${duration}ms`,
+      case: caseData,
+    });
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    logger.error({
+      type: 'api_error',
+      method: 'POST',
+      endpoint: '/api/cases',
+      error: error.message,
+      duration,
+    });
+
+    res.status(500).json({
+      success: false,
+      message: `Failed to create case: ${sanitizeErrorForClient(error)}`,
+      timestamp: new Date().toISOString(),
+      duration: `${duration}ms`,
+    });
+  }
+});
+
+/**
+ * PATCH /api/cases/:caseId
+ * Update an existing case
+ */
+app.patch('/api/cases/:caseId', async (req, res) => {
+  const { caseId } = req.params;
+  const updates = req.body;
+  const startTime = Date.now();
+  const userAccessToken = req.headers['x-forwarded-access-token'];
+
+  if (!updates || Object.keys(updates).length === 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'No updates provided in request body',
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  try {
+    // Check if case exists
+    const existingCase = getCaseById(db, caseId);
+    if (!existingCase) {
+      return res.status(404).json({
+        success: false,
+        error: `Case ${caseId} not found`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    updateCase(db, caseId, updates);
+
+    const duration = Date.now() - startTime;
+    logger.info({
+      type: 'api_success',
+      method: 'PATCH',
+      endpoint: '/api/cases/:caseId',
+      caseId,
+      duration,
+    });
+
+    res.json({
+      success: true,
+      message: `Updated case ${caseId}`,
+      source: 'SQLite',
+      userAuth: !!userAccessToken,
+      timestamp: new Date().toISOString(),
+      duration: `${duration}ms`,
+    });
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    logger.error({
+      type: 'api_error',
+      method: 'PATCH',
+      endpoint: '/api/cases/:caseId',
+      error: error.message,
+      duration,
+    });
+
+    res.status(500).json({
+      success: false,
+      message: `Failed to update case: ${sanitizeErrorForClient(error)}`,
+      timestamp: new Date().toISOString(),
+      duration: `${duration}ms`,
+    });
+  }
+});
+
+/**
+ * DELETE /api/cases/:caseId
+ * Delete a case
+ */
+app.delete('/api/cases/:caseId', async (req, res) => {
+  const { caseId } = req.params;
+  const startTime = Date.now();
+  const userAccessToken = req.headers['x-forwarded-access-token'];
+
+  try {
+    const deleted = deleteCase(db, caseId);
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        error: `Case ${caseId} not found`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const duration = Date.now() - startTime;
+    logger.info({
+      type: 'api_success',
+      method: 'DELETE',
+      endpoint: '/api/cases/:caseId',
+      caseId,
+      duration,
+    });
+
+    res.json({
+      success: true,
+      message: `Deleted case ${caseId}`,
+      source: 'SQLite',
+      userAuth: !!userAccessToken,
+      timestamp: new Date().toISOString(),
+      duration: `${duration}ms`,
+    });
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    logger.error({
+      type: 'api_error',
+      method: 'DELETE',
+      endpoint: '/api/cases/:caseId',
+      error: error.message,
+      duration,
+    });
+
+    res.status(500).json({
+      success: false,
+      message: `Failed to delete case: ${sanitizeErrorForClient(error)}`,
+      timestamp: new Date().toISOString(),
+      duration: `${duration}ms`,
+    });
+  }
+});
+
+/**
+ * GET /api/documents
+ * List all available PDF and HTML documents from scrapers
+ */
+app.get('/api/documents', (req, res) => {
+  try {
+    const scrapersDir = path.join(__dirname, '../scrapers/data/reports');
+    const files = [];
+
+    if (!fs.existsSync(scrapersDir)) {
+      return res.json({ files: [] });
+    }
+
+    function scanDirectory(dir, relativePath = '') {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        const relativeFilePath = path.join(relativePath, entry.name);
+
+        if (entry.isDirectory()) {
+          scanDirectory(fullPath, relativeFilePath);
+        } else if (entry.isFile()) {
+          const ext = entry.name.toLowerCase();
+          if (ext.endsWith('.pdf') || ext.endsWith('.html')) {
+            const stats = fs.statSync(fullPath);
+            const source = relativePath.split(path.sep)[0] || 'unknown';
+            const type = ext.endsWith('.pdf') ? 'pdf' : 'html';
+
+            files.push({
+              name: entry.name,
+              path: relativeFilePath.replace(/\\/g, '/'), // Normalize path separators
+              source: source,
+              type: type,
+              size: stats.size,
+              date: stats.mtime.toISOString(),
+            });
+          }
+        }
+      }
+    }
+
+    scanDirectory(scrapersDir);
+
+    res.json({
+      success: true,
+      files: files.sort((a, b) => b.date.localeCompare(a.date)),
+      count: files.length,
+    });
+  } catch (error) {
+    logger.error({
+      type: 'api_error',
+      method: 'GET',
+      endpoint: '/api/documents',
+      error: error.message,
+    });
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to list documents',
+      message: error.message,
+      files: [],
+    });
+  }
+});
+
+/**
+ * GET /api/documents/:path
+ * Serve a PDF or HTML document by path
+ */
+app.get('/api/documents/:path(*)', (req, res) => {
+  try {
+    const requestedPath = req.params.path;
+    
+    // Security: Prevent directory traversal
+    if (requestedPath.includes('..') || (requestedPath.includes('/') && requestedPath.startsWith('/'))) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid path',
+      });
+    }
+
+    const scrapersDir = path.join(__dirname, '../scrapers/data/reports');
+    const filePath = path.join(scrapersDir, requestedPath);
+
+    // Ensure the file is within the scrapers directory
+    if (!filePath.startsWith(scrapersDir)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied',
+      });
+    }
+
+    // Check if file exists
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        success: false,
+        error: 'File not found',
+      });
+    }
+
+    const ext = filePath.toLowerCase();
+    const isPDF = ext.endsWith('.pdf');
+    const isHTML = ext.endsWith('.html');
+
+    if (!isPDF && !isHTML) {
+      return res.status(400).json({
+        success: false,
+        error: 'File must be PDF or HTML',
+      });
+    }
+
+    if (isPDF) {
+      // Set headers for PDF
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="${path.basename(filePath)}"`);
+    } else {
+      // Set headers for HTML
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Content-Disposition', `inline; filename="${path.basename(filePath)}"`);
+    }
+
+    // Stream the file
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+
+    fileStream.on('error', (error) => {
+      logger.error({
+        type: 'api_error',
+        method: 'GET',
+        endpoint: '/api/documents/:path',
+        error: error.message,
+      });
+
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to read file',
+        });
+      }
+    });
+  } catch (error) {
+    logger.error({
+      type: 'api_error',
+      method: 'GET',
+      endpoint: '/api/documents/:path',
+      error: error.message,
+    });
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to serve document',
+      message: error.message,
+    });
+  }
 });
 
 /**

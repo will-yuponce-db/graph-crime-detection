@@ -1,272 +1,330 @@
-# Databricks Graph Visualization
+# Crime Network Analysis Platform
 
-A modern graph visualization application built with React, Vite, TypeScript, and Material-UI. Connects to Databricks SQL Warehouse to visualize property graph data stored in tabular format.
+A powerful graph visualization and analysis platform designed for law enforcement and intelligence agencies to map, analyze, and understand criminal networks, terrorist organizations, and transnational threats.
 
-## 🚀 Features
+## 🎯 Mission
 
-- ⚡ **Vite** - Lightning-fast HMR and optimized builds
-- ⚛️ **React 18** - Latest React with TypeScript
-- 🎨 **Material-UI (MUI)** - Beautiful, accessible components
-- 🌓 **Dark Mode** - Seamless light/dark theme switching
-- 📱 **Responsive** - Mobile-first design with drawer navigation
-- 🧭 **React Router** - Client-side routing
-- 💅 **Emotion** - Powerful CSS-in-JS styling
-- 📦 **TypeScript** - Type-safe code for better DX
-- 🔗 **Databricks Integration** - Direct connection to Databricks SQL Warehouse
-- 📊 **Interactive Graph Visualization** - Powered by react-force-graph-2d
+Built specifically for the Intelligence Community and law enforcement agencies, this platform enables analysts to visualize complex criminal relationships, track financial flows, identify key actors, and discover hidden connections across multi-jurisdictional investigations.
 
-## 📂 Project Structure
+## 🔐 Key Features for Intelligence Analysis
+
+### Core Capabilities
+- **Interactive Network Mapping** - Visualize suspects, organizations, locations, and assets in an interactive graph
+- **Relationship Analysis** - Track associations, communications, financial transfers, and organizational hierarchies
+- **Change Tracking** - Distinguish between confirmed intelligence and newly discovered connections
+- **Multi-Source Integration** - Combine HUMINT, SIGINT, FININT, and open-source intelligence
+- **Temporal Analysis** - Track network evolution and investigate activities over time
+- **Data Classification** - Built-in support for classification markings (SECRET, CONFIDENTIAL, etc.)
+
+### Advanced Features
+- **Entity Types** - Suspects, Organizations, Locations, Financial Accounts, Communication Devices, Events, Assets
+- **Relationship Types** - Member Of, Associates With, Communicated With, Transferred Funds To, Controls, Leads, Attended, Owns
+- **Property-Rich Entities** - Attach detailed intelligence metadata to any node or edge
+- **Search & Filter** - Quickly locate entities by name, type, alias, or property values
+- **Case Management** - Save proposed intelligence additions before committing to knowledge base
+- **Evidence Tracking** - Document intelligence sources for each relationship
+
+## 🏗️ Architecture
 
 ```
-src/
-├── components/          # Reusable components
-│   ├── Layout.tsx      # Main layout with AppBar and Drawer
-│   └── ThemeToggle.tsx # Dark/light mode toggle button
-├── contexts/           # React contexts
-│   └── ThemeContext.tsx # Theme provider with mode switching
-├── pages/              # Page components
-│   ├── Home.tsx        # Landing page with hero section
-│   ├── Dashboard.tsx   # Dashboard with stats and charts
-│   ├── Forms.tsx       # Form examples with various inputs
-│   └── About.tsx       # About page with project info
-├── theme/              # Theme configuration
-│   └── theme.ts        # Light/dark theme definitions
-├── App.tsx             # Root component with routing
-└── main.tsx            # Application entry point
+Frontend (React/TypeScript)
+    ↓
+Backend API (Express/Node.js)
+    ↓
+Data Layer (Databricks SQL Warehouse + SQLite)
 ```
 
-## 🛠️ Getting Started
+**Key Technologies:**
+- React 19 with TypeScript for type-safe development
+- Material-UI (MUI) for professional, accessible interface
+- react-force-graph-2d for high-performance graph visualization
+- Databricks for enterprise-scale data storage and analytics
+- SQLite for local development and air-gapped deployments
+
+## 🚀 Quick Start
 
 ### Prerequisites
 
 - Node.js 16+ and npm
-- Databricks SQL Warehouse with access credentials
-- Service Principal with permissions to query the graph table
+- (Optional) Databricks SQL Warehouse for production deployment
+- Security clearance appropriate for classified data handling
 
-### Installation
+### Demo Mode (No Setup Required)
 
-1. Install dependencies:
+The platform works immediately with realistic mock data representing an international organized crime investigation:
 
 ```bash
+# Install dependencies
 npm install
+
+# Start the application
+npm run dev
 ```
 
-2. Configure environment variables (optional):
+Open [http://localhost:5173](http://localhost:5173) to access the platform.
 
-**For Demo Mode (Default):** The application works out-of-the-box with mock data. No configuration needed!
+### Production Deployment
 
-**For Databricks Connection:** The Databricks SQL driver requires a Node.js backend. See the `backend/` directory for setup instructions.
+For production use with Databricks integration:
 
-To enable backend mode, create a `.env` file in the frontend root directory:
-
-```env
-VITE_USE_BACKEND_API=true
-VITE_API_URL=http://localhost:3000/api
-```
-
-Then set up and run the backend server (see `backend/README.md`):
-
+1. **Set up backend:**
 ```bash
 cd backend
 npm install
 cp env.example .env
 # Edit .env with your Databricks credentials
-npm start
 ```
 
-**Architecture:**
-
-```
-Frontend (React/Vite) → Backend (Express/Node.js) → Databricks SQL Warehouse
-```
-
-**Fallback Behavior:** If the backend is not available, the application automatically uses mock data. This ensures the demo works seamlessly!
-
-3. Start the development server:
-
+2. **Configure environment variables:**
 ```bash
+# backend/.env
+DATABRICKS_SERVER_HOSTNAME=your-workspace.cloud.databricks.com
+DATABRICKS_HTTP_PATH=/sql/1.0/warehouses/...
+DATABRICKS_CLIENT_ID=your-oauth-client-id
+DATABRICKS_CLIENT_SECRET=your-oauth-client-secret
+DATABRICKS_TABLE_NAME=main.intelligence.crime_network_entities
+```
+
+3. **Enable backend connection:**
+```bash
+# Create .env in project root
+echo "VITE_USE_BACKEND_API=true" > .env
+echo "VITE_API_URL=http://localhost:3000/api" >> .env
+```
+
+4. **Start services:**
+```bash
+# Terminal 1: Start backend
+cd backend && npm start
+
+# Terminal 2: Start frontend
 npm run dev
 ```
 
-4. Open your browser to [http://localhost:5173](http://localhost:5173)
+## 📊 Data Model
 
-### Build for Production
+### Entity Types
 
+**Suspects** - Individuals under investigation
+- Name, alias, nationality, date of birth
+- Role in organization, threat level
+- Last known location, classification level
+
+**Organizations** - Criminal enterprises, terrorist cells, cartels
+- Name, type, origin country
+- Estimated membership, annual revenue
+- Primary activities, operational areas
+
+**Locations** - Safe houses, meeting points, operational sites
+- Address, coordinates, location type
+- Surveillance status, first observed date
+
+**Financial Accounts** - Bank accounts, cryptocurrency wallets
+- Account number (redacted), bank/institution
+- Estimated balance, account type
+- Opened date, current status
+
+**Communication Devices** - Phones, encrypted apps, messaging platforms
+- Device ID, device type, encryption level
+- First detected, last activity date
+
+**Events** - Meetings, transactions, crimes, shipments
+- Event type, date, location
+- Participants, amount (if financial)
+- Intelligence source
+
+**Assets** - Vehicles, aircraft, real estate, weapons
+- Asset type, registration, estimated value
+- Owner (registered/beneficial), location
+
+### Relationship Types
+
+- **MEMBER_OF** - Organizational membership and affiliation
+- **ASSOCIATES_WITH** - Known criminal associations
+- **COMMUNICATED_WITH** - Phone calls, messages, meetings
+- **TRANSFERRED_FUNDS_TO** - Financial transactions and flows
+- **LOCATED_AT** - Physical presence at locations
+- **CONTROLS** - Control or ownership of accounts, assets, organizations
+- **ATTENDED** - Participation in events
+- **LEADS** - Leadership roles within organizations
+- **OWNS** - Asset ownership
+- **REPORTED_BY** - Intelligence reporting relationship
+
+### Properties
+
+All entities and relationships support custom properties for:
+- Intelligence source attribution (HUMINT, SIGINT, FININT, etc.)
+- Confidence levels (High, Medium, Low)
+- Classification markings
+- Dates (first contact, since, observed, etc.)
+- Custom metadata specific to investigation
+
+## 🔍 Use Cases
+
+### Organized Crime Investigations
+- Map cartel structures and distribution networks
+- Track money laundering operations across jurisdictions
+- Identify high-value targets and key facilitators
+
+### Terrorism and Counterintelligence
+- Map terrorist cell structures and support networks
+- Track recruitment patterns and radicalization
+- Identify foreign intelligence service operatives
+
+### Financial Crime
+- Visualize complex money laundering schemes
+- Track cryptocurrency flows and mixers
+- Identify shell companies and beneficial owners
+
+### Transnational Threats
+- Map relationships across international borders
+- Track human trafficking and smuggling networks
+- Identify logistics coordinators and transport routes
+
+## 🔒 Security Considerations
+
+### Data Classification
+- Built-in classification level tracking (UNCLASSIFIED, CONFIDENTIAL, SECRET, TOP SECRET)
+- Support for compartmented information (SCI)
+- Proper handling of intelligence sources and methods
+
+### Access Control (Future Enhancement)
+- Role-based access control (RBAC)
+- Need-to-know enforcement
+- Audit logging of all data access
+
+### Deployment Modes
+- **Air-Gapped**: SQLite backend for classified networks
+- **Cloud**: Databricks for unclassified to SECRET data
+- **Hybrid**: Separate instances per classification level
+
+### Compliance
+- CJIS Security Policy compliance
+- NIST 800-53 controls
+- FedRAMP considerations
+- Criminal Justice Information Services (CJIS) standards
+
+## 🛠️ Development
+
+### Project Structure
+```
+crime-graph/
+├── src/
+│   ├── components/       # Reusable UI components
+│   ├── pages/           # Main application pages
+│   ├── services/        # API integration layer
+│   ├── data/            # Mock data for demo mode
+│   ├── types/           # TypeScript type definitions
+│   ├── theme/           # MUI theme configuration
+│   └── hooks/           # Custom React hooks
+├── backend/
+│   ├── db/              # Database management
+│   ├── server.js        # Express API server
+│   └── utils/           # Backend utilities
+└── public/              # Static assets
+```
+
+### Running Tests
 ```bash
-npm run build
+npm run lint          # Code quality checks
+npm run format        # Auto-format code
+npm run build         # Production build
+npm run preview       # Preview production build
 ```
 
-The optimized production build will be in the `dist/` directory.
+### Code Quality
+- ESLint for code quality
+- Prettier for consistent formatting
+- TypeScript for type safety
+- Pre-commit hooks via Husky
 
-### Preview Production Build
+## 📈 Scalability
 
-```bash
-npm run preview
-```
+The platform is designed to handle:
+- **Nodes**: Millions of entities (suspects, organizations, etc.)
+- **Edges**: Tens of millions of relationships
+- **Properties**: Unlimited custom metadata per entity
+- **Concurrent Users**: Hundreds of analysts (with proper backend scaling)
 
-## 📄 Available Pages
+Databricks SQL Warehouse provides:
+- Horizontal scalability for large datasets
+- Fast query performance on massive graphs
+- Integration with data lakes and lakehouses
+- Advanced analytics and ML capabilities
 
-- **Home (`/`)** - Landing page with hero section and feature cards
-- **Graph Visualization (`/graph`)** - Interactive graph visualization connected to Databricks
-- **Dashboard (`/dashboard`)** - Example dashboard with statistics, charts, and data displays
-- **Forms (`/forms`)** - Comprehensive form examples with various MUI input components
-- **About (`/about`)** - Project information and technology stack
+## 🤝 Integration Opportunities
 
-## 📊 Databricks Table Schema
+### Data Sources
+- Case management systems (IBM i2, Palantir)
+- Financial intelligence systems
+- SIGINT databases
+- Open-source intelligence platforms
+- Law enforcement databases (NCIC, III, etc.)
 
-The application expects a table with the following schema for property graph data:
+### Export Formats
+- Intelligence reports (PDF, Word)
+- Network diagrams (PNG, SVG)
+- Data exports (JSON, CSV)
+- Graph databases (Neo4j, TigerGraph)
 
-```sql
-CREATE TABLE main.default.property_graph_entity_edges (
-  node_start_id STRING,
-  node_start_key STRING,
-  relationship STRING,
-  node_end_id STRING,
-  node_end_key STRING,
-  node_start_properties STRING,  -- JSON string
-  node_end_properties STRING     -- JSON string
-);
-```
+## 🎓 Training & Support
 
-### Data Format
+### Getting Started
+1. Review the demo scenario (international organized crime network)
+2. Experiment with search, filtering, and graph controls
+3. Create test nodes and relationships
+4. Explore entity properties and intelligence metadata
 
-Each row represents an edge (relationship) in the graph:
+### Best Practices
+- Document intelligence sources for all relationships
+- Use confidence levels to indicate reliability
+- Apply proper classification markings
+- Regular case reviews and data quality checks
 
-- **node_start_id** - Unique identifier for the source node
-- **node_start_key** - Display label for the source node
-- **relationship** - Type of relationship (e.g., "WORKS_AT", "MANAGES")
-- **node_end_id** - Unique identifier for the target node
-- **node_end_key** - Display label for the target node
-- **node_start_properties** - JSON string containing source node properties (including `type`, `label`, etc.)
-- **node_end_properties** - JSON string containing target node properties
+## 🔮 Roadmap
 
-Example row:
+### Phase 1 (Current)
+- ✅ Interactive graph visualization
+- ✅ Entity and relationship management
+- ✅ Change tracking and approval workflow
+- ✅ Databricks integration
 
-```json
-{
-  "node_start_id": "person_001",
-  "node_start_key": "John Doe",
-  "relationship": "WORKS_AT",
-  "node_end_id": "company_001",
-  "node_end_key": "Acme Corp",
-  "node_start_properties": "{\"type\": \"Person\", \"age\": 30}",
-  "node_end_properties": "{\"type\": \"Company\", \"industry\": \"Technology\"}"
-}
-```
+### Phase 2 (Planned)
+- Advanced analytics (centrality metrics, community detection)
+- Timeline visualization and temporal queries
+- Multi-case support and case comparison
+- Enhanced search with fuzzy matching
 
-## 🎯 Graph Visualization Features
+### Phase 3 (Future)
+- Machine learning for link prediction
+- Automated entity resolution and deduplication
+- Real-time alerts for new connections
+- Mobile application for field operations
 
-- **Interactive Exploration** - Click, drag, and zoom to explore the graph
-- **Node Filtering** - Filter by node types (Person, Company, Product, etc.)
-- **Relationship Filtering** - Show/hide specific relationship types
-- **Change Tracking** - Distinguish between existing and proposed changes
-- **Write Back to Databricks** - Save approved changes back to the table
-- **Real-time Refresh** - Reload data from Databricks with the refresh button
-- **Automatic Fallback** - Uses mock data when Databricks is unavailable (perfect for demos!)
-- **Responsive Design** - Works on desktop and mobile devices
-- **Dark/Light Mode** - Automatic theme switching
+## 🏛️ Target Agencies
 
-## 🔄 Data Source Modes
+This platform is designed for:
+- **ODNI** - Office of the Director of National Intelligence
+- **FBI** - Federal Bureau of Investigation
+- **DEA** - Drug Enforcement Administration
+- **DHS** - Department of Homeland Security
+- **NSA** - National Security Agency (network analysis)
+- **CIA** - Central Intelligence Agency
+- **State/Local Law Enforcement** - Major crimes units
+- **International Partners** - Five Eyes and allied agencies
 
-The application intelligently handles different data source scenarios:
+## 📄 License
 
-### 1. Demo Mode (Default)
-
-- **When:** `VITE_USE_BACKEND_API` is not set or `false`
-- **Behavior:** Uses realistic mock data
-- **Best for:** Development, demonstrations, testing UI changes
-- **Setup:** None required - works out of the box!
-
-### 2. Backend Connected Mode
-
-- **When:** `VITE_USE_BACKEND_API=true` and backend server is running
-- **Behavior:** Fetches live data from Databricks via backend API
-- **Best for:** Production use, real data visualization
-- **Setup:** Requires backend server (see `backend/README.md`)
-
-### 3. Fallback Mode
-
-- **When:** Backend mode enabled but connection fails
-- **Behavior:** Automatically falls back to mock data
-- **Best for:** Resilient demos, handling connectivity issues
-
-## 🎨 Customization
-
-### Theme
-
-Edit `src/theme/theme.ts` to customize colors, typography, and component styles:
-
-```typescript
-// Customize primary color
-primary: {
-  main: '#1976d2',  // Your brand color
-  light: '#42a5f5',
-  dark: '#1565c0',
-}
-```
-
-### Navigation
-
-Modify the menu items in `src/components/Layout.tsx`:
-
-```typescript
-const menuItems = [
-  { text: 'Home', icon: <HomeIcon />, path: '/' },
-  // Add your custom routes here
-];
-```
-
-### Adding New Pages
-
-1. Create a new component in `src/pages/`
-2. Add the route in `src/App.tsx`
-3. Add navigation item in `src/components/Layout.tsx`
-
-## 📦 Dependencies
-
-### Core
-
-- react: ^18.3.1
-- react-dom: ^18.3.1
-- react-router-dom: ^7.0.2
-- typescript: ^5.6.2
-- vite: ^6.0.5
-
-### UI & Styling
-
-- @mui/material: ^6.3.1
-- @mui/icons-material: ^6.3.1
-- @emotion/react: ^11.14.0
-- @emotion/styled: ^11.14.0
-
-## 🤝 Contributing
-
-This is a boilerplate template - feel free to customize it for your needs!
-
-## 📝 License
-
-MIT - Use this boilerplate however you'd like!
-
-## 🛠️ Code Quality
-
-This project includes automated code quality tools:
-
-- **ESLint** - Linting for TypeScript and React
-- **Prettier** - Code formatting
-- **Husky** - Pre-commit hooks
-- **lint-staged** - Run linters on staged files only
-
-All code is automatically linted and formatted before each commit. See [DEVELOPMENT.md](DEVELOPMENT.md) for more details.
-
-## 🎯 Next Steps
-
-- Add your business logic
-- Integrate with your backend API
-- Add state management (Redux, Zustand, etc.)
-- Set up testing (Vitest, React Testing Library)
-- Add more pages and features
-- Customize the theme to match your brand
+MIT License - Use and modify as needed for your agency's requirements.
 
 ---
 
-Built with ❤️ using React, Vite, and Material-UI
+## 🚨 Disclaimer
+
+This is a demonstration platform. For operational use in classified environments, additional security hardening, accreditation, and compliance verification is required. Consult your agency's IT security team before deploying with classified data.
+
+**For Official Use Only** - Demonstration purposes with mock data only.
+
+---
+
+Built with advanced graph analytics for the Intelligence Community and Law Enforcement professionals.

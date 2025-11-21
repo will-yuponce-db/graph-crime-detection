@@ -78,6 +78,16 @@ export const fetchGraphData = async (
     }
     const response = await fetch(url);
 
+    // Check if response is JSON
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      const text = await response.text();
+      if (text.trim().startsWith('<!')) {
+        throw new Error('Backend server not running or returned HTML. Make sure the backend is running with: npm run dev');
+      }
+      throw new Error(`Expected JSON but got ${contentType}`);
+    }
+
     if (!response.ok) {
       throw new Error(`Backend API returned ${response.status}: ${response.statusText}`);
     }

@@ -1,99 +1,126 @@
-# Backend API Server for Databricks Integration
+# Crime Graph Backend API
 
-This Express.js server provides a REST API for the React frontend to connect to Databricks SQL Warehouse.
+Backend service for the Crime Network Analysis Platform, providing data persistence and Databricks SQL Warehouse integration for law enforcement and intelligence agencies.
 
-## Why a Backend Server?
+## Features
 
-The `@databricks/sql` package is a Node.js library that:
+- **Databricks Integration**: Connect to Databricks SQL Warehouse for enterprise-scale crime network data
+- **SQLite Fallback**: Local database for air-gapped deployments and development
+- **RESTful API**: Simple HTTP endpoints for graph data operations
+- **Auto-seeding**: Automatically populates demo crime network data
+- **CORS Enabled**: Supports frontend development on different ports
 
-- Cannot run in the browser (requires Node.js native modules)
-- Needs server-side environment for security (credentials should never be in frontend code)
-- Requires proper connection pooling and error handling
+## Getting Started
 
-## Setup
+### Prerequisites
 
-### 1. Install Dependencies
+- Node.js 16+ and npm
+- (Optional) Databricks workspace with SQL Warehouse access
+
+### Installation
 
 ```bash
-cd backend
 npm install
 ```
 
-### 2. Configure Environment Variables
+### Configuration
 
-Copy `env.example` to `.env`:
+Create a `.env` file:
 
 ```bash
 cp env.example .env
 ```
 
-Edit `.env` with your actual Databricks credentials:
+Edit `.env` with your configuration:
 
 ```env
+# Server Configuration
 PORT=3000
 
-DATABRICKS_HOST=e2-demo-field-eng.cloud.databricks.com
-DATABRICKS_HTTP_PATH=/sql/1.0/warehouses/862f1d757f0424f7
-DATABRICKS_TABLE=main.default.property_graph_entity_edges
+# Databricks SQL Warehouse (Optional - for production)
+DATABRICKS_SERVER_HOSTNAME=your-workspace.cloud.databricks.com
+DATABRICKS_HTTP_PATH=/sql/1.0/warehouses/your-warehouse-id
+DATABRICKS_CLIENT_ID=your-oauth-client-id
+DATABRICKS_CLIENT_SECRET=your-oauth-client-secret
 
-DATABRICKS_CLIENT_ID=your-actual-client-id
-DATABRICKS_CLIENT_SECRET=your-actual-client-secret
+# Table Configuration
+DATABRICKS_TABLE_NAME=main.intelligence.crime_network_entities
+
+# SQLite (Always used as fallback)
+SQLITE_DB_PATH=./db/graph.db
 ```
 
-### 3. Start the Server
-
-**Development mode (with auto-reload):**
-
-```bash
-npm run dev
-```
-
-**Production mode:**
+### Start the Server
 
 ```bash
 npm start
 ```
 
-The server will start on http://localhost:3000
+The API will be available at `http://localhost:3000`
+
+### Development Mode
+
+For auto-restart on file changes:
+
+```bash
+npm run dev
+```
 
 ## API Endpoints
 
-### GET /api/graph
+### GET `/api/graph`
 
-Fetch all graph data from Databricks.
+Fetch all crime network entities (nodes and edges)
+
+**Query Parameters:**
+- `table` (optional): Databricks table name to query
 
 **Response:**
-
 ```json
 {
   "nodes": [
     {
-      "id": "person_001",
-      "label": "John Doe",
-      "type": "Person",
-      "properties": { "age": 30 },
-      "status": "existing"
+      "id": "suspect_001",
+      "label": "Miguel Sandoval",
+      "type": "Suspect",
+      "status": "existing",
+      "properties": {
+        "name": "Miguel Sandoval",
+        "alias": "El Lobo",
+        "role": "Cartel Leader",
+        "threat_level": "Critical",
+        "classification": "SECRET",
+        "image_url": "https://..."
+      }
     }
   ],
   "edges": [
     {
-      "id": "edge_0_person_001_company_001",
-      "source": "person_001",
-      "target": "company_001",
-      "relationshipType": "WORKS_AT",
-      "properties": {},
-      "status": "existing"
+      "id": "edge_001",
+      "source": "suspect_001",
+      "target": "org_001",
+      "relationshipType": "LEADS",
+      "status": "existing",
+      "properties": {
+        "since": "2015-01-01",
+        "confidence": "High",
+        "source": "HUMINT"
+      }
     }
-  ]
+  ],
+  "metadata": {
+    "source": "sqlite|databricks",
+    "databricksEnabled": true|false,
+    "databricksError": null|"error message"
+  }
 }
 ```
 
-### POST /api/graph
+### POST `/api/graph`
 
-Write new nodes and edges to Databricks.
+Write crime network entities to database
 
 **Request Body:**
-
 ```json
 {
   "nodes": [...],
@@ -102,184 +129,245 @@ Write new nodes and edges to Databricks.
 ```
 
 **Response:**
-
 ```json
 {
   "success": true,
-  "message": "Successfully wrote 2 nodes and 3 edges to graph table",
-  "jobId": "job_1234567890_abc123",
-  "writtenNodes": 2,
-  "writtenEdges": 3
-}
-```
-
-### GET /api/job/:jobId
-
-Check the status of a write job.
-
-**Response:**
-
-```json
-{
-  "jobId": "job_1234567890_abc123",
-  "status": "SUCCESS",
-  "message": "Write operation completed successfully"
-}
-```
-
-### GET /health
-
-Health check endpoint.
-
-**Response:**
-
-```json
-{
-  "status": "ok",
-  "databricks": {
-    "configured": true,
-    "host": "e2-demo-field-eng.cloud.databricks.com",
-    "table": "main.default.property_graph_entity_edges"
+  "message": "Successfully wrote X nodes and Y edges",
+  "writtenNodes": X,
+  "writtenEdges": Y,
+  "metadata": {
+    "source": "sqlite|databricks",
+    "databricksEnabled": true|false
   }
 }
 ```
 
-## Connecting the Frontend
+### DELETE `/api/graph/nodes/:nodeId`
 
-To use this backend with your React frontend:
+Delete a suspect, organization, location, or other entity
 
-1. Make sure the backend server is running on port 3000
-
-2. In the frontend project root, create or update `.env`:
-
-   ```env
-   VITE_USE_BACKEND_API=true
-   VITE_API_URL=http://localhost:3000/api
-   ```
-
-3. Restart your frontend dev server:
-
-   ```bash
-   npm run dev
-   ```
-
-4. Navigate to the Graph Visualization page - it will now fetch data from the backend!
-
-## Architecture
-
-```
-React Frontend (Browser)
-        ↓ HTTP Requests
-Express Backend (Node.js)
-        ↓ @databricks/sql
-Databricks SQL Warehouse
-        ↓ Query
-property_graph_entity_edges table
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Node deleted successfully"
+}
 ```
 
-## Security Best Practices
+### DELETE `/api/graph/edges/:edgeId`
 
-✅ **DO:**
+Delete a relationship between entities
 
-- Keep `.env` file out of version control (already in .gitignore)
-- Use environment variables for all credentials
-- Add authentication/authorization for production
-- Use HTTPS in production
-- Implement rate limiting
-- Add request validation
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Edge deleted successfully"
+}
+```
 
-❌ **DON'T:**
+## Database Schema
 
-- Commit credentials to git
-- Expose credentials in frontend code
-- Allow unauthenticated access in production
-- Skip input validation
+### Databricks Table
 
-## Production Deployment
+The platform expects a denormalized edge table format:
 
-For production, consider:
+```sql
+CREATE TABLE IF NOT EXISTS main.intelligence.crime_network_entities (
+  node_start_id STRING,
+  node_start_key STRING,
+  relationship STRING,
+  node_end_id STRING,
+  node_end_key STRING,
+  node_start_properties STRING,  -- JSON
+  node_end_properties STRING     -- JSON
+);
+```
 
-1. **Deploy to a cloud service:**
-   - AWS (ECS, Lambda)
-   - Azure (App Service)
-   - Google Cloud (Cloud Run)
-   - Heroku
-   - Railway
+### SQLite Schema
 
-2. **Set environment variables** in your deployment platform
+The local SQLite database mirrors this structure:
 
-3. **Enable CORS properly:**
+```sql
+CREATE TABLE IF NOT EXISTS property_graph_entity_edges (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  node_start_id TEXT NOT NULL,
+  node_start_key TEXT NOT NULL,
+  relationship TEXT NOT NULL,
+  node_end_id TEXT NOT NULL,
+  node_end_key TEXT NOT NULL,
+  node_start_properties TEXT,
+  node_end_properties TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
 
-   ```javascript
-   app.use(
-     cors({
-       origin: 'https://your-frontend-domain.com',
-     })
-   );
-   ```
+## Data Management
 
-4. **Add authentication:**
-   - API keys
-   - OAuth 2.0
-   - JWT tokens
-
-5. **Monitor and log:**
-   - Request logs
-   - Error tracking (Sentry)
-   - Performance monitoring
-
-## Troubleshooting
-
-### "Module not found: @databricks/sql"
-
-**Solution:** Run `npm install` in the backend directory
-
-### "Connection refused" from frontend
-
-**Checks:**
-
-1. Is the backend server running?
-2. Is it running on port 3000?
-3. Check CORS configuration
-4. Verify VITE_API_URL in frontend .env
-
-### "Failed to connect to Databricks"
-
-**Checks:**
-
-1. Are credentials correct in backend/.env?
-2. Is the SQL warehouse running?
-3. Does the service principal have permissions?
-4. Is the network accessible?
-
-### "Cannot find table"
-
-**Solution:** Verify DATABRICKS_TABLE environment variable matches your actual table name
-
-## Development Tips
-
-**Test the health endpoint:**
+### Seeding Demo Data
 
 ```bash
-curl http://localhost:3000/health
+npm run seed
 ```
 
-**Test fetching graph data:**
+This populates the database with a realistic international organized crime network including:
+- 8 Suspects (high-value targets with photos)
+- 4 Criminal Organizations
+- 5 Locations (safe houses, warehouses, operational sites)
+- 4 Financial Accounts
+- 3 Communication Devices
+- 3 Events (meetings, transactions, shipments)
+- 3 Assets (yacht, aircraft, real estate)
+- 35+ Relationships
+
+### Resetting Database
+
+```bash
+npm run reseed
+```
+
+Clears and repopulates the database.
+
+## Security Considerations
+
+### For Classified Environments
+
+1. **Air-Gapped Deployment**
+   - Disable Databricks integration
+   - Use SQLite only
+   - Deploy on classified network
+
+2. **Access Control**
+   - Add authentication middleware
+   - Implement role-based access control (RBAC)
+   - Log all data access
+
+3. **Data Classification**
+   - Ensure proper handling of SECRET/TS data
+   - Use separate instances per classification level
+   - Implement compartmented access (SCI)
+
+4. **Audit Logging**
+   - Log all create/update/delete operations
+   - Track user access patterns
+   - Retain logs per agency requirements
+
+### Production Hardening
+
+```javascript
+// Example: Add authentication middleware
+app.use('/api', authenticateUser);
+app.use('/api', authorizeRole(['analyst', 'admin']));
+app.use('/api', auditLog);
+```
+
+## Deployment Options
+
+### Option 1: Air-Gapped (Classified Networks)
+
+- Use SQLite backend only
+- Deploy on SIPR/JWICS
+- No external dependencies
+
+### Option 2: Cloud (UNCLASS to SECRET)
+
+- Connect to Databricks SQL Warehouse
+- Deploy on AWS GovCloud/Azure Government
+- FedRAMP compliance considerations
+
+### Option 3: Hybrid
+
+- SQLite for local/field operations
+- Databricks for centralized analysis
+- Sync mechanisms between instances
+
+## Monitoring
+
+### Health Check
 
 ```bash
 curl http://localhost:3000/api/graph
 ```
 
-**View server logs:**
-The server logs all requests and Databricks operations to the console.
+### Logs
 
-## Files
+Server logs include:
+- API requests and responses
+- Database connection status
+- Databricks availability
+- Error traces
 
-- `server.js` - Main Express server with all API endpoints
-- `package.json` - Node.js dependencies and scripts
-- `env.example` - Environment variable template
-- `README.md` - This file
+## Troubleshooting
+
+### Databricks Connection Issues
+
+If Databricks is unavailable, the system automatically falls back to SQLite:
+
+```
+⚠️  Databricks Error: Connection timeout
+📊 Using SQLite fallback database
+```
+
+### Database Locked
+
+SQLite may lock during concurrent writes:
+
+```bash
+# Stop all connections
+npm run seed
+```
+
+### Missing Dependencies
+
+```bash
+rm -rf node_modules package-lock.json
+npm install
+```
+
+## Development
+
+### Project Structure
+
+```
+backend/
+├── db/
+│   ├── database.js      # Database initialization
+│   ├── seed.js          # Demo data seeding
+│   ├── schema.sql       # SQLite schema
+│   └── graph.db         # SQLite database file
+├── utils/
+│   └── logger.js        # Logging utility
+├── server.js            # Express server
+└── package.json
+```
+
+### Adding New Entity Types
+
+1. Update `seed.js` with new entity data
+2. Ensure properties include classification markings
+3. Add relationships to connect new entities
+4. Reseed database
+
+### Extending the API
+
+```javascript
+// Add new endpoint in server.js
+app.get('/api/analysis/centrality', async (req, res) => {
+  // Implement network analysis
+});
+```
+
+## Performance
+
+- **SQLite**: Handles 100K+ entities efficiently
+- **Databricks**: Scales to millions of entities
+- **API Response**: < 100ms for typical queries
+- **Bulk Writes**: Batched inserts for performance
+
+## License
+
+MIT License
 
 ---
 
-**Need help?** Check the main project's `DATABRICKS_INTEGRATION.md` for more details.
+**Security Notice**: This backend service handles sensitive law enforcement and intelligence data. Ensure proper access controls, encryption, and compliance with agency security policies before deploying in production.
