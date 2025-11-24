@@ -2,6 +2,9 @@
 
 A powerful graph visualization and analysis platform designed for law enforcement and intelligence agencies to map, analyze, and understand criminal networks, terrorist organizations, and transnational threats.
 
+<img width="1714" height="818" alt="Screenshot 2025-11-24 at 11 08 58 AM" src="https://github.com/user-attachments/assets/2aa96a8f-02d8-4e64-b9fd-04c210688d23" />
+
+
 ## 🎯 Mission
 
 Built specifically for the Intelligence Community and law enforcement agencies, this platform enables analysts to visualize complex criminal relationships, track financial flows, identify key actors, and discover hidden connections across multi-jurisdictional investigations.
