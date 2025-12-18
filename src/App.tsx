@@ -7,16 +7,23 @@ import { ThemeContextProvider } from './contexts/ThemeContext';
 import { store, persistor } from './store';
 import ErrorBoundary from './components/ErrorBoundary';
 import Layout from './components/Layout';
-import Dashboard from './pages/Dashboard';
-import Cases from './pages/Cases';
-import GraphVisualization from './pages/GraphVisualization';
-// import ActivityMap from './pages/ActivityMap'; // Timeline and Map temporarily hidden
-import Documents from './pages/Documents';
-import CaseInitializer from './components/CaseInitializer';
+
+// Demo Pages
+import HeatmapDashboard from './pages/HeatmapDashboard';
+import GraphExplorer from './pages/GraphExplorer';
+import EvidenceCard from './pages/EvidenceCard';
 
 const LoadingScreen = () => (
-  <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
-    <CircularProgress />
+  <Box
+    sx={{
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      minHeight: '100vh',
+      bgcolor: '#0a0a0a',
+    }}
+  >
+    <CircularProgress sx={{ color: '#ff9800' }} />
   </Box>
 );
 
@@ -26,16 +33,12 @@ const App: React.FC = () => {
       <Provider store={store}>
         <PersistGate loading={<LoadingScreen />} persistor={persistor}>
           <ThemeContextProvider>
-            <CaseInitializer />
             <Routes>
               <Route path="/" element={<Layout />}>
-                <Route index element={<Dashboard />} />
-                <Route path="cases" element={<Cases />} />
-                <Route path="graph" element={<GraphVisualization />} />
-                {/* Timeline and Map temporarily hidden */}
-                {/* <Route path="timeline" element={<ActivityMap viewMode="timeline" />} /> */}
-                {/* <Route path="map" element={<ActivityMap viewMode="map" />} /> */}
-                <Route path="documents" element={<Documents />} />
+                <Route index element={<HeatmapDashboard />} />
+                <Route path="heatmap" element={<HeatmapDashboard />} />
+                <Route path="graph-explorer" element={<GraphExplorer />} />
+                <Route path="evidence-card" element={<EvidenceCard />} />
               </Route>
             </Routes>
           </ThemeContextProvider>

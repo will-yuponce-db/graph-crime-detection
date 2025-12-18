@@ -39,6 +39,7 @@ const {
 } = require('./db/database');
 
 const { seedDatabase } = require('./db/seed');
+const investigativeData = require('./db/investigativeData.json');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1711,6 +1712,762 @@ app.get('/api/documents/:path(*)', (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to serve document',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/investigative/cells
+ * Get device counts per H3 cell for a specific time bucket
+ */
+app.get('/api/investigative/cells', (req, res) => {
+  const { time_bucket, city } = req.query;
+
+  try {
+    let events = investigativeData.location_events;
+
+    // Filter by time bucket if provided
+    if (time_bucket) {
+      events = events.filter((e) => e.time_bucket === time_bucket);
+    }
+
+    // Filter by city if provided
+    if (city) {
+      events = events.filter((e) => e.city === city);
+    }
+
+    // Group by H3 cell and count devices
+    const cellCounts = {};
+    events.forEach((event) => {
+      if (!cellCounts[event.h3_cell]) {
+        cellCounts[event.h3_cell] = {
+          h3_cell: event.h3_cell,
+          device_count: 0,
+          devices: new Set(),
+          city: event.city,
+          state: event.state,
+          neighborhood: event.neighborhood || 'Unknown',
+          latitude: event.latitude,
+          longitude: event.longitude,
+          incident_id: event.incident_id,
+        };
+      }
+      cellCounts[event.h3_cell].devices.add(event.entity_id);
+    });
+
+    // Convert to array and add device count
+    const cells = Object.values(cellCounts).map((cell) => ({
+      ...cell,
+      device_count: cell.devices.size,
+      devices: Array.from(cell.devices),
+    }));
+
+    res.json({
+      success: true,
+      cells: cells.sort((a, b) => b.device_count - a.device_count),
+      total_cells: cells.length,
+      filters: { time_bucket, city },
+    });
+  } catch (error) {
+    logger.error({
+      type: 'api_error',
+      method: 'GET',
+      endpoint: '/api/investigative/cells',
+      error: error.message,
+    });
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch cell data',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/investigative/entities-in-cell
+ * Get all entities (devices) in a specific H3 cell at a specific time
+ */
+app.get('/api/investigative/entities-in-cell', (req, res) => {
+  const { h3_cell, time_bucket } = req.query;
+
+  if (!h3_cell || !time_bucket) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing required parameters: h3_cell and time_bucket',
+    });
+  }
+
+  try {
+    const events = investigativeData.location_events.filter(
+      (e) => e.h3_cell === h3_cell && e.time_bucket === time_bucket
+    );
+
+    // Get unique entities
+    const entityIds = [...new Set(events.map((e) => e.entity_id))];
+
+    // Enrich with profile data
+    const entities = entityIds.map((entityId) => {
+      const profile = investigativeData.entity_profiles.find((p) => p.entity_id === entityId);
+      const event = events.find((e) => e.entity_id === entityId);
+
+      return {
+        entity_id: entityId,
+        entity_type: event.entity_type,
+        latitude: event.latitude,
+        longitude: event.longitude,
+        case_id: event.case_id,
+        profile: profile || null,
+      };
+    });
+
+    res.json({
+      success: true,
+      h3_cell,
+      time_bucket,
+      entity_count: entities.length,
+      entities,
+    });
+  } catch (error) {
+    logger.error({
+      type: 'api_error',
+      method: 'GET',
+      endpoint: '/api/investigative/entities-in-cell',
+      error: error.message,
+    });
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch entities',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/investigative/co-presence
+ * Get co-presence edges for entities, optionally filtered by case type
+ */
+app.get('/api/investigative/co-presence', (req, res) => {
+  const { entity_ids, case_filter } = req.query;
+
+  try {
+    let edges = investigativeData.co_presence_edges;
+
+    // Filter by entities if provided
+    if (entity_ids) {
+      const entityList = Array.isArray(entity_ids) ? entity_ids : entity_ids.split(',');
+      edges = edges.filter(
+        (edge) => entityList.includes(edge.entity1) || entityList.includes(edge.entity2)
+      );
+    }
+
+    // Filter by case type if provided
+    if (case_filter === 'burglary_only') {
+      edges = edges.filter((edge) =>
+        edge.case_ids.some((caseId) => caseId.includes('CASE_DC') || caseId.includes('CASE_TN'))
+      );
+    }
+
+    res.json({
+      success: true,
+      edges,
+      edge_count: edges.length,
+    });
+  } catch (error) {
+    logger.error({
+      type: 'api_error',
+      method: 'GET',
+      endpoint: '/api/investigative/co-presence',
+      error: error.message,
+    });
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch co-presence data',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/investigative/rank-entities
+ * Rank entities for a specific case based on co-presence patterns
+ */
+app.post('/api/investigative/rank-entities', (req, res) => {
+  const { case_id, entity_ids } = req.body;
+
+  if (!case_id || !entity_ids || !Array.isArray(entity_ids)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing required parameters: case_id and entity_ids (array)',
+    });
+  }
+
+  try {
+    // Get all co-presence edges for these entities
+    const edges = investigativeData.co_presence_edges.filter(
+      (edge) =>
+        (entity_ids.includes(edge.entity1) || entity_ids.includes(edge.entity2)) &&
+        edge.case_ids.some((cid) => cid.includes('CASE_DC') || cid.includes('CASE_TN'))
+    );
+
+    // Score each entity
+    const entityScores = {};
+    entity_ids.forEach((entityId) => {
+      const relevantEdges = edges.filter((e) => e.entity1 === entityId || e.entity2 === entityId);
+
+      // Calculate score based on:
+      // - Number of co-presence relationships
+      // - Weight of those relationships
+      // - Cross-case overlap
+      const score = relevantEdges.reduce((sum, edge) => {
+        const crossCaseBonus = edge.case_ids.length > 1 ? 2 : 1;
+        return sum + edge.weight * crossCaseBonus;
+      }, 0);
+
+      entityScores[entityId] = {
+        entity_id: entityId,
+        score,
+        edge_count: relevantEdges.length,
+        cross_case_count: relevantEdges.filter((e) => e.case_ids.length > 1).length,
+      };
+    });
+
+    // Sort by score and return top entities
+    const rankedEntities = Object.values(entityScores)
+      .sort((a, b) => b.score - a.score)
+      .map((entity, index) => ({
+        ...entity,
+        rank: index + 1,
+        profile: investigativeData.entity_profiles.find((p) => p.entity_id === entity.entity_id),
+      }));
+
+    res.json({
+      success: true,
+      case_id,
+      ranked_entities: rankedEntities,
+      top_suspects: rankedEntities.slice(0, 2),
+    });
+  } catch (error) {
+    logger.error({
+      type: 'api_error',
+      method: 'POST',
+      endpoint: '/api/investigative/rank-entities',
+      error: error.message,
+    });
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to rank entities',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/investigative/handoff-candidates
+ * Get potential burner phone handoff detections
+ */
+app.get('/api/investigative/handoff-candidates', (req, res) => {
+  try {
+    const candidates = investigativeData.handoff_candidates;
+
+    res.json({
+      success: true,
+      candidates,
+      top_candidate: candidates.find((c) => c.confidence === 'High'),
+    });
+  } catch (error) {
+    logger.error({
+      type: 'api_error',
+      method: 'GET',
+      endpoint: '/api/investigative/handoff-candidates',
+      error: error.message,
+    });
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch handoff candidates',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * POST /api/investigative/evidence-card
+ * Generate an evidence card for suspects and cases
+ */
+app.post('/api/investigative/evidence-card', (req, res) => {
+  const { entity_ids, case_ids } = req.body;
+
+  if (!entity_ids || !Array.isArray(entity_ids) || entity_ids.length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing required parameter: entity_ids (array)',
+    });
+  }
+
+  try {
+    // Get entity profiles
+    const entities = entity_ids
+      .map((id) => investigativeData.entity_profiles.find((p) => p.entity_id === id))
+      .filter(Boolean);
+
+    // Get cases
+    const cases = investigativeData.cases.filter((c) =>
+      case_ids ? case_ids.includes(c.id) : true
+    );
+
+    // Get co-presence evidence
+    const coPresenceEdges = investigativeData.co_presence_edges.filter(
+      (edge) => entity_ids.includes(edge.entity1) || entity_ids.includes(edge.entity2)
+    );
+
+    // Get social links
+    const socialLinks = investigativeData.social_links.filter(
+      (link) => entity_ids.includes(link.entity1) || entity_ids.includes(link.entity2)
+    );
+
+    // Build evidence card
+    const evidenceCard = {
+      title: 'Cross-Jurisdictional Burglary Crew Evidence',
+      generated_at: new Date().toISOString(),
+      entities: entities.map((e) => ({
+        id: e.entity_id,
+        name: e.owner_name,
+        alias: e.owner_alias,
+        image: e.image_url,
+      })),
+      linked_cases: cases.map((c) => ({
+        id: c.id,
+        case_number: c.case_number,
+        title: c.title,
+        city: c.city,
+        state: c.state,
+      })),
+      signals: {
+        geospatial: [
+          {
+            claim: `Suspects co-located at ${coPresenceEdges.length} different crime scenes across DC and Nashville`,
+            support: coPresenceEdges.map((e) => ({
+              type: 'co_presence_edge',
+              id: e.id,
+              cities: e.cities,
+              occurrences: e.occurrences,
+            })),
+            confidence: 'High',
+          },
+          {
+            claim: 'Both suspects present at DC burglary on December 1, 2024 at 10:30 PM',
+            support: [
+              {
+                type: 'location_event',
+                h3_cell: investigativeData.config.dc_incident.h3_cell,
+                time: investigativeData.config.dc_incident.time_bucket,
+              },
+            ],
+            confidence: 'High',
+          },
+          {
+            claim: 'Both suspects present at Nashville burglary on November 24, 2024',
+            support: [{ type: 'case', case_id: 'CASE_TN_007' }],
+            confidence: 'High',
+          },
+        ],
+        narrative: [
+          {
+            claim:
+              'Consistent method of operation: "Rear window smash" entry across all linked cases',
+            support: cases
+              .filter((c) => c.method_of_entry === 'Rear window smash')
+              .map((c) => ({
+                type: 'case',
+                case_id: c.id,
+                case_number: c.case_number,
+                excerpt: c.method_of_entry,
+              })),
+            confidence: 'High',
+          },
+          {
+            claim: 'Jewelry targeted in all burglaries, indicating specialized crew',
+            support: cases
+              .filter((c) => c.stolen_items?.includes('Jewelry'))
+              .map((c) => ({
+                type: 'case',
+                case_id: c.id,
+                stolen_items: c.stolen_items,
+              })),
+            confidence: 'High',
+          },
+        ],
+        social: socialLinks.map((link) => ({
+          claim: `${link.entity1} and ${link.entity2}: ${link.relationship_type}`,
+          support: [
+            {
+              type: 'social_link',
+              id: link.id,
+              source: link.source,
+              since: link.since,
+              notes: link.notes,
+            },
+          ],
+          confidence: link.confidence,
+        })),
+      },
+      summary: `Intelligence analysis reveals a coordinated burglary crew operating across DC and Nashville. The two primary suspects (${entities.map((e) => e.owner_name).join(' and ')}) have been co-located at multiple burglary scenes, demonstrating a consistent modus operandi of rear window entry and jewelry theft. Social network analysis confirms they are known associates with prior joint criminal history. Geospatial evidence places both suspects at the December 1, 2024 DC incident and the November 24, 2024 Nashville incident. This represents a traveling crew with cross-jurisdictional coordination.`,
+      recommended_action:
+        'Coordinate with Nashville PD for joint investigation. Issue warrants for both suspects. Surveillance on known associate Victor Martinez (fence) in Baltimore.',
+    };
+
+    res.json({
+      success: true,
+      evidence_card: evidenceCard,
+    });
+  } catch (error) {
+    logger.error({
+      type: 'api_error',
+      method: 'POST',
+      endpoint: '/api/investigative/evidence-card',
+      error: error.message,
+    });
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate evidence card',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/investigative/config
+ * Get demo configuration for frontend
+ */
+app.get('/api/investigative/config', (req, res) => {
+  try {
+    res.json({
+      success: true,
+      config: investigativeData.config,
+      cases: investigativeData.cases,
+      cell_metadata: investigativeData.cell_metadata,
+    });
+  } catch (error) {
+    logger.error({
+      type: 'api_error',
+      method: 'GET',
+      endpoint: '/api/investigative/config',
+      error: error.message,
+    });
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch config',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/investigative/time-buckets
+ * Get all available time buckets for filtering
+ */
+app.get('/api/investigative/time-buckets', (req, res) => {
+  try {
+    res.json({
+      success: true,
+      time_buckets: investigativeData.time_buckets || [],
+      cases: investigativeData.cases || [],
+    });
+  } catch (error) {
+    logger.error({
+      type: 'api_error',
+      method: 'GET',
+      endpoint: '/api/investigative/time-buckets',
+      error: error.message,
+    });
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch time buckets',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/investigative/cases
+ * Get all pre-created cases (key frames)
+ */
+app.get('/api/investigative/cases', (req, res) => {
+  try {
+    res.json({
+      success: true,
+      cases: investigativeData.cases || [],
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/investigative/devices-at-time
+ * Get all device positions at a specific timestamp
+ */
+app.get('/api/investigative/devices-at-time', (req, res) => {
+  const { timestamp } = req.query;
+
+  try {
+    const events = (investigativeData.device_timeline || []).filter(
+      (e) => e.timestamp === timestamp
+    );
+
+    // Get unique devices with their positions
+    const deviceMap = new Map();
+    events.forEach((e) => {
+      deviceMap.set(e.device_id, {
+        device_id: e.device_id,
+        latitude: e.latitude,
+        longitude: e.longitude,
+        location_id: e.location_id,
+        city: e.city,
+        neighborhood: e.neighborhood,
+        is_suspect: e.is_suspect,
+        case_id: e.case_id,
+        activity_level: e.activity_level,
+      });
+    });
+
+    // Enrich with profile data
+    const devices = Array.from(deviceMap.values()).map((d) => {
+      const profile = (investigativeData.entity_profiles || []).find(
+        (p) => p.entity_id === d.device_id
+      );
+      return {
+        ...d,
+        owner_name: profile?.owner_name || null,
+        owner_alias: profile?.owner_alias || null,
+        threat_level: profile?.threat_level || 'Unknown',
+        display_name:
+          profile?.owner_alias || profile?.owner_name?.split(' ')[0] || d.device_id.split('_')[1],
+      };
+    });
+
+    res.json({
+      success: true,
+      timestamp,
+      device_count: devices.length,
+      suspect_count: devices.filter((d) => d.is_suspect).length,
+      devices: devices.sort((a, b) => (b.is_suspect ? 1 : 0) - (a.is_suspect ? 1 : 0)),
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/investigative/hotspots-at-time
+ * Get location hotspots at a specific timestamp
+ */
+app.get('/api/investigative/hotspots-at-time', (req, res) => {
+  const { timestamp } = req.query;
+
+  try {
+    const summaries = (investigativeData.location_summaries || []).filter(
+      (s) => s.timestamp === timestamp
+    );
+
+    // Find the related case if this is a key frame
+    const bucket = (investigativeData.time_buckets || []).find((b) => b.time_bucket === timestamp);
+
+    res.json({
+      success: true,
+      timestamp,
+      is_key_frame: bucket?.is_key_frame || false,
+      case_id: bucket?.case_id || null,
+      hotspots: summaries.map((s) => ({
+        location_id: s.location_id,
+        latitude: s.latitude,
+        longitude: s.longitude,
+        city: s.city,
+        state: s.state,
+        neighborhood: s.neighborhood,
+        device_count: s.device_count,
+        suspect_count: s.suspect_count,
+        case_id: s.case_id,
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/investigative/accumulated-cells
+ * Get all cells that have had activity up to and including a given time
+ */
+app.get('/api/investigative/accumulated-cells', (req, res) => {
+  const { up_to_time } = req.query;
+
+  try {
+    let events = investigativeData.location_events;
+
+    // Filter events up to the given time
+    if (up_to_time) {
+      const cutoffTime = new Date(up_to_time).getTime();
+      events = events.filter((e) => new Date(e.time_bucket).getTime() <= cutoffTime);
+    }
+
+    // Group by H3 cell
+    const cellMap = new Map();
+    events.forEach((event) => {
+      const key = event.h3_cell;
+      if (!cellMap.has(key)) {
+        cellMap.set(key, {
+          h3_cell: event.h3_cell,
+          devices: new Set(),
+          city: event.city,
+          state: event.state,
+          neighborhood: event.neighborhood || 'Unknown',
+          latitude: event.latitude,
+          longitude: event.longitude,
+          time_buckets: new Set(),
+          incident_ids: new Set(),
+        });
+      }
+      const cell = cellMap.get(key);
+      cell.devices.add(event.entity_id);
+      cell.time_buckets.add(event.time_bucket);
+      if (event.incident_id) cell.incident_ids.add(event.incident_id);
+    });
+
+    // Convert to array
+    const cells = Array.from(cellMap.values()).map((cell) => ({
+      h3_cell: cell.h3_cell,
+      device_count: cell.devices.size,
+      devices: Array.from(cell.devices),
+      city: cell.city,
+      state: cell.state,
+      neighborhood: cell.neighborhood,
+      latitude: cell.latitude,
+      longitude: cell.longitude,
+      time_buckets: Array.from(cell.time_buckets).sort(),
+      incident_count: cell.incident_ids.size,
+      latest_activity: Array.from(cell.time_buckets).sort().pop(),
+    }));
+
+    res.json({
+      success: true,
+      cells: cells.sort((a, b) => b.device_count - a.device_count),
+      total_cells: cells.length,
+      up_to_time,
+    });
+  } catch (error) {
+    logger.error({
+      type: 'api_error',
+      method: 'GET',
+      endpoint: '/api/investigative/accumulated-cells',
+      error: error.message,
+    });
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch accumulated cells',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/investigative/devices-near-incident
+ * Get individual device locations around a crime scene with person data
+ */
+app.get('/api/investigative/devices-near-incident', (req, res) => {
+  const { h3_cell, time_bucket, incident_id } = req.query;
+
+  try {
+    // Get events for the specific cell and time (or incident)
+    let events = investigativeData.location_events;
+
+    if (incident_id) {
+      events = events.filter((e) => e.incident_id === incident_id);
+    } else if (h3_cell && time_bucket) {
+      events = events.filter((e) => e.h3_cell === h3_cell && e.time_bucket === time_bucket);
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'Must provide either incident_id or both h3_cell and time_bucket',
+      });
+    }
+
+    // Build device list with person data
+    const devices = events.map((event) => {
+      const profile = investigativeData.entity_profiles.find(
+        (p) => p.entity_id === event.entity_id
+      );
+
+      // Add slight position jitter to avoid overlap
+      const jitter = () => (Math.random() - 0.5) * 0.003;
+
+      return {
+        device_id: event.entity_id,
+        latitude: event.latitude + jitter(),
+        longitude: event.longitude + jitter(),
+        timestamp: event.time_bucket,
+        city: event.city,
+        neighborhood: event.neighborhood,
+        // Person/profile data
+        owner_name: profile?.owner_name || null,
+        owner_alias: profile?.owner_alias || null,
+        threat_level: profile?.threat_level || 'Unknown',
+        device_type: profile?.device_type || 'smartphone',
+        criminal_history: profile?.criminal_history || null,
+        age: profile?.age || null,
+        is_suspect: profile?.threat_level === 'High',
+        // Display helpers
+        display_name: profile?.owner_alias
+          ? `"${profile.owner_alias}"`
+          : profile?.owner_name
+            ? profile.owner_name.split(' ')[0]
+            : event.entity_id.split('_')[1],
+      };
+    });
+
+    // Get incident details if available
+    const incident = investigativeData.incidents?.find((i) => i.id === incident_id);
+
+    // Calculate center point
+    const centerLat = devices.reduce((sum, d) => sum + d.latitude, 0) / devices.length;
+    const centerLon = devices.reduce((sum, d) => sum + d.longitude, 0) / devices.length;
+
+    res.json({
+      success: true,
+      incident: incident || null,
+      center: {
+        latitude: centerLat,
+        longitude: centerLon,
+      },
+      device_count: devices.length,
+      suspect_count: devices.filter((d) => d.is_suspect).length,
+      devices: devices.sort((a, b) => {
+        // Suspects first
+        if (a.is_suspect && !b.is_suspect) return -1;
+        if (!a.is_suspect && b.is_suspect) return 1;
+        return 0;
+      }),
+    });
+  } catch (error) {
+    logger.error({
+      type: 'api_error',
+      method: 'GET',
+      endpoint: '/api/investigative/devices-near-incident',
+      error: error.message,
+    });
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch devices',
       message: error.message,
     });
   }
