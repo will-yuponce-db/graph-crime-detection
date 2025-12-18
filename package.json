@@ -16,9 +16,9 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "preview": "vite preview",
-    "start": "node backend/db/seed.js && concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "start": "npm install --prefix backend && node backend/db/seed.js && concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
     "start:prod": "npm run build:clean && npm install --prefix backend && node backend/db/seed.js && NODE_ENV=production node backend/server.js",
-    "seed": "node backend/db/seed.js"
+    "seed": "npm install --prefix backend && node backend/db/seed.js"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [
