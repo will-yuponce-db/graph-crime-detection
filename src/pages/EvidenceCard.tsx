@@ -28,6 +28,7 @@ import {
   Gavel,
   Search,
   TrendingUp,
+  ArrowForward,
 } from '@mui/icons-material';
 
 type CaseStatus = 'investigating' | 'review' | 'adjudicated';
