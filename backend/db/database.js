@@ -1,6 +1,6 @@
 /**
- * SQLite Database Manager
- * Provides connection and query helpers for the graph database
+ * SQLite Database Manager for Cross-Jurisdictional Investigative Analytics Demo
+ * Provides connection and query helpers for all demo data
  */
 
 const Database = require('better-sqlite3');
@@ -14,13 +14,8 @@ const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
  * Initialize database connection
  */
 function initDatabase() {
-  const db = new Database(DB_PATH, {
-    verbose: console.log,
-  });
-
-  // Enable foreign keys
+  const db = new Database(DB_PATH);
   db.pragma('foreign_keys = ON');
-
   return db;
 }
 
@@ -34,453 +29,455 @@ function createTables(db) {
 }
 
 /**
- * Get all nodes from database
- */
-function getAllNodes(db) {
-  const stmt = db.prepare('SELECT * FROM nodes ORDER BY created_at');
-  const rows = stmt.all();
-
-  return rows.map((row) => ({
-    id: row.id,
-    label: row.label,
-    type: row.type,
-    status: row.status,
-    properties: JSON.parse(row.properties),
-  }));
-}
-
-/**
- * Get all edges from database
- */
-function getAllEdges(db) {
-  const stmt = db.prepare('SELECT * FROM edges ORDER BY created_at');
-  const rows = stmt.all();
-
-  return rows.map((row) => ({
-    id: row.id,
-    source: row.source,
-    target: row.target,
-    relationshipType: row.relationship_type,
-    status: row.status,
-    properties: JSON.parse(row.properties),
-  }));
-}
-
-/**
- * Insert a single node
- */
-function insertNode(db, node) {
-  const stmt = db.prepare(`
-    INSERT INTO nodes (id, label, type, status, properties)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-
-  stmt.run(node.id, node.label, node.type, node.status, JSON.stringify(node.properties));
-}
-
-/**
- * Insert a single edge
- */
-function insertEdge(db, edge) {
-  const stmt = db.prepare(`
-    INSERT INTO edges (id, source, target, relationship_type, status, properties)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
-
-  stmt.run(
-    edge.id,
-    edge.source,
-    edge.target,
-    edge.relationshipType,
-    edge.status,
-    JSON.stringify(edge.properties)
-  );
-}
-
-/**
- * Insert multiple nodes (transaction)
- */
-function insertNodes(db, nodes) {
-  const insert = db.transaction((nodes) => {
-    for (const node of nodes) {
-      insertNode(db, node);
-    }
-  });
-
-  insert(nodes);
-  console.log(`✓ Inserted ${nodes.length} nodes`);
-}
-
-/**
- * Insert multiple edges (transaction)
- */
-function insertEdges(db, edges) {
-  const insert = db.transaction((edges) => {
-    for (const edge of edges) {
-      insertEdge(db, edge);
-    }
-  });
-
-  insert(edges);
-  console.log(`✓ Inserted ${edges.length} edges`);
-}
-
-/**
- * Update node status
- */
-function updateNodeStatus(db, nodeId, status) {
-  const stmt = db.prepare(`
-    UPDATE nodes 
-    SET status = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `);
-
-  stmt.run(status, nodeId);
-}
-
-/**
- * Update edge status
- */
-function updateEdgeStatus(db, edgeId, status) {
-  const stmt = db.prepare(`
-    UPDATE edges 
-    SET status = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `);
-
-  stmt.run(edgeId, status);
-}
-
-/**
- * Update multiple nodes status (transaction)
- */
-function updateNodesStatus(db, nodeIds, status) {
-  const update = db.transaction((nodeIds, status) => {
-    for (const nodeId of nodeIds) {
-      updateNodeStatus(db, nodeId, status);
-    }
-  });
-
-  update(nodeIds, status);
-  console.log(`✓ Updated ${nodeIds.length} nodes to status: ${status}`);
-}
-
-/**
- * Update multiple edges status (transaction)
- */
-function updateEdgesStatus(db, edgeIds, status) {
-  const update = db.transaction((edgeIds, status) => {
-    for (const edgeId of edgeIds) {
-      updateEdgeStatus(db, edgeId, status);
-    }
-  });
-
-  update(edgeIds, status);
-  console.log(`✓ Updated ${edgeIds.length} edges to status: ${status}`);
-}
-
-/**
- * Get all cases from database
- */
-function getAllCases(db) {
-  const stmt = db.prepare('SELECT * FROM cases ORDER BY created_date DESC');
-  const rows = stmt.all();
-
-  return rows.map((row) => ({
-    id: row.id,
-    caseNumber: row.case_number,
-    name: row.name,
-    description: row.description,
-    status: row.status,
-    priority: row.priority,
-    classification: row.classification,
-    leadAgent: row.lead_agent,
-    assignedAgents: row.assigned_agents ? JSON.parse(row.assigned_agents) : [],
-    tags: row.tags ? JSON.parse(row.tags) : [],
-    notes: row.notes,
-    targetDate: row.target_date,
-    createdDate: row.created_date,
-    updatedDate: row.updated_date,
-    entityIds: getCaseEntityIds(db, row.id),
-    documents: getCaseDocuments(db, row.id),
-  }));
-}
-
-/**
- * Get a single case by ID
- */
-function getCaseById(db, caseId) {
-  const stmt = db.prepare('SELECT * FROM cases WHERE id = ?');
-  const row = stmt.get(caseId);
-
-  if (!row) return null;
-
-  return {
-    id: row.id,
-    caseNumber: row.case_number,
-    name: row.name,
-    description: row.description,
-    status: row.status,
-    priority: row.priority,
-    classification: row.classification,
-    leadAgent: row.lead_agent,
-    assignedAgents: row.assigned_agents ? JSON.parse(row.assigned_agents) : [],
-    tags: row.tags ? JSON.parse(row.tags) : [],
-    notes: row.notes,
-    targetDate: row.target_date,
-    createdDate: row.created_date,
-    updatedDate: row.updated_date,
-    entityIds: getCaseEntityIds(db, row.id),
-    documents: getCaseDocuments(db, row.id),
-  };
-}
-
-/**
- * Get entity IDs for a case
- */
-function getCaseEntityIds(db, caseId) {
-  const stmt = db.prepare('SELECT entity_id FROM case_entities WHERE case_id = ?');
-  const rows = stmt.all(caseId);
-  return rows.map(row => row.entity_id);
-}
-
-/**
- * Get documents for a case
- */
-function getCaseDocuments(db, caseId) {
-  const stmt = db.prepare('SELECT * FROM case_documents WHERE case_id = ?');
-  const rows = stmt.all(caseId);
-  return rows.map(row => ({
-    id: row.id,
-    sourceNodeId: row.source_node_id,
-    title: row.title,
-    type: row.type,
-    path: row.path,
-    date: row.date,
-    summary: row.summary,
-    tags: row.tags ? JSON.parse(row.tags) : [],
-  }));
-}
-
-/**
- * Insert a single case with entities and documents
- */
-function insertCase(db, caseData) {
-  const stmt = db.prepare(`
-    INSERT INTO cases (
-      id, case_number, name, description, status, priority, classification,
-      lead_agent, assigned_agents, tags, notes, target_date, created_date, updated_date
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  stmt.run(
-    caseData.id,
-    caseData.caseNumber,
-    caseData.name,
-    caseData.description || null,
-    caseData.status,
-    caseData.priority,
-    caseData.classification || null,
-    caseData.leadAgent || null,
-    JSON.stringify(caseData.assignedAgents || []),
-    JSON.stringify(caseData.tags || []),
-    caseData.notes || null,
-    caseData.targetDate || null,
-    caseData.createdDate || new Date().toISOString(),
-    caseData.updatedDate || new Date().toISOString()
-  );
-
-  // Insert entity associations
-  if (caseData.entityIds && caseData.entityIds.length > 0) {
-    const entityStmt = db.prepare('INSERT INTO case_entities (case_id, entity_id) VALUES (?, ?)');
-    const insertEntities = db.transaction((caseId, entityIds) => {
-      for (const entityId of entityIds) {
-        entityStmt.run(caseId, entityId);
-      }
-    });
-    insertEntities(caseData.id, caseData.entityIds);
-  }
-
-  // Insert documents
-  if (caseData.documents && caseData.documents.length > 0) {
-    const docStmt = db.prepare(`
-      INSERT INTO case_documents (id, case_id, source_node_id, title, type, path, date, summary, tags)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const insertDocs = db.transaction((caseId, documents) => {
-      for (const doc of documents) {
-        docStmt.run(
-          doc.id,
-          caseId,
-          doc.sourceNodeId || null,
-          doc.title,
-          doc.type,
-          doc.path || null,
-          doc.date || null,
-          doc.summary || null,
-          JSON.stringify(doc.tags || [])
-        );
-      }
-    });
-    insertDocs(caseData.id, caseData.documents);
-  }
-}
-
-/**
- * Insert multiple cases (transaction)
- */
-function insertCases(db, cases) {
-  const insert = db.transaction((cases) => {
-    for (const caseData of cases) {
-      insertCase(db, caseData);
-    }
-  });
-
-  insert(cases);
-  console.log(`✓ Inserted ${cases.length} cases`);
-}
-
-/**
- * Update a case
- */
-function updateCase(db, caseId, updates) {
-  const fields = [];
-  const values = [];
-
-  // Map frontend field names to database column names
-  const fieldMap = {
-    caseNumber: 'case_number',
-    leadAgent: 'lead_agent',
-    assignedAgents: 'assigned_agents',
-    targetDate: 'target_date',
-    createdDate: 'created_date',
-    updatedDate: 'updated_date',
-  };
-
-  for (const [key, value] of Object.entries(updates)) {
-    if (key === 'entityIds' || key === 'documents') continue; // Handle separately
-
-    const dbKey = fieldMap[key] || key;
-    fields.push(`${dbKey} = ?`);
-
-    // JSON fields
-    if (key === 'assignedAgents' || key === 'tags') {
-      values.push(JSON.stringify(value));
-    } else {
-      values.push(value);
-    }
-  }
-
-  // Always update updatedDate
-  if (!updates.updatedDate) {
-    fields.push('updated_date = ?');
-    values.push(new Date().toISOString());
-  }
-
-  if (fields.length > 0) {
-    const stmt = db.prepare(`UPDATE cases SET ${fields.join(', ')} WHERE id = ?`);
-    stmt.run(...values, caseId);
-  }
-
-  // Update entities if provided
-  if (updates.entityIds) {
-    db.prepare('DELETE FROM case_entities WHERE case_id = ?').run(caseId);
-    if (updates.entityIds.length > 0) {
-      const entityStmt = db.prepare('INSERT INTO case_entities (case_id, entity_id) VALUES (?, ?)');
-      const insertEntities = db.transaction((caseId, entityIds) => {
-        for (const entityId of entityIds) {
-          entityStmt.run(caseId, entityId);
-        }
-      });
-      insertEntities(caseId, updates.entityIds);
-    }
-  }
-
-  // Update documents if provided
-  if (updates.documents) {
-    db.prepare('DELETE FROM case_documents WHERE case_id = ?').run(caseId);
-    if (updates.documents.length > 0) {
-      const docStmt = db.prepare(`
-        INSERT INTO case_documents (id, case_id, source_node_id, title, type, path, date, summary, tags)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      const insertDocs = db.transaction((caseId, documents) => {
-        for (const doc of documents) {
-          docStmt.run(
-            doc.id,
-            caseId,
-            doc.sourceNodeId || null,
-            doc.title,
-            doc.type,
-            doc.path || null,
-            doc.date || null,
-            doc.summary || null,
-            JSON.stringify(doc.tags || [])
-          );
-        }
-      });
-      insertDocs(caseId, updates.documents);
-    }
-  }
-}
-
-/**
- * Delete a case
- */
-function deleteCase(db, caseId) {
-  // CASCADE will automatically delete case_entities and case_documents
-  const stmt = db.prepare('DELETE FROM cases WHERE id = ?');
-  const result = stmt.run(caseId);
-  return result.changes > 0;
-}
-
-/**
- * Clear all data from tables
- */
-function clearAllData(db) {
-  db.exec('DELETE FROM case_documents');
-  db.exec('DELETE FROM case_entities');
-  db.exec('DELETE FROM cases');
-  db.exec('DELETE FROM edges');
-  db.exec('DELETE FROM nodes');
-  console.log('✓ All data cleared');
-}
-
-/**
- * Check if database is empty
+ * Check if database is empty (no cell towers = needs seeding)
  */
 function isDatabaseEmpty(db) {
   try {
-    const nodeCount = db.prepare('SELECT COUNT(*) as count FROM nodes').get();
-    return nodeCount.count === 0;
-  } catch (error) {
-    // If table doesn't exist, database is empty
+    const count = db.prepare('SELECT COUNT(*) as count FROM cell_towers').get();
+    return count.count === 0;
+  } catch {
     return true;
   }
+}
+
+// ============== CELL TOWERS ==============
+
+function getAllCellTowers(db) {
+  return db.prepare('SELECT * FROM cell_towers ORDER BY city, name').all();
+}
+
+function insertCellTower(db, tower) {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO cell_towers (id, name, latitude, longitude, city, state)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(tower.id, tower.name, tower.latitude, tower.longitude, tower.city, tower.state || null);
+}
+
+function insertCellTowers(db, towers) {
+  const insert = db.transaction((towers) => {
+    for (const tower of towers) {
+      insertCellTower(db, tower);
+    }
+  });
+  insert(towers);
+  console.log(`✓ Inserted ${towers.length} cell towers`);
+}
+
+// ============== PERSONS ==============
+
+function getAllPersons(db) {
+  return db.prepare('SELECT * FROM persons ORDER BY is_suspect DESC, name').all();
+}
+
+function getPersonById(db, personId) {
+  return db.prepare('SELECT * FROM persons WHERE id = ?').get(personId);
+}
+
+function getSuspects(db) {
+  return db.prepare('SELECT * FROM persons WHERE is_suspect = 1').all();
+}
+
+function insertPerson(db, person) {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO persons (id, name, alias, is_suspect, threat_level, age, criminal_history, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(
+    person.id,
+    person.name,
+    person.alias || null,
+    person.is_suspect ? 1 : 0,
+    person.threat_level || 'Unknown',
+    person.age || null,
+    person.criminal_history || null,
+    person.notes || null
+  );
+}
+
+function insertPersons(db, persons) {
+  const insert = db.transaction((persons) => {
+    for (const person of persons) {
+      insertPerson(db, person);
+    }
+  });
+  insert(persons);
+  console.log(`✓ Inserted ${persons.length} persons`);
+}
+
+// ============== DEVICES ==============
+
+function getAllDevices(db) {
+  return db
+    .prepare(
+      `
+    SELECT d.*, p.name as owner_name, p.alias as owner_alias, p.is_suspect
+    FROM devices d
+    LEFT JOIN persons p ON d.owner_id = p.id
+    ORDER BY p.is_suspect DESC, d.name
+  `
+    )
+    .all();
+}
+
+function getDeviceById(db, deviceId) {
+  return db
+    .prepare(
+      `
+    SELECT d.*, p.name as owner_name, p.alias as owner_alias, p.is_suspect
+    FROM devices d
+    LEFT JOIN persons p ON d.owner_id = p.id
+    WHERE d.id = ?
+  `
+    )
+    .get(deviceId);
+}
+
+function insertDevice(db, device) {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO devices (id, name, device_type, owner_id, is_burner)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  stmt.run(
+    device.id,
+    device.name,
+    device.device_type || 'smartphone',
+    device.owner_id || null,
+    device.is_burner ? 1 : 0
+  );
+}
+
+function insertDevices(db, devices) {
+  const insert = db.transaction((devices) => {
+    for (const device of devices) {
+      insertDevice(db, device);
+    }
+  });
+  insert(devices);
+  console.log(`✓ Inserted ${devices.length} devices`);
+}
+
+// ============== DEVICE POSITIONS ==============
+
+function getDevicePositionsAtHour(db, hour) {
+  return db
+    .prepare(
+      `
+    SELECT dp.*, d.name as device_name, d.owner_id, 
+           p.name as owner_name, p.alias as owner_alias, p.is_suspect,
+           ct.name as tower_name, ct.city as tower_city
+    FROM device_positions dp
+    JOIN devices d ON dp.device_id = d.id
+    LEFT JOIN persons p ON d.owner_id = p.id
+    LEFT JOIN cell_towers ct ON dp.tower_id = ct.id
+    WHERE dp.hour = ?
+    ORDER BY p.is_suspect DESC
+  `
+    )
+    .all(hour);
+}
+
+function getDevicePositionHistory(db, deviceId) {
+  return db
+    .prepare(
+      `
+    SELECT dp.*, ct.name as tower_name, ct.city as tower_city
+    FROM device_positions dp
+    LEFT JOIN cell_towers ct ON dp.tower_id = ct.id
+    WHERE dp.device_id = ?
+    ORDER BY dp.hour
+  `
+    )
+    .all(deviceId);
+}
+
+function insertDevicePosition(db, position) {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO device_positions (device_id, hour, latitude, longitude, tower_id)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  stmt.run(
+    position.device_id,
+    position.hour,
+    position.latitude,
+    position.longitude,
+    position.tower_id || null
+  );
+}
+
+function insertDevicePositions(db, positions) {
+  const insert = db.transaction((positions) => {
+    for (const pos of positions) {
+      insertDevicePosition(db, pos);
+    }
+  });
+  insert(positions);
+  console.log(`✓ Inserted ${positions.length} device positions`);
+}
+
+// ============== DEMO CASES ==============
+
+function getAllDemoCases(db) {
+  const cases = db.prepare('SELECT * FROM demo_cases ORDER BY hour').all();
+  return cases.map((c) => ({
+    ...c,
+    persons: getCasePersons(db, c.id),
+    devices: getCaseDevices(db, c.id),
+  }));
+}
+
+function getDemoCaseById(db, caseId) {
+  const caseData = db.prepare('SELECT * FROM demo_cases WHERE id = ?').get(caseId);
+  if (!caseData) return null;
+  return {
+    ...caseData,
+    persons: getCasePersons(db, caseId),
+    devices: getCaseDevices(db, caseId),
+  };
+}
+
+function getDemoCaseByHour(db, hour) {
+  const cases = db.prepare('SELECT * FROM demo_cases WHERE hour = ?').all(hour);
+  return cases.map((c) => ({
+    ...c,
+    persons: getCasePersons(db, c.id),
+    devices: getCaseDevices(db, c.id),
+  }));
+}
+
+function getCasePersons(db, caseId) {
+  return db
+    .prepare(
+      `
+    SELECT p.*, cp.role
+    FROM case_persons cp
+    JOIN persons p ON cp.person_id = p.id
+    WHERE cp.case_id = ?
+  `
+    )
+    .all(caseId);
+}
+
+function getCaseDevices(db, caseId) {
+  return db
+    .prepare(
+      `
+    SELECT d.*, p.name as owner_name, p.alias as owner_alias
+    FROM case_devices cd
+    JOIN devices d ON cd.device_id = d.id
+    LEFT JOIN persons p ON d.owner_id = p.id
+    WHERE cd.case_id = ?
+  `
+    )
+    .all(caseId);
+}
+
+function insertDemoCase(db, caseData) {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO demo_cases (
+      id, case_number, title, description, city, state, neighborhood,
+      latitude, longitude, hour, status, priority, assigned_to,
+      estimated_loss, method_of_entry, stolen_items, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+  `);
+  stmt.run(
+    caseData.id,
+    caseData.case_number,
+    caseData.title,
+    caseData.description || null,
+    caseData.city,
+    caseData.state,
+    caseData.neighborhood,
+    caseData.latitude,
+    caseData.longitude,
+    caseData.hour,
+    caseData.status || 'investigating',
+    caseData.priority || 'Medium',
+    caseData.assigned_to || null,
+    caseData.estimated_loss || null,
+    caseData.method_of_entry || null,
+    caseData.stolen_items || null
+  );
+
+  // Link persons
+  if (caseData.person_ids) {
+    const personStmt = db.prepare(
+      'INSERT OR IGNORE INTO case_persons (case_id, person_id, role) VALUES (?, ?, ?)'
+    );
+    for (const personId of caseData.person_ids) {
+      personStmt.run(caseData.id, personId, 'suspect');
+    }
+  }
+
+  // Link devices
+  if (caseData.device_ids) {
+    const deviceStmt = db.prepare(
+      'INSERT OR IGNORE INTO case_devices (case_id, device_id) VALUES (?, ?)'
+    );
+    for (const deviceId of caseData.device_ids) {
+      deviceStmt.run(caseData.id, deviceId);
+    }
+  }
+}
+
+function insertDemoCases(db, cases) {
+  const insert = db.transaction((cases) => {
+    for (const c of cases) {
+      insertDemoCase(db, c);
+    }
+  });
+  insert(cases);
+  console.log(`✓ Inserted ${cases.length} demo cases`);
+}
+
+function updateDemoCaseStatus(db, caseId, status) {
+  const stmt = db.prepare(`
+    UPDATE demo_cases SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+  `);
+  stmt.run(status, caseId);
+}
+
+// ============== PERSON RELATIONSHIPS ==============
+
+function getAllRelationships(db) {
+  return db
+    .prepare(
+      `
+    SELECT pr.*, 
+           p1.name as person1_name, p1.alias as person1_alias,
+           p2.name as person2_name, p2.alias as person2_alias
+    FROM person_relationships pr
+    JOIN persons p1 ON pr.person1_id = p1.id
+    JOIN persons p2 ON pr.person2_id = p2.id
+    ORDER BY pr.count DESC
+  `
+    )
+    .all();
+}
+
+function getRelationshipsForPerson(db, personId) {
+  return db
+    .prepare(
+      `
+    SELECT pr.*, 
+           p1.name as person1_name, p1.alias as person1_alias,
+           p2.name as person2_name, p2.alias as person2_alias
+    FROM person_relationships pr
+    JOIN persons p1 ON pr.person1_id = p1.id
+    JOIN persons p2 ON pr.person2_id = p2.id
+    WHERE pr.person1_id = ? OR pr.person2_id = ?
+    ORDER BY pr.count DESC
+  `
+    )
+    .all(personId, personId);
+}
+
+function insertRelationship(db, rel) {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO person_relationships (person1_id, person2_id, relationship_type, count, cities, notes)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(
+    rel.person1_id,
+    rel.person2_id,
+    rel.relationship_type,
+    rel.count || 1,
+    rel.cities || null,
+    rel.notes || null
+  );
+}
+
+function insertRelationships(db, relationships) {
+  const insert = db.transaction((relationships) => {
+    for (const rel of relationships) {
+      insertRelationship(db, rel);
+    }
+  });
+  insert(relationships);
+  console.log(`✓ Inserted ${relationships.length} relationships`);
+}
+
+// ============== HOTSPOT QUERIES ==============
+
+function getHotspotsAtHour(db, hour) {
+  return db
+    .prepare(
+      `
+    SELECT 
+      ct.id as tower_id,
+      ct.name as tower_name,
+      ct.latitude,
+      ct.longitude,
+      ct.city,
+      COUNT(dp.device_id) as device_count,
+      SUM(CASE WHEN p.is_suspect = 1 THEN 1 ELSE 0 END) as suspect_count
+    FROM cell_towers ct
+    LEFT JOIN device_positions dp ON ct.id = dp.tower_id AND dp.hour = ?
+    LEFT JOIN devices d ON dp.device_id = d.id
+    LEFT JOIN persons p ON d.owner_id = p.id
+    GROUP BY ct.id
+    HAVING device_count > 0
+    ORDER BY suspect_count DESC, device_count DESC
+  `
+    )
+    .all(hour);
+}
+
+// ============== UTILITIES ==============
+
+function clearAllData(db) {
+  db.exec('DELETE FROM device_positions');
+  db.exec('DELETE FROM case_devices');
+  db.exec('DELETE FROM case_persons');
+  db.exec('DELETE FROM person_relationships');
+  db.exec('DELETE FROM demo_cases');
+  db.exec('DELETE FROM devices');
+  db.exec('DELETE FROM persons');
+  db.exec('DELETE FROM cell_towers');
+  console.log('✓ All demo data cleared');
 }
 
 module.exports = {
   initDatabase,
   createTables,
-  getAllNodes,
-  getAllEdges,
-  getAllCases,
-  getCaseById,
-  getCaseEntityIds,
-  getCaseDocuments,
-  insertNode,
-  insertEdge,
-  insertNodes,
-  insertEdges,
-  insertCase,
-  insertCases,
-  updateNodeStatus,
-  updateEdgeStatus,
-  updateNodesStatus,
-  updateEdgesStatus,
-  updateCase,
-  deleteCase,
-  clearAllData,
   isDatabaseEmpty,
+  // Cell Towers
+  getAllCellTowers,
+  insertCellTower,
+  insertCellTowers,
+  // Persons
+  getAllPersons,
+  getPersonById,
+  getSuspects,
+  insertPerson,
+  insertPersons,
+  // Devices
+  getAllDevices,
+  getDeviceById,
+  insertDevice,
+  insertDevices,
+  // Device Positions
+  getDevicePositionsAtHour,
+  getDevicePositionHistory,
+  insertDevicePosition,
+  insertDevicePositions,
+  // Demo Cases
+  getAllDemoCases,
+  getDemoCaseById,
+  getDemoCaseByHour,
+  getCasePersons,
+  getCaseDevices,
+  insertDemoCase,
+  insertDemoCases,
+  updateDemoCaseStatus,
+  // Relationships
+  getAllRelationships,
+  getRelationshipsForPerson,
+  insertRelationship,
+  insertRelationships,
+  // Hotspots
+  getHotspotsAtHour,
+  // Utilities
+  clearAllData,
   DB_PATH,
 };

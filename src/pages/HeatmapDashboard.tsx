@@ -18,6 +18,7 @@ import {
   MenuItem,
   ListItemIcon,
   ListItemText,
+  CircularProgress,
 } from '@mui/material';
 import {
   PlayArrow,
@@ -41,20 +42,35 @@ import 'leaflet/dist/leaflet.css';
 interface CellTower {
   id: string;
   name: string;
-  lat: number;
-  lng: number;
+  latitude: number;
+  longitude: number;
   city: string;
 }
 
-interface Device {
-  id: string;
-  name: string;
-  owner: string;
+interface DevicePosition {
+  deviceId: string;
+  deviceName: string;
+  lat: number;
+  lng: number;
+  towerId: string | null;
+  towerName: string | null;
+  ownerId: string | null;
+  ownerName: string | null;
+  ownerAlias: string | null;
   isSuspect: boolean;
-  positions: { [hour: number]: { lat: number; lng: number; towerId: string | null } };
 }
 
-interface CaseKeyFrame {
+interface Hotspot {
+  towerId: string;
+  towerName: string;
+  lat: number;
+  lng: number;
+  city: string;
+  deviceCount: number;
+  suspectCount: number;
+}
+
+interface KeyFrame {
   id: string;
   caseNumber: string;
   hour: number;
@@ -66,197 +82,30 @@ interface CaseKeyFrame {
   priority: 'low' | 'medium' | 'high' | 'critical';
 }
 
-// Cell Towers
-const CELL_TOWERS: CellTower[] = [
-  { id: 'tower_dc_georgetown', name: 'Georgetown', lat: 38.9076, lng: -77.0723, city: 'DC' },
-  { id: 'tower_dc_adams', name: 'Adams Morgan', lat: 38.9214, lng: -77.0425, city: 'DC' },
-  { id: 'tower_dc_dupont', name: 'Dupont Circle', lat: 38.9096, lng: -77.0434, city: 'DC' },
-  { id: 'tower_dc_capitol', name: 'Capitol Hill', lat: 38.8899, lng: -76.9905, city: 'DC' },
-  { id: 'tower_dc_navy', name: 'Navy Yard', lat: 38.8764, lng: -77.003, city: 'DC' },
-  { id: 'tower_nash_east', name: 'East Nashville', lat: 36.1866, lng: -86.745, city: 'Nashville' },
-  { id: 'tower_nash_gulch', name: 'The Gulch', lat: 36.1512, lng: -86.7893, city: 'Nashville' },
-  {
-    id: 'tower_balt_harbor',
-    name: 'Harbor District',
-    lat: 39.2804,
-    lng: -76.6081,
-    city: 'Baltimore',
-  },
-];
-
-type DevicePosition = { lat: number; lng: number; towerId: string | null };
-
-// Generate device movement
-const generateDevicePositions = (): Device[] => {
-  const devices: Device[] = [];
-
-  const suspectPath: DevicePosition[] = [
-    ...Array(10)
-      .fill(null)
-      .map(() => ({
-        lat: 38.9214 + (Math.random() - 0.5) * 0.01,
-        lng: -77.0425 + (Math.random() - 0.5) * 0.01,
-        towerId: 'tower_dc_adams',
-      })),
-    ...Array(10)
-      .fill(null)
-      .map(() => ({
-        lat: 38.9096 + (Math.random() - 0.5) * 0.01,
-        lng: -77.0434 + (Math.random() - 0.5) * 0.01,
-        towerId: 'tower_dc_dupont',
-      })),
-    ...Array(10)
-      .fill(null)
-      .map(() => ({
-        lat: 38.9076 + (Math.random() - 0.5) * 0.005,
-        lng: -77.0723 + (Math.random() - 0.5) * 0.005,
-        towerId: 'tower_dc_georgetown',
-      })),
-    ...Array(10)
-      .fill(null)
-      .map(() => ({
-        lat: 38.8764 + (Math.random() - 0.5) * 0.01,
-        lng: -77.003 + (Math.random() - 0.5) * 0.01,
-        towerId: 'tower_dc_navy',
-      })),
-    ...Array(15)
-      .fill(null)
-      .map(() => ({
-        lat: 36.1866 + (Math.random() - 0.5) * 0.02,
-        lng: -86.745 + (Math.random() - 0.5) * 0.02,
-        towerId: 'tower_nash_east',
-      })),
-    ...Array(17)
-      .fill(null)
-      .map(() => ({
-        lat: 36.1512 + (Math.random() - 0.5) * 0.01,
-        lng: -86.7893 + (Math.random() - 0.5) * 0.01,
-        towerId: 'tower_nash_gulch',
-      })),
-  ];
-
-  const marcusPositions: { [h: number]: DevicePosition } = {};
-  suspectPath.forEach((pos, i) => {
-    marcusPositions[i] = pos;
-  });
-  devices.push({
-    id: 'device_marcus',
-    name: 'iPhone (E0412)',
-    owner: 'Marcus "Ghost"',
-    isSuspect: true,
-    positions: marcusPositions,
-  });
-
-  const dariusPositions: { [h: number]: DevicePosition } = {};
-  suspectPath.forEach((pos, i) => {
-    dariusPositions[i] = {
-      lat: pos.lat + (Math.random() - 0.5) * 0.002,
-      lng: pos.lng + (Math.random() - 0.5) * 0.002,
-      towerId: pos.towerId,
-    };
-  });
-  devices.push({
-    id: 'device_darius',
-    name: 'Samsung (E1098)',
-    owner: 'Darius "Slim"',
-    isSuspect: true,
-    positions: dariusPositions,
-  });
-
-  const civilians = ['Alice Chen', 'Bob Martinez', 'Carol Smith', 'David Lee', 'Emma Wilson'];
-  civilians.forEach((name, idx) => {
-    const positions: { [h: number]: DevicePosition } = {};
-    const homeTower = CELL_TOWERS[idx % CELL_TOWERS.length];
-    for (let h = 0; h < 72; h++) {
-      const wander = Math.random() > 0.8;
-      const tower = wander ? CELL_TOWERS[Math.floor(Math.random() * 5)] : homeTower;
-      positions[h] = {
-        lat: tower.lat + (Math.random() - 0.5) * 0.015,
-        lng: tower.lng + (Math.random() - 0.5) * 0.015,
-        towerId: tower.id,
-      };
-    }
-    devices.push({
-      id: `device_${idx}`,
-      name: `Phone ${idx + 100}`,
-      owner: name,
-      isSuspect: false,
-      positions,
-    });
-  });
-
-  return devices;
-};
-
-// Key frames - cases tied to specific hours
-const KEY_FRAMES: CaseKeyFrame[] = [
-  {
-    id: 'CASE_001',
-    caseNumber: 'DC-2024-1105',
-    hour: 8,
-    lat: 38.9214,
-    lng: -77.0425,
-    neighborhood: 'Adams Morgan',
-    city: 'DC',
-    description: 'Early surveillance detected',
-    priority: 'medium',
-  },
-  {
-    id: 'CASE_002',
-    caseNumber: 'DC-2024-1107',
-    hour: 15,
-    lat: 38.9096,
-    lng: -77.0434,
-    neighborhood: 'Dupont Circle',
-    city: 'DC',
-    description: 'Pattern confirmed',
-    priority: 'medium',
-  },
-  {
-    id: 'CASE_008',
-    caseNumber: 'DC-2024-1201',
-    hour: 25,
-    lat: 38.9076,
-    lng: -77.0723,
-    neighborhood: 'Georgetown',
-    city: 'DC',
-    description: 'PRIMARY INCIDENT - Major burglary',
-    priority: 'critical',
-  },
-  {
-    id: 'CASE_005',
-    caseNumber: 'TN-2024-1121',
-    hour: 48,
-    lat: 36.1866,
-    lng: -86.745,
-    neighborhood: 'East Nashville',
-    city: 'Nashville',
-    description: 'Cross-jurisdictional connection',
-    priority: 'high',
-  },
-  {
-    id: 'CASE_006',
-    caseNumber: 'TN-2024-1124',
-    hour: 60,
-    lat: 36.1512,
-    lng: -86.7893,
-    neighborhood: 'The Gulch',
-    city: 'Nashville',
-    description: 'Nashville operation confirmed',
-    priority: 'high',
-  },
-];
-
-const DEVICES = generateDevicePositions();
-
-const PRIORITY_COLORS = {
+const PRIORITY_COLORS: Record<string, string> = {
   low: '#71717a',
   medium: '#eab308',
   high: '#f97316',
   critical: '#ef4444',
 };
 
-// Map controller
+// Tower icon
+const towerIcon = L.divIcon({
+  className: 'tower-icon',
+  html: '<div style="font-size: 16px;">📡</div>',
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
+});
+
+// Case icon
+const caseIcon = L.divIcon({
+  className: 'case-icon',
+  html: '<div style="font-size: 20px; filter: drop-shadow(0 0 4px rgba(249, 115, 22, 0.8));">📋</div>',
+  iconSize: [24, 24],
+  iconAnchor: [12, 12],
+});
+
+// Map controller component
 const MapController: React.FC<{ center: [number, number]; zoom: number }> = ({ center, zoom }) => {
   const map = useMap();
   useEffect(() => {
@@ -265,69 +114,92 @@ const MapController: React.FC<{ center: [number, number]; zoom: number }> = ({ c
   return null;
 };
 
-const towerIcon = L.divIcon({
-  html: `<div style="color: #22c55e; font-size: 20px; text-shadow: 0 0 4px #000;">📡</div>`,
-  className: '',
-  iconSize: [20, 20],
-  iconAnchor: [10, 10],
-});
+// Format hour to readable time
+const formatHour = (hour: number): string => {
+  const day = Math.floor(hour / 24) + 1;
+  const h = hour % 24;
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const displayHour = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  return `Day ${day}, ${displayHour}:00 ${ampm}`;
+};
 
-const HotspotExplorer: React.FC = () => {
+const HeatmapDashboard: React.FC = () => {
   const navigate = useNavigate();
-  useSearchParams(); // Available for future URL param handling
+  useSearchParams();
 
+  const [loading, setLoading] = useState(true);
   const [currentHour, setCurrentHour] = useState(25);
   const [isPlaying, setIsPlaying] = useState(false);
   const [showDevices, setShowDevices] = useState(true);
   const [mapCenter, setMapCenter] = useState<[number, number]>([38.9076, -77.0723]);
   const [mapZoom, setMapZoom] = useState(13);
-  const [selectedCase, setSelectedCase] = useState<CaseKeyFrame | null>(null);
+
+  // Data from API
+  const [towers, setTowers] = useState<CellTower[]>([]);
+  const [keyFrames, setKeyFrames] = useState<KeyFrame[]>([]);
+  const [positions, setPositions] = useState<DevicePosition[]>([]);
+  const [hotspots, setHotspots] = useState<Hotspot[]>([]);
+
+  // UI state
+  const [selectedCase, setSelectedCase] = useState<KeyFrame | null>(null);
   const [caseMenuAnchor, setCaseMenuAnchor] = useState<null | HTMLElement>(null);
 
   const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Fetch initial config
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const res = await fetch('/api/demo/config');
+        const data = await res.json();
+        if (data.success) {
+          setTowers(data.towers);
+          setKeyFrames(data.keyFrames);
+        }
+      } catch (err) {
+        console.error('Failed to fetch config:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchConfig();
+  }, []);
+
+  // Fetch positions and hotspots when hour changes
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [posRes, hotRes] = await Promise.all([
+          fetch(`/api/demo/positions/${currentHour}`),
+          fetch(`/api/demo/hotspots/${currentHour}`),
+        ]);
+        const posData = await posRes.json();
+        const hotData = await hotRes.json();
+
+        if (posData.success) setPositions(posData.positions);
+        if (hotData.success) setHotspots(hotData.hotspots);
+      } catch (err) {
+        console.error('Failed to fetch positions:', err);
+      }
+    };
+    fetchData();
+  }, [currentHour]);
+
   // Get cases at current hour
-  const casesAtCurrentHour = KEY_FRAMES.filter((kf) => kf.hour === currentHour);
+  const casesAtCurrentHour = keyFrames.filter((kf) => kf.hour === currentHour);
   const isKeyFrame = casesAtCurrentHour.length > 0;
 
   // Auto-select case when landing on key frame
   useEffect(() => {
-    const cases = KEY_FRAMES.filter((kf) => kf.hour === currentHour);
+    const cases = keyFrames.filter((kf) => kf.hour === currentHour);
     if (cases.length === 1) {
       setSelectedCase(cases[0]);
-    } else if (cases.length === 0) {
+    } else if (cases.length > 1) {
+      setSelectedCase(cases[0]);
+    } else {
       setSelectedCase(null);
     }
-  }, [currentHour]);
-
-  // Hotspot data
-  const getHotspotData = useCallback(() => {
-    const hotspots: { tower: CellTower; deviceCount: number; suspectCount: number }[] = [];
-    CELL_TOWERS.forEach((tower) => {
-      const devicesAtTower = DEVICES.filter((d) => {
-        const pos = d.positions[currentHour];
-        return pos && pos.towerId === tower.id;
-      });
-      if (devicesAtTower.length > 0) {
-        hotspots.push({
-          tower,
-          deviceCount: devicesAtTower.length,
-          suspectCount: devicesAtTower.filter((d) => d.isSuspect).length,
-        });
-      }
-    });
-    return hotspots;
-  }, [currentHour]);
-
-  const hotspots = getHotspotData();
-
-  const getDevicePositions = useCallback(() => {
-    return DEVICES.map((d) => ({ ...d, currentPos: d.positions[currentHour] || null })).filter(
-      (d) => d.currentPos !== null
-    );
-  }, [currentHour]);
-
-  const devicePositions = getDevicePositions();
+  }, [currentHour, keyFrames]);
 
   // Playback
   useEffect(() => {
@@ -343,26 +215,27 @@ const HotspotExplorer: React.FC = () => {
     };
   }, [isPlaying]);
 
-  const jumpToKeyFrame = (kf: CaseKeyFrame) => {
+  const jumpToKeyFrame = useCallback((kf: KeyFrame) => {
     setCurrentHour(kf.hour);
-    setSelectedCase(kf);
     setMapCenter([kf.lat, kf.lng]);
     setMapZoom(14);
+    setSelectedCase(kf);
     setIsPlaying(false);
-    setCaseMenuAnchor(null);
-  };
-
-  const formatHour = (h: number) => {
-    const day = Math.floor(h / 24) + 1;
-    const hour = h % 24;
-    return `Day ${day}, ${hour.toString().padStart(2, '0')}:00`;
-  };
+  }, []);
 
   const handleCaseChipClick = (event: React.MouseEvent<HTMLElement>) => {
     if (casesAtCurrentHour.length > 1) {
       setCaseMenuAnchor(event.currentTarget);
     }
   };
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
+        <CircularProgress sx={{ color: '#f97316' }} />
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ height: 'calc(100vh - 64px)', display: 'flex', bgcolor: '#09090b' }}>
@@ -378,10 +251,10 @@ const HotspotExplorer: React.FC = () => {
           <MapController center={mapCenter} zoom={mapZoom} />
 
           {/* Cell Towers */}
-          {CELL_TOWERS.map((tower) => (
+          {towers.map((tower) => (
             <React.Fragment key={tower.id}>
               <CircleMarker
-                center={[tower.lat, tower.lng]}
+                center={[tower.latitude, tower.longitude]}
                 radius={18}
                 pathOptions={{
                   color: '#22c55e15',
@@ -390,7 +263,7 @@ const HotspotExplorer: React.FC = () => {
                   weight: 1,
                 }}
               />
-              <Marker position={[tower.lat, tower.lng]} icon={towerIcon}>
+              <Marker position={[tower.latitude, tower.longitude]} icon={towerIcon}>
                 <Popup>
                   <strong>{tower.name}</strong>
                   <br />
@@ -403,24 +276,30 @@ const HotspotExplorer: React.FC = () => {
           {/* Hotspots */}
           {hotspots.map((hs) => (
             <CircleMarker
-              key={hs.tower.id}
-              center={[hs.tower.lat, hs.tower.lng]}
-              radius={8 + hs.deviceCount * 4}
+              key={hs.towerId}
+              center={[hs.lat, hs.lng]}
+              radius={Math.min(30, 8 + hs.deviceCount * 3)}
               pathOptions={{
                 color: hs.suspectCount > 0 ? '#ef4444' : '#f97316',
                 fillColor: hs.suspectCount > 0 ? '#ef4444' : '#f97316',
-                fillOpacity: 0.3 + hs.suspectCount * 0.2,
+                fillOpacity: 0.3,
                 weight: 2,
               }}
-            />
+            >
+              <Popup>
+                <strong>📡 {hs.towerName}</strong>
+                <br />
+                {hs.deviceCount} devices{hs.suspectCount > 0 && `, ${hs.suspectCount} suspects`}
+              </Popup>
+            </CircleMarker>
           ))}
 
           {/* Devices */}
           {showDevices &&
-            devicePositions.map((d) => (
+            positions.map((d) => (
               <CircleMarker
-                key={d.id}
-                center={[d.currentPos!.lat, d.currentPos!.lng]}
+                key={d.deviceId}
+                center={[d.lat, d.lng]}
                 radius={d.isSuspect ? 6 : 4}
                 pathOptions={{
                   color: d.isSuspect ? '#ef4444' : '#3b82f6',
@@ -430,9 +309,9 @@ const HotspotExplorer: React.FC = () => {
                 }}
               >
                 <Popup>
-                  <strong>{d.name}</strong>
+                  <strong>{d.deviceName}</strong>
                   <br />
-                  {d.owner}
+                  {d.ownerAlias ? `"${d.ownerAlias}"` : d.ownerName || 'Unknown owner'}
                   {d.isSuspect && (
                     <>
                       <br />
@@ -445,16 +324,7 @@ const HotspotExplorer: React.FC = () => {
 
           {/* Case marker - ONLY show when on key frame */}
           {isKeyFrame && selectedCase && (
-            <CircleMarker
-              center={[selectedCase.lat, selectedCase.lng]}
-              radius={20}
-              pathOptions={{
-                color: PRIORITY_COLORS[selectedCase.priority],
-                fillColor: 'transparent',
-                weight: 3,
-                dashArray: '6 4',
-              }}
-            >
+            <Marker position={[selectedCase.lat, selectedCase.lng]} icon={caseIcon}>
               <Popup>
                 <strong>📋 {selectedCase.caseNumber}</strong>
                 <br />
@@ -462,7 +332,7 @@ const HotspotExplorer: React.FC = () => {
                 <br />
                 {selectedCase.description}
               </Popup>
-            </CircleMarker>
+            </Marker>
           )}
         </MapContainer>
 
@@ -491,7 +361,7 @@ const HotspotExplorer: React.FC = () => {
                   Hotspot Explorer
                 </Typography>
                 <Typography variant="caption" sx={{ color: '#52525b' }}>
-                  {CELL_TOWERS.length} towers • {DEVICES.length} devices
+                  {towers.length} towers • {positions.length} devices
                 </Typography>
               </Box>
             </Stack>
@@ -550,7 +420,7 @@ const HotspotExplorer: React.FC = () => {
                     primary={c.caseNumber}
                     secondary={c.neighborhood}
                     primaryTypographyProps={{ sx: { color: '#fff', fontSize: '0.875rem' } }}
-                    secondaryTypographyProps={{ sx: { color: '#71717a', fontSize: '0.75rem' } }}
+                    secondaryTypographyProps={{ sx: { color: '#71717a' } }}
                   />
                 </MenuItem>
               ))}
@@ -595,7 +465,7 @@ const HotspotExplorer: React.FC = () => {
                 onChange={(_, v) => setCurrentHour(v as number)}
                 min={0}
                 max={71}
-                marks={KEY_FRAMES.map((kf) => ({ value: kf.hour, label: '' }))}
+                marks={keyFrames.map((kf) => ({ value: kf.hour, label: '' }))}
                 sx={{
                   color: isKeyFrame
                     ? PRIORITY_COLORS[selectedCase?.priority || 'medium']
@@ -627,10 +497,10 @@ const HotspotExplorer: React.FC = () => {
             <Typography variant="caption" sx={{ color: '#3f3f46', mr: 1 }}>
               JUMP TO:
             </Typography>
-            {KEY_FRAMES.map((kf) => (
+            {keyFrames.map((kf) => (
               <Chip
                 key={kf.id}
-                label={kf.neighborhood}
+                label={kf.caseNumber}
                 size="small"
                 onClick={() => jumpToKeyFrame(kf)}
                 sx={{
@@ -772,7 +642,7 @@ const HotspotExplorer: React.FC = () => {
             <Stack spacing={1}>
               {hotspots.slice(0, 4).map((hs) => (
                 <Card
-                  key={hs.tower.id}
+                  key={hs.towerId}
                   sx={{
                     bgcolor: '#09090b',
                     border: `1px solid ${hs.suspectCount > 0 ? '#ef444430' : '#27272a'}`,
@@ -780,14 +650,14 @@ const HotspotExplorer: React.FC = () => {
                     '&:hover': { borderColor: '#f97316' },
                   }}
                   onClick={() => {
-                    setMapCenter([hs.tower.lat, hs.tower.lng]);
+                    setMapCenter([hs.lat, hs.lng]);
                     setMapZoom(15);
                   }}
                 >
                   <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
                     <Stack direction="row" justifyContent="space-between" alignItems="center">
                       <Typography variant="body2" sx={{ color: '#fff', fontWeight: 500 }}>
-                        📡 {hs.tower.name}
+                        📡 {hs.towerName}
                       </Typography>
                       <Stack direction="row" spacing={1}>
                         <Badge
@@ -853,10 +723,10 @@ const HotspotExplorer: React.FC = () => {
           </Stack>
 
           <Stack spacing={0.5}>
-            {devicePositions
+            {positions
               .filter((d) => d.isSuspect)
               .map((d) => (
-                <Card key={d.id} sx={{ bgcolor: '#18181b', border: '1px solid #ef444430' }}>
+                <Card key={d.deviceId} sx={{ bgcolor: '#18181b', border: '1px solid #ef444430' }}>
                   <CardContent sx={{ p: 1, '&:last-child': { pb: 1 } }}>
                     <Stack direction="row" alignItems="center" spacing={1}>
                       <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: '#ef4444' }} />
@@ -865,29 +735,29 @@ const HotspotExplorer: React.FC = () => {
                           variant="caption"
                           sx={{ color: '#fff', fontWeight: 600, display: 'block', lineHeight: 1.2 }}
                         >
-                          {d.owner}
+                          {d.ownerAlias ? `"${d.ownerAlias}"` : d.ownerName || 'Unknown'}
                         </Typography>
                         <Typography
                           variant="caption"
                           sx={{ color: '#52525b', fontSize: '0.65rem' }}
                         >
-                          {d.name}
+                          {d.deviceName}
                         </Typography>
                       </Box>
                     </Stack>
                   </CardContent>
                 </Card>
               ))}
-            {devicePositions
+            {positions
               .filter((d) => !d.isSuspect)
               .slice(0, 3)
               .map((d) => (
-                <Card key={d.id} sx={{ bgcolor: '#18181b', border: '1px solid #27272a' }}>
+                <Card key={d.deviceId} sx={{ bgcolor: '#18181b', border: '1px solid #27272a' }}>
                   <CardContent sx={{ p: 1, '&:last-child': { pb: 1 } }}>
                     <Stack direction="row" alignItems="center" spacing={1}>
                       <Box sx={{ width: 5, height: 5, borderRadius: '50%', bgcolor: '#3b82f6' }} />
                       <Typography variant="caption" sx={{ color: '#52525b' }}>
-                        {d.owner}
+                        {d.ownerName || 'Unknown'}
                       </Typography>
                     </Stack>
                   </CardContent>
@@ -918,4 +788,4 @@ const HotspotExplorer: React.FC = () => {
   );
 };
 
-export default HotspotExplorer;
+export default HeatmapDashboard;

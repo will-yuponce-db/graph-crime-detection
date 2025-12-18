@@ -15,6 +15,7 @@ import {
   DialogActions,
   Tooltip,
   Badge,
+  CircularProgress,
 } from '@mui/material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -28,28 +29,26 @@ import {
   Gavel,
   Search,
   TrendingUp,
-  ArrowForward,
 } from '@mui/icons-material';
 
 type CaseStatus = 'investigating' | 'review' | 'adjudicated';
 
 interface CaseData {
   id: string;
-  case_number: string;
+  caseNumber: string;
   title: string;
   city: string;
   state: string;
   neighborhood: string;
   status: CaseStatus;
-  priority: 'Low' | 'Medium' | 'High' | 'Critical';
-  created_at: string;
-  updated_at: string;
-  assigned_to: string;
-  suspect_count: number;
-  device_count: number;
-  location_count: number;
-  estimated_loss?: number;
+  priority: string;
+  createdAt: string;
+  updatedAt: string;
+  assignedTo: string;
+  estimatedLoss?: number;
   description?: string;
+  persons?: { id: string; name: string; alias?: string }[];
+  devices?: { id: string; name: string }[];
 }
 
 const STATUS_CONFIG = {
@@ -76,7 +75,7 @@ const STATUS_CONFIG = {
   },
 };
 
-const PRIORITY_COLORS = {
+const PRIORITY_COLORS: Record<string, string> = {
   Low: '#71717a',
   Medium: '#eab308',
   High: '#f97316',
@@ -86,14 +85,35 @@ const PRIORITY_COLORS = {
 const CaseView: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const [loading, setLoading] = useState(true);
   const [cases, setCases] = useState<CaseData[]>([]);
   const [selectedCase, setSelectedCase] = useState<CaseData | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
 
+  // Fetch cases from API
   useEffect(() => {
-    loadCases();
+    const fetchCases = async () => {
+      try {
+        const res = await fetch('/api/demo/cases');
+        const data = await res.json();
+        if (data.success) {
+          setCases(
+            data.cases.map((c: CaseData) => ({
+              ...c,
+              status: c.status as CaseStatus,
+            }))
+          );
+        }
+      } catch (err) {
+        console.error('Failed to fetch cases:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchCases();
   }, []);
 
+  // Handle URL param for opening specific case
   useEffect(() => {
     const caseId = searchParams.get('case_id');
     if (caseId && cases.length > 0) {
@@ -105,130 +125,28 @@ const CaseView: React.FC = () => {
     }
   }, [searchParams, cases]);
 
-  const loadCases = () => {
-    // Mock case data with different statuses
-    const mockCases: CaseData[] = [
-      {
-        id: 'CASE_001',
-        case_number: 'DC-2024-1105',
-        title: 'Adams Morgan Residential Burglary',
-        city: 'Washington',
-        state: 'DC',
-        neighborhood: 'Adams Morgan',
-        status: 'adjudicated',
-        priority: 'Medium',
-        created_at: '2024-11-05T02:30:00Z',
-        updated_at: '2024-11-20T14:00:00Z',
-        assigned_to: 'Det. Johnson',
-        suspect_count: 2,
-        device_count: 2,
-        location_count: 1,
-        estimated_loss: 15000,
-        description: 'Linked to cross-jurisdictional burglary series',
-      },
-      {
-        id: 'CASE_002',
-        case_number: 'DC-2024-1107',
-        title: 'Dupont Circle Break-in',
-        city: 'Washington',
-        state: 'DC',
-        neighborhood: 'Dupont Circle',
-        status: 'adjudicated',
-        priority: 'Medium',
-        created_at: '2024-11-07T03:15:00Z',
-        updated_at: '2024-11-22T10:00:00Z',
-        assigned_to: 'Det. Johnson',
-        suspect_count: 2,
-        device_count: 2,
-        location_count: 1,
-        estimated_loss: 22000,
-      },
-      {
-        id: 'CASE_005',
-        case_number: 'TN-2024-1121',
-        title: 'East Nashville Break-in',
-        city: 'Nashville',
-        state: 'TN',
-        neighborhood: 'East Nashville',
-        status: 'review',
-        priority: 'High',
-        created_at: '2024-11-21T02:30:00Z',
-        updated_at: '2024-12-01T09:00:00Z',
-        assigned_to: 'Det. Smith',
-        suspect_count: 2,
-        device_count: 2,
-        location_count: 1,
-        estimated_loss: 35000,
-        description: 'Cross-jurisdictional link confirmed with DC cases',
-      },
-      {
-        id: 'CASE_006',
-        case_number: 'TN-2024-1124',
-        title: 'The Gulch Residential Burglary',
-        city: 'Nashville',
-        state: 'TN',
-        neighborhood: 'The Gulch',
-        status: 'review',
-        priority: 'High',
-        created_at: '2024-11-24T03:00:00Z',
-        updated_at: '2024-12-02T11:00:00Z',
-        assigned_to: 'Det. Smith',
-        suspect_count: 2,
-        device_count: 2,
-        location_count: 1,
-        estimated_loss: 78000,
-      },
-      {
-        id: 'CASE_008',
-        case_number: 'DC-2024-1201',
-        title: 'Georgetown Major Burglary',
-        city: 'Washington',
-        state: 'DC',
-        neighborhood: 'Georgetown',
-        status: 'investigating',
-        priority: 'Critical',
-        created_at: '2024-12-01T03:00:00Z',
-        updated_at: '2024-12-03T08:00:00Z',
-        assigned_to: 'Det. Johnson',
-        suspect_count: 2,
-        device_count: 3,
-        location_count: 1,
-        estimated_loss: 125000,
-        description: 'PRIMARY INCIDENT - 50 devices detected, burner phone switch detected',
-      },
-      {
-        id: 'CASE_009',
-        case_number: 'DC-2024-1203',
-        title: 'Capitol Hill Attempted Entry',
-        city: 'Washington',
-        state: 'DC',
-        neighborhood: 'Capitol Hill',
-        status: 'investigating',
-        priority: 'Medium',
-        created_at: '2024-12-03T01:45:00Z',
-        updated_at: '2024-12-03T10:00:00Z',
-        assigned_to: 'Det. Martinez',
-        suspect_count: 0,
-        device_count: 5,
-        location_count: 1,
-        description: 'Alarm triggered, suspect fled - possible series connection',
-      },
-    ];
-    setCases(mockCases);
-  };
-
-  const handleStatusChange = (caseId: string, newStatus: CaseStatus) => {
-    setCases((prev) =>
-      prev.map((c) =>
-        c.id === caseId ? { ...c, status: newStatus, updated_at: new Date().toISOString() } : c
-      )
-    );
+  const handleStatusChange = async (caseId: string, newStatus: CaseStatus) => {
+    try {
+      await fetch(`/api/demo/cases/${caseId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      setCases((prev) =>
+        prev.map((c) =>
+          c.id === caseId ? { ...c, status: newStatus, updatedAt: new Date().toISOString() } : c
+        )
+      );
+    } catch (err) {
+      console.error('Failed to update status:', err);
+    }
   };
 
   const getCasesByStatus = (status: CaseStatus) => cases.filter((c) => c.status === status);
 
   const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
   const CaseCard: React.FC<{ caseData: CaseData }> = ({ caseData }) => (
@@ -248,26 +166,29 @@ const CaseView: React.FC = () => {
     >
       <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
         <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-          <Box sx={{ flex: 1 }}>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Typography variant="body2" sx={{ color: '#fff', fontWeight: 600 }}>
-                {caseData.case_number}
-              </Typography>
-              <Chip
-                label={caseData.priority}
-                size="small"
-                sx={{
-                  height: 18,
-                  fontSize: '0.65rem',
-                  bgcolor: `${PRIORITY_COLORS[caseData.priority]}20`,
-                  color: PRIORITY_COLORS[caseData.priority],
-                }}
-              />
-            </Stack>
-            <Typography variant="caption" sx={{ color: '#a1a1aa', display: 'block', mt: 0.5 }}>
-              {caseData.neighborhood}, {caseData.state}
+          <Box>
+            <Typography variant="body2" sx={{ color: '#fff', fontWeight: 600 }}>
+              {caseData.caseNumber}
+            </Typography>
+            <Typography
+              variant="caption"
+              sx={{ color: '#71717a', display: 'block', lineHeight: 1.3 }}
+            >
+              {caseData.neighborhood}
             </Typography>
           </Box>
+          <Stack alignItems="flex-end" spacing={0.5}>
+            <Chip
+              label={caseData.priority}
+              size="small"
+              sx={{
+                height: 18,
+                fontSize: '0.65rem',
+                bgcolor: `${PRIORITY_COLORS[caseData.priority]}20`,
+                color: PRIORITY_COLORS[caseData.priority],
+              }}
+            />
+          </Stack>
         </Stack>
 
         <Stack direction="row" spacing={2} sx={{ mt: 1.5 }}>
@@ -275,7 +196,7 @@ const CaseView: React.FC = () => {
             <Stack direction="row" spacing={0.5} alignItems="center">
               <Person sx={{ fontSize: 14, color: '#ef4444' }} />
               <Typography variant="caption" sx={{ color: '#71717a' }}>
-                {caseData.suspect_count}
+                {caseData.persons?.length || 0}
               </Typography>
             </Stack>
           </Tooltip>
@@ -283,7 +204,7 @@ const CaseView: React.FC = () => {
             <Stack direction="row" spacing={0.5} alignItems="center">
               <Devices sx={{ fontSize: 14, color: '#f97316' }} />
               <Typography variant="caption" sx={{ color: '#71717a' }}>
-                {caseData.device_count}
+                {caseData.devices?.length || 0}
               </Typography>
             </Stack>
           </Tooltip>
@@ -291,14 +212,15 @@ const CaseView: React.FC = () => {
             <Stack direction="row" spacing={0.5} alignItems="center">
               <LocationOn sx={{ fontSize: 14, color: '#3b82f6' }} />
               <Typography variant="caption" sx={{ color: '#71717a' }}>
-                {caseData.location_count}
+                1
               </Typography>
             </Stack>
           </Tooltip>
         </Stack>
 
         <Typography variant="caption" sx={{ color: '#52525b', display: 'block', mt: 1 }}>
-          {caseData.assigned_to} • {formatDate(caseData.updated_at)}
+          {caseData.assignedTo || 'Unassigned'} •{' '}
+          {formatDate(caseData.updatedAt || caseData.createdAt)}
         </Typography>
       </CardContent>
     </Card>
@@ -327,9 +249,6 @@ const CaseView: React.FC = () => {
               <Typography variant="subtitle2" sx={{ color: '#fff', fontWeight: 700 }}>
                 {config.label}
               </Typography>
-              <Typography variant="caption" sx={{ color: '#71717a' }}>
-                {config.description}
-              </Typography>
             </Box>
             <Badge
               badgeContent={statusCases.length}
@@ -352,6 +271,14 @@ const CaseView: React.FC = () => {
       </Box>
     );
   };
+
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
+        <CircularProgress sx={{ color: '#f97316' }} />
+      </Box>
+    );
+  }
 
   return (
     <Box
@@ -397,25 +324,17 @@ const CaseView: React.FC = () => {
               onClick={() => navigate('/')}
               sx={{ borderColor: '#27272a', color: '#a1a1aa' }}
             >
-              New from Hotspot
+              New Case
             </Button>
           </Stack>
         </Stack>
       </Paper>
 
-      {/* Pipeline View */}
-      <Box sx={{ flex: 1, p: 3, overflow: 'hidden' }}>
-        <Stack direction="row" spacing={3} sx={{ height: '100%' }}>
-          <StatusColumn status="investigating" />
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <ArrowForward sx={{ color: '#52525b', fontSize: 32 }} />
-          </Box>
-          <StatusColumn status="review" />
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <ArrowForward sx={{ color: '#52525b', fontSize: 32 }} />
-          </Box>
-          <StatusColumn status="adjudicated" />
-        </Stack>
+      {/* Kanban Board */}
+      <Box sx={{ flex: 1, p: 3, display: 'flex', gap: 3, overflow: 'auto' }}>
+        <StatusColumn status="investigating" />
+        <StatusColumn status="review" />
+        <StatusColumn status="adjudicated" />
       </Box>
 
       {/* Case Detail Dialog */}
@@ -428,15 +347,17 @@ const CaseView: React.FC = () => {
       >
         {selectedCase && (
           <>
-            <DialogTitle sx={{ bgcolor: '#09090b', borderBottom: '1px solid #27272a' }}>
+            <DialogTitle sx={{ bgcolor: '#0f0f0f', borderBottom: '1px solid #27272a' }}>
               <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Stack direction="row" spacing={2} alignItems="center">
-                  <Avatar sx={{ bgcolor: PRIORITY_COLORS[selectedCase.priority] }}>
-                    {STATUS_CONFIG[selectedCase.status].icon}
+                <Stack direction="row" alignItems="center" spacing={2}>
+                  <Avatar
+                    sx={{ bgcolor: PRIORITY_COLORS[selectedCase.priority], width: 40, height: 40 }}
+                  >
+                    <Description />
                   </Avatar>
                   <Box>
                     <Typography variant="h6" sx={{ color: '#fff' }}>
-                      {selectedCase.case_number}
+                      {selectedCase.caseNumber}
                     </Typography>
                     <Typography variant="body2" sx={{ color: '#71717a' }}>
                       {selectedCase.title}
@@ -454,7 +375,7 @@ const CaseView: React.FC = () => {
             </DialogTitle>
             <DialogContent sx={{ mt: 2 }}>
               <Stack spacing={3}>
-                {/* Info Grid */}
+                {/* Location & Details */}
                 <Stack direction="row" spacing={4}>
                   <Box>
                     <Typography variant="caption" sx={{ color: '#52525b' }}>
@@ -469,7 +390,7 @@ const CaseView: React.FC = () => {
                       ASSIGNED TO
                     </Typography>
                     <Typography variant="body1" sx={{ color: '#fff' }}>
-                      {selectedCase.assigned_to}
+                      {selectedCase.assignedTo || 'Unassigned'}
                     </Typography>
                   </Box>
                   <Box>
@@ -477,21 +398,22 @@ const CaseView: React.FC = () => {
                       CREATED
                     </Typography>
                     <Typography variant="body1" sx={{ color: '#fff' }}>
-                      {new Date(selectedCase.created_at).toLocaleDateString()}
+                      {new Date(selectedCase.createdAt).toLocaleDateString()}
                     </Typography>
                   </Box>
-                  {selectedCase.estimated_loss && (
+                  {selectedCase.estimatedLoss && (
                     <Box>
                       <Typography variant="caption" sx={{ color: '#52525b' }}>
                         EST. LOSS
                       </Typography>
                       <Typography variant="body1" sx={{ color: '#ef4444' }}>
-                        ${selectedCase.estimated_loss.toLocaleString()}
+                        ${selectedCase.estimatedLoss.toLocaleString()}
                       </Typography>
                     </Box>
                   )}
                 </Stack>
 
+                {/* Description */}
                 {selectedCase.description && (
                   <Box>
                     <Typography variant="caption" sx={{ color: '#52525b' }}>
@@ -509,7 +431,7 @@ const CaseView: React.FC = () => {
                     <CardContent sx={{ textAlign: 'center', py: 2 }}>
                       <Person sx={{ color: '#ef4444', fontSize: 32 }} />
                       <Typography variant="h4" sx={{ color: '#fff', fontWeight: 700 }}>
-                        {selectedCase.suspect_count}
+                        {selectedCase.persons?.length || 0}
                       </Typography>
                       <Typography variant="caption" sx={{ color: '#71717a' }}>
                         Suspects
@@ -520,7 +442,7 @@ const CaseView: React.FC = () => {
                     <CardContent sx={{ textAlign: 'center', py: 2 }}>
                       <Devices sx={{ color: '#f97316', fontSize: 32 }} />
                       <Typography variant="h4" sx={{ color: '#fff', fontWeight: 700 }}>
-                        {selectedCase.device_count}
+                        {selectedCase.devices?.length || 0}
                       </Typography>
                       <Typography variant="caption" sx={{ color: '#71717a' }}>
                         Devices
@@ -531,7 +453,7 @@ const CaseView: React.FC = () => {
                     <CardContent sx={{ textAlign: 'center', py: 2 }}>
                       <LocationOn sx={{ color: '#3b82f6', fontSize: 32 }} />
                       <Typography variant="h4" sx={{ color: '#fff', fontWeight: 700 }}>
-                        {selectedCase.location_count}
+                        1
                       </Typography>
                       <Typography variant="caption" sx={{ color: '#71717a' }}>
                         Locations
@@ -540,17 +462,17 @@ const CaseView: React.FC = () => {
                   </Card>
                 </Stack>
 
-                {/* Status Change */}
+                {/* Status Actions */}
                 <Box>
-                  <Typography variant="caption" sx={{ color: '#52525b', display: 'block', mb: 1 }}>
-                    UPDATE STATUS
+                  <Typography variant="caption" sx={{ color: '#52525b', mb: 1, display: 'block' }}>
+                    CHANGE STATUS
                   </Typography>
                   <Stack direction="row" spacing={1}>
                     {(['investigating', 'review', 'adjudicated'] as CaseStatus[]).map((status) => (
                       <Button
                         key={status}
-                        variant={selectedCase.status === status ? 'contained' : 'outlined'}
-                        startIcon={STATUS_CONFIG[status].icon}
+                        variant="outlined"
+                        size="small"
                         onClick={() => {
                           handleStatusChange(selectedCase.id, status);
                           setSelectedCase((prev) => (prev ? { ...prev, status } : null));
@@ -586,9 +508,9 @@ const CaseView: React.FC = () => {
                 variant="contained"
                 startIcon={<Visibility />}
                 onClick={() => navigate(`/?case=${selectedCase.id}`)}
-                sx={{ bgcolor: '#f97316', color: '#000' }}
+                sx={{ bgcolor: '#f97316', '&:hover': { bgcolor: '#fb923c' } }}
               >
-                View in Hotspot Explorer
+                View on Map
               </Button>
             </DialogActions>
           </>

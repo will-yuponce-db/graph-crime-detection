@@ -1,45 +1,36 @@
 /**
- * Express Backend Server for Graph Database with Databricks Integration
- *
- * This server uses Databricks as the primary data store with SQLite as a fallback.
- * - Reads: Try Databricks first, fallback to SQLite if unavailable
- * - Writes: Try Databricks first, fallback to SQLite if unavailable
- * It provides a REST API for the React frontend to manage graph data.
- *
- * Setup:
- * 1. cd backend
- * 2. npm install
- * 3. Copy .env.example to .env and configure your credentials (optional)
- * 4. npm run seed (to initialize database)
- * 5. npm start
+ * Express Backend Server for Cross-Jurisdictional Investigative Analytics Demo
+ * All data is stored in SQLite for easy deployment and demo purposes.
  */
 
 const express = require('express');
 const cors = require('cors');
-const { DBSQLClient } = require('@databricks/sql');
 const logger = require('./utils/logger');
 const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
 const {
   initDatabase,
-  createTables,
-  getAllNodes,
-  getAllEdges,
-  getAllCases,
-  getCaseById,
-  insertNodes,
-  insertEdges,
-  insertCase,
-  updateNodesStatus,
-  updateEdgesStatus,
-  updateCase,
-  deleteCase,
   isDatabaseEmpty,
+  getAllCellTowers,
+  getAllPersons,
+  getPersonById,
+  getSuspects,
+  getAllDevices,
+  getDeviceById,
+  getDevicePositionsAtHour,
+  getDevicePositionHistory,
+  getAllDemoCases,
+  getDemoCaseById,
+  getDemoCaseByHour,
+  updateDemoCaseStatus,
+  getAllRelationships,
+  getRelationshipsForPerson,
+  getHotspotsAtHour,
 } = require('./db/database');
 
 const { seedDatabase } = require('./db/seed');
-const investigativeData = require('./db/investigativeData.json');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -51,61 +42,31 @@ app.use(express.json());
 // Request logging middleware
 app.use((req, res, next) => {
   const startTime = Date.now();
-  const requestId = Math.random().toString(36).substring(7);
-
-  // Log response when finished
   res.on('finish', () => {
     const duration = Date.now() - startTime;
-
-    const logData = {
-      type: 'request',
-      method: req.method,
-      path: req.path,
-      status: res.statusCode,
-      duration,
-      requestId,
-    };
-
-    // Add query params if present
-    if (Object.keys(req.query).length > 0) {
-      logData.query = req.query;
+    if (!req.path.startsWith('/api/demo/positions')) {
+      // Don't log frequent position requests
+      logger.info({
+        type: 'request',
+        method: req.method,
+        path: req.path,
+        status: res.statusCode,
+        duration,
+      });
     }
-
-    // Add body info for POST/PATCH requests
-    if (req.body && Object.keys(req.body).length > 0) {
-      if (req.body.nodes || req.body.edges) {
-        logData.bodySize = {
-          nodes: req.body.nodes?.length || 0,
-          edges: req.body.edges?.length || 0,
-        };
-      }
-    }
-
-    logger.info(logData);
   });
-
   next();
 });
 
 // Serve static files from React app in production
-const path = require('path');
 if (process.env.NODE_ENV === 'production') {
   const distPath = path.join(__dirname, '../dist');
-  logger.info({
-    type: 'static_files',
-    distPath,
-    exists: fs.existsSync(distPath),
-    __dirname,
-  });
-
+  logger.info({ type: 'static_files', distPath, exists: fs.existsSync(distPath) });
   app.use(
     express.static(distPath, {
       setHeaders: (res, filePath) => {
-        // Prevent caching of HTML files to ensure users get latest frontend code
         if (filePath.endsWith('.html')) {
           res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-          res.setHeader('Pragma', 'no-cache');
-          res.setHeader('Expires', '0');
         }
       },
     })
@@ -116,9 +77,9 @@ if (process.env.NODE_ENV === 'production') {
 let db;
 try {
   db = initDatabase();
-  logger.info({ type: 'database_init', status: 'initialized', database: 'SQLite' });
+  logger.info({ type: 'database_init', status: 'initialized' });
 
-  // Check if database is empty, if so seed it
+  // Seed if empty
   if (isDatabaseEmpty(db)) {
     logger.info({ type: 'database_seed', status: 'seeding', reason: 'empty database' });
     db.close();
@@ -130,2406 +91,494 @@ try {
   process.exit(1);
 }
 
-// Databricks Configuration - uses environment variables from Databricks Apps
-const DATABRICKS_CONFIG = {
-  host: process.env.DATABRICKS_HOST || 'e2-demo-west.cloud.databricks.com',
-  path: process.env.DATABRICKS_HTTP_PATH || '/sql/1.0/warehouses/75fd8278393d07eb',
-  clientId: process.env.DATABRICKS_CLIENT_ID,
-  clientSecret: process.env.DATABRICKS_CLIENT_SECRET,
-};
-
-const DEFAULT_TABLE_NAME =
-  process.env.DATABRICKS_TABLE || 'main.default.property_graph_entity_edges';
-
-// Note: Databricks authentication now uses ONLY user OAuth tokens
-// from X-Forwarded-Access-Token header (provided by Databricks Apps)
+// ============== DEMO DATA ENDPOINTS ==============
 
 /**
- * Validate and sanitize table name to prevent SQL injection
- * Table names should be in format: catalog.schema.table or schema.table or table
- * Only allows alphanumeric, underscores, dots, and backticks
+ * GET /api/demo/config
+ * Get demo configuration (cell towers, time range, key frames)
  */
-function validateTableName(tableName) {
-  if (!tableName) {
-    return DEFAULT_TABLE_NAME;
-  }
-
-  // Remove any whitespace
-  const trimmed = tableName.trim();
-
-  // Check for valid table name pattern (catalog.schema.table or schema.table or table)
-  // Allows alphanumeric, underscores, dots, and backticks for escaped identifiers
-  const validPattern = /^[a-zA-Z0-9_`]+(\.[a-zA-Z0-9_`]+){0,2}$/;
-
-  if (!validPattern.test(trimmed)) {
-    throw new Error(
-      'Invalid table name format. Use: catalog.schema.table or schema.table or table'
-    );
-  }
-
-  return trimmed;
-}
-
-/**
- * Sanitize error messages for client responses
- * Keeps full details in server logs but sends clean messages to frontend
- */
-function sanitizeErrorForClient(error) {
-  if (!error) return null;
-
-  const errorMessage = typeof error === 'string' ? error : error.message || 'Unknown error';
-  const errorObj = typeof error === 'object' ? error : {};
-
-  // Check for Databricks-specific error properties first
-  if (errorObj.errorClass) {
-    switch (errorObj.errorClass) {
-      case 'TABLE_OR_VIEW_NOT_FOUND':
-        return 'Database table not found';
-      case 'SCHEMA_NOT_FOUND':
-        return 'Database schema not found';
-      case 'PARSE_SYNTAX_ERROR':
-        return 'Invalid query syntax';
-      default:
-        return `Database error: ${errorObj.errorClass}`;
-    }
-  }
-
-  // Check HTTP status codes
-  if (errorObj.statusCode || errorObj.status) {
-    const status = errorObj.statusCode || errorObj.status;
-    switch (status) {
-      case 401:
-      case 403:
-        return 'Databricks authentication failed';
-      case 404:
-        return 'Databricks resource not found';
-      case 500:
-        return 'Databricks server error';
-      case 503:
-        return 'Databricks service unavailable';
-      default:
-        return `Databricks error (HTTP ${status})`;
-    }
-  }
-
-  // Detect common error types from message
-  if (errorMessage.includes('ECONNREFUSED') || errorMessage.includes('connect')) {
-    return 'Unable to connect to Databricks';
-  }
-  if (
-    errorMessage.includes('authentication') ||
-    errorMessage.includes('401') ||
-    errorMessage.includes('403')
-  ) {
-    return 'Databricks authentication failed';
-  }
-  if (errorMessage.includes('timeout') || errorMessage.includes('ETIMEDOUT')) {
-    return 'Databricks connection timed out';
-  }
-  if (errorMessage.includes('not configured')) {
-    return 'Databricks not configured';
-  }
-  if (errorMessage.includes('ENOTFOUND') || errorMessage.includes('DNS')) {
-    return 'Databricks host not found';
-  }
-  if (errorMessage.includes('table') && errorMessage.includes('not found')) {
-    return 'Database table not found';
-  }
-
-  // Return a generic version of the message without internal details
-  return errorMessage.split('\n')[0].substring(0, 150);
-}
-
-logger.info({
-  type: 'server_config',
-  environment: process.env.NODE_ENV || 'development',
-  port: PORT,
-  sqlite: 'enabled',
-  databricks: {
-    authMode: 'user_oauth_only',
-    host: DATABRICKS_CONFIG.host,
-    defaultTable: DEFAULT_TABLE_NAME,
-    path: DATABRICKS_CONFIG.path,
-    note: 'Requires X-Forwarded-Access-Token header from Databricks Apps',
-  },
-});
-
-/**
- * Create a Databricks SQL connection using User OAuth ONLY
- * @param {string} userAccessToken - Required user access token from X-Forwarded-Access-Token header
- */
-async function createDatabricksConnection(userAccessToken) {
-  if (!userAccessToken) {
-    throw new Error('User access token required - app must be accessed through Databricks Apps');
-  }
-
-  logger.databricks(logger.info.level, {
-    operation: 'connection',
-    status: 'attempting',
-    host: DATABRICKS_CONFIG.host,
-    path: DATABRICKS_CONFIG.path,
-    authType: 'user_oauth',
-  });
-
+app.get('/api/demo/config', (req, res) => {
   try {
-    const client = new DBSQLClient();
-
-    // OAuth2: User's access token ONLY (from X-Forwarded-Access-Token header)
-    // All operations execute with user's identity and permissions
-    const connectionConfig = {
-      host: DATABRICKS_CONFIG.host,
-      path: DATABRICKS_CONFIG.path,
-      token: userAccessToken,
-    };
-
-    const connection = await client.connect(connectionConfig);
-
-    logger.databricks('INFO', {
-      operation: 'connection',
-      status: 'success',
-      authType: 'user_oauth',
-    });
-    return connection;
-  } catch (error) {
-    const errorDetails = {
-      operation: 'connection',
-      status: 'failed',
-      authType: 'user_oauth',
-      error: error.message,
-      errorType: error.constructor.name,
-      statusCode: error.statusCode,
-      errorCode: error.code,
-      sqlState: error.sqlState,
-      errorClass: error.errorClass,
-    };
-
-    // Add helpful context for permission errors
-    if (error.statusCode === 403 || error.message?.includes('403')) {
-      errorDetails.hint =
-        'User does not have permission to access SQL Warehouse. Grant CAN USE permission to the user.';
-      errorDetails.grantCommand = `GRANT USE ON WAREHOUSE \`Shared Endpoint\` TO \`user@example.com\`;`;
-    }
-
-    logger.databricks('ERROR', errorDetails);
-    throw error;
-  }
-}
-
-/**
- * Read graph data from Databricks using user's OAuth token
- * @param {string} userAccessToken - Required user access token
- * @param {string} tableName - Table name to query
- */
-async function readFromDatabricks(userAccessToken, tableName) {
-  let connection;
-
-  try {
-    connection = await createDatabricksConnection(userAccessToken);
-    const session = await connection.openSession();
-
-    const query = `SELECT * FROM ${tableName}`;
-    const queryOperation = await session.executeStatement(query, {
-      runAsync: false,
-    });
-
-    const result = await queryOperation.fetchAll();
-    await queryOperation.close();
-    await session.close();
-
-    // Transform Databricks result into nodes and edges
-    const nodesMap = new Map();
-    const edges = [];
-
-    result.forEach((row) => {
-      // Parse properties safely
-      let startProps = {};
-      let endProps = {};
-      try {
-        startProps = JSON.parse(row.node_start_properties || '{}');
-      } catch (e) {
-        console.warn(`Failed to parse node_start_properties for ${row.node_start_id}:`, e.message);
-      }
-      try {
-        endProps = JSON.parse(row.node_end_properties || '{}');
-      } catch (e) {
-        console.warn(`Failed to parse node_end_properties for ${row.node_end_id}:`, e.message);
-      }
-
-      // Add source node (use node_start_key as the type, which appears to be the entity type)
-      if (!nodesMap.has(row.node_start_id)) {
-        // Extract label from properties or fallback to ID
-        const label = startProps._label || startProps.label || row.node_start_id;
-        // Remove _label from properties if it exists (it's metadata, not a real property)
-        const { _label, ...nodeProps } = startProps;
-
-        nodesMap.set(row.node_start_id, {
-          id: row.node_start_id,
-          label: label,
-          type: row.node_start_key || 'Unknown', // node_start_key is the entity type (e.g., "Customer")
-          properties: nodeProps,
-          status: 'existing',
-        });
-      }
-
-      // Add target node (use node_end_key as the type)
-      if (!nodesMap.has(row.node_end_id)) {
-        // Extract label from properties or fallback to ID
-        const label = endProps._label || endProps.label || row.node_end_id;
-        // Remove _label from properties if it exists (it's metadata, not a real property)
-        const { _label, ...nodeProps } = endProps;
-
-        nodesMap.set(row.node_end_id, {
-          id: row.node_end_id,
-          label: label,
-          type: row.node_end_key || 'Unknown', // node_end_key is the entity type (e.g., "Account")
-          properties: nodeProps,
-          status: 'existing',
-        });
-      }
-
-      // Add edge
-      edges.push({
-        id: `edge_${row.node_start_id}_${row.node_end_id}_${row.relationship}`,
-        source: row.node_start_id,
-        target: row.node_end_id,
-        relationshipType: row.relationship,
-        properties: {},
-        status: 'existing',
-      });
-    });
-
-    const nodes = Array.from(nodesMap.values());
-    logger.databricks('INFO', {
-      operation: 'read',
-      status: 'success',
-      nodeCount: nodes.length,
-      edgeCount: edges.length,
-    });
-
-    return { nodes, edges };
-  } catch (error) {
-    logger.databricks('ERROR', {
-      operation: 'read',
-      status: 'failed',
-      query: `SELECT * FROM ${tableName}`,
-      error: error.message,
-      errorType: error.constructor.name,
-      statusCode: error.statusCode,
-      errorCode: error.code,
-      sqlState: error.sqlState,
-      errorClass: error.errorClass,
-    });
-    throw error;
-  } finally {
-    if (connection) {
-      try {
-        await connection.close();
-      } catch (closeError) {
-        console.error('Error closing Databricks connection:', closeError);
-      }
-    }
-  }
-}
-
-/**
- * Write nodes and edges to Databricks using user's OAuth token
- * @param {Array} nodes - Nodes to write
- * @param {Array} edges - Edges to write
- * @param {string} userAccessToken - Required user access token
- * @param {string} tableName - Table name to write to
- */
-async function writeToDatabricks(nodes, edges, userAccessToken, tableName) {
-  let connection;
-
-  try {
-    connection = await createDatabricksConnection(userAccessToken);
-    const session = await connection.openSession();
-
-    // For each edge, insert a row into the table with both nodes
-    for (const edge of edges) {
-      const sourceNode = nodes.find((n) => n.id === edge.source);
-      const targetNode = nodes.find((n) => n.id === edge.target);
-
-      if (!sourceNode || !targetNode) {
-        console.warn(`Skipping edge ${edge.id} - missing source or target node`);
-        continue;
-      }
-
-      // Include label in properties for storage (using _label to avoid conflicts)
-      const sourceProps = { ...sourceNode.properties, _label: sourceNode.label };
-      const targetProps = { ...targetNode.properties, _label: targetNode.label };
-
-      const query = `
-        INSERT INTO ${tableName} (
-          node_start_id,
-          node_start_key,
-          relationship,
-          node_end_id,
-          node_end_key,
-          node_start_properties,
-          node_end_properties
-        ) VALUES (
-          '${sourceNode.id}',
-          '${sourceNode.type}',
-          '${edge.relationshipType}',
-          '${targetNode.id}',
-          '${targetNode.type}',
-          '${JSON.stringify(sourceProps).replace(/'/g, "''")}',
-          '${JSON.stringify(targetProps).replace(/'/g, "''")}'
-        )
-      `;
-
-      const queryOperation = await session.executeStatement(query, {
-        runAsync: false,
-      });
-      await queryOperation.close();
-    }
-
-    await session.close();
-    logger.databricks('INFO', {
-      operation: 'write',
-      status: 'success',
-      nodeCount: nodes.length,
-      edgeCount: edges.length,
-    });
-
-    return {
-      success: true,
-      target: 'databricks',
-    };
-  } catch (error) {
-    logger.databricks('ERROR', {
-      operation: 'write',
-      status: 'failed',
-      table: tableName,
-      nodeCount: nodes.length,
-      edgeCount: edges.length,
-      error: error.message,
-      errorType: error.constructor.name,
-      statusCode: error.statusCode,
-      errorCode: error.code,
-      sqlState: error.sqlState,
-      errorClass: error.errorClass,
-    });
-    throw error;
-  } finally {
-    if (connection) {
-      try {
-        await connection.close();
-      } catch (closeError) {
-        console.error('Error closing Databricks connection:', closeError);
-      }
-    }
-  }
-}
-
-/**
- * GET /api/graph
- * Fetch graph data - tries Databricks first, falls back to SQLite
- * Uses user's access token if available (X-Forwarded-Access-Token header)
- * Accepts optional tableName query parameter
- */
-app.get('/api/graph', async (req, res) => {
-  const startTime = Date.now();
-  let nodes, edges;
-  let source = 'SQLite';
-  let databricksError = null;
-
-  // Extract table name from query parameter
-  let tableName;
-  try {
-    tableName = validateTableName(req.query.tableName);
-  } catch (error) {
-    return res.status(400).json({
-      success: false,
-      error: error.message,
-      timestamp: new Date().toISOString(),
-    });
-  }
-
-  // Extract user's access token from Databricks Apps header
-  const userAccessToken = req.headers['x-forwarded-access-token'];
-  const userEmail = req.headers['x-forwarded-email'];
-
-  if (userAccessToken) {
-    logger.info({
-      type: 'user_auth',
-      endpoint: 'GET /api/graph',
-      email: userEmail,
-      hasToken: true,
-      tokenLength: userAccessToken.length,
-      tokenPrefix: userAccessToken.substring(0, 10) + '...',
-      tableName,
-    });
-  } else {
-    logger.info({
-      type: 'user_auth',
-      endpoint: 'GET /api/graph',
-      email: userEmail,
-      hasToken: false,
-      tableName,
-      availableHeaders: Object.keys(req.headers).filter((h) => h.startsWith('x-forwarded')),
-    });
-  }
-
-  try {
-    // Try Databricks only if user token is available
-    if (userAccessToken) {
-      try {
-        const data = await readFromDatabricks(userAccessToken, tableName);
-        nodes = data.nodes;
-        edges = data.edges;
-        source = 'Databricks (user auth)';
-      } catch (dbError) {
-        databricksError = dbError.message;
-        logger.warn({
-          type: 'api_fallback',
-          endpoint: 'GET /api/graph',
-          reason: 'databricks_failed',
-          error: sanitizeErrorForClient(dbError),
-          tableName,
-        });
-
-        // Fall back to SQLite
-        nodes = getAllNodes(db);
-        edges = getAllEdges(db);
-        source = 'SQLite (fallback)';
-      }
-    } else {
-      nodes = getAllNodes(db);
-      edges = getAllEdges(db);
-    }
-
-    const duration = Date.now() - startTime;
-    logger.info({
-      type: 'api_success',
-      method: 'GET',
-      endpoint: '/api/graph',
-      source,
-      nodeCount: nodes.length,
-      edgeCount: edges.length,
-      duration,
-    });
-
-    res.json({
-      success: true,
-      source,
-      userAuth: !!userAccessToken,
-      databricksError: sanitizeErrorForClient(databricksError),
-      timestamp: new Date().toISOString(),
-      duration: `${duration}ms`,
-      nodes,
-      edges,
-      metadata: {
-        source,
-        userAuth: !!userAccessToken,
-        databricksEnabled: !!userAccessToken,
-        databricksError: sanitizeErrorForClient(databricksError),
-        timestamp: new Date().toISOString(),
-        duration: `${duration}ms`,
-      },
-    });
-  } catch (error) {
-    const duration = Date.now() - startTime;
-    logger.error({
-      type: 'api_error',
-      method: 'GET',
-      endpoint: '/api/graph',
-      error: error.message,
-      duration,
-    });
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch graph data',
-      message: sanitizeErrorForClient(error),
-      source: 'error',
-      userAuth: !!userAccessToken,
-      databricksError: sanitizeErrorForClient(databricksError || error),
-      timestamp: new Date().toISOString(),
-      duration: `${duration}ms`,
-      metadata: {
-        source: 'error',
-        userAuth: !!userAccessToken,
-        databricksEnabled: !!userAccessToken,
-        databricksError: sanitizeErrorForClient(databricksError || error),
-        timestamp: new Date().toISOString(),
-        duration: `${duration}ms`,
-      },
-    });
-  }
-});
-
-/**
- * POST /api/graph
- * Write new nodes and edges to database
- * Tries Databricks first, falls back to SQLite on failure
- * Uses user's access token if available (X-Forwarded-Access-Token header)
- * Accepts optional tableName query parameter
- */
-app.post('/api/graph', async (req, res) => {
-  const { nodes, edges } = req.body;
-
-  if (!nodes || !edges) {
-    return res.status(400).json({
-      success: false,
-      message: 'Missing nodes or edges in request body',
-    });
-  }
-
-  if (nodes.length === 0 && edges.length === 0) {
-    return res.json({
-      success: true,
-      message: 'No new changes to write',
-      writtenNodes: 0,
-      writtenEdges: 0,
-    });
-  }
-
-  // Extract table name from query parameter
-  let tableName;
-  try {
-    tableName = validateTableName(req.query.tableName);
-  } catch (error) {
-    return res.status(400).json({
-      success: false,
-      error: error.message,
-      timestamp: new Date().toISOString(),
-    });
-  }
-
-  const startTime = Date.now();
-  let target = 'SQLite';
-  let writeError = null;
-
-  // Extract user's access token from Databricks Apps header
-  const userAccessToken = req.headers['x-forwarded-access-token'];
-  const userEmail = req.headers['x-forwarded-email'];
-
-  if (userAccessToken) {
-    logger.info({
-      type: 'user_auth',
-      endpoint: 'POST /api/graph',
-      email: userEmail,
-      hasToken: true,
-      tokenLength: userAccessToken.length,
-      tokenPrefix: userAccessToken.substring(0, 10) + '...',
-      tableName,
-    });
-  } else {
-    logger.info({
-      type: 'user_auth',
-      endpoint: 'POST /api/graph',
-      email: userEmail,
-      hasToken: false,
-      tableName,
-      availableHeaders: Object.keys(req.headers).filter((h) => h.startsWith('x-forwarded')),
-    });
-  }
-
-  try {
-    // Try writing to Databricks only if user token is available
-    if (userAccessToken) {
-      try {
-        await writeToDatabricks(nodes, edges, userAccessToken, tableName);
-        target = 'Databricks (user auth)';
-      } catch (error) {
-        writeError = error.message;
-        logger.warn({
-          type: 'api_fallback',
-          endpoint: 'POST /api/graph',
-          reason: 'databricks_failed',
-          error: sanitizeErrorForClient(error),
-          tableName,
-        });
-
-        // Fall back to SQLite
-        insertNodes(db, nodes);
-        insertEdges(db, edges);
-        target = 'SQLite (fallback)';
-      }
-    } else {
-      insertNodes(db, nodes);
-      insertEdges(db, edges);
-    }
-
-    const totalDuration = Date.now() - startTime;
-    const sanitizedError = sanitizeErrorForClient(writeError);
-    const message = writeError
-      ? `Wrote ${nodes.length} nodes and ${edges.length} edges to ${target} (Databricks unavailable: ${sanitizedError})`
-      : `Wrote ${nodes.length} nodes and ${edges.length} edges to ${target}`;
-
-    logger.info({
-      type: 'api_success',
-      method: 'POST',
-      endpoint: '/api/graph',
-      target,
-      nodeCount: nodes.length,
-      edgeCount: edges.length,
-      duration: totalDuration,
-    });
-
-    res.json({
-      success: true,
-      message,
-      source: target,
-      userAuth: !!userAccessToken,
-      databricksError: sanitizedError,
-      timestamp: new Date().toISOString(),
-      duration: `${totalDuration}ms`,
-      target,
-      jobId: `job_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-      writtenNodes: nodes.length,
-      writtenEdges: edges.length,
-      metadata: {
-        source: target,
-        userAuth: !!userAccessToken,
-        databricksEnabled: !!userAccessToken,
-        databricksError: sanitizedError,
-        timestamp: new Date().toISOString(),
-        duration: `${totalDuration}ms`,
-      },
-    });
-  } catch (error) {
-    const totalDuration = Date.now() - startTime;
-    logger.error({
-      type: 'api_error',
-      method: 'POST',
-      endpoint: '/api/graph',
-      error: error.message,
-      duration: totalDuration,
-    });
-
-    res.status(500).json({
-      success: false,
-      message: `Failed to write to database: ${sanitizeErrorForClient(error)}`,
-      source: 'error',
-      userAuth: !!userAccessToken,
-      databricksError: sanitizeErrorForClient(writeError || error),
-      timestamp: new Date().toISOString(),
-      duration: `${totalDuration}ms`,
-      metadata: {
-        source: 'error',
-        userAuth: !!userAccessToken,
-        databricksEnabled: !!userAccessToken,
-        databricksError: sanitizeErrorForClient(writeError || error),
-        timestamp: new Date().toISOString(),
-        duration: `${totalDuration}ms`,
-      },
-    });
-  }
-});
-
-/**
- * PATCH /api/graph/status
- * Update status of nodes and edges (e.g., from 'new' to 'existing')
- *
- * IMPORTANT: This endpoint is DEPRECATED and SQLite-only.
- * - Status is frontend UI state only (to show "proposed" vs "existing" nodes)
- * - Databricks table does NOT have a status column
- * - Status should be managed in frontend state, not persisted to Databricks
- * - This endpoint only exists for local SQLite persistence between sessions
- */
-app.patch('/api/graph/status', async (req, res) => {
-  const { nodeIds, edgeIds, status } = req.body;
-  const startTime = Date.now();
-
-  // Extract user's access token from Databricks Apps header
-  const userAccessToken = req.headers['x-forwarded-access-token'];
-
-  if (!status) {
-    return res.status(400).json({
-      success: false,
-      message: 'Missing status in request body',
-      source: 'error',
-      userAuth: !!userAccessToken,
-      databricksEnabled: !!userAccessToken,
-      databricksError: null,
-      timestamp: new Date().toISOString(),
-      duration: '0ms',
-    });
-  }
-
-  try {
-    // Note: Status updates are SQLite-only
-    // Databricks table structure doesn't include status field
-    if (nodeIds && nodeIds.length > 0) {
-      updateNodesStatus(db, nodeIds, status);
-    }
-
-    if (edgeIds && edgeIds.length > 0) {
-      updateEdgesStatus(db, edgeIds, status);
-    }
-
-    const totalDuration = Date.now() - startTime;
-    logger.info({
-      type: 'api_success',
-      method: 'PATCH',
-      endpoint: '/api/graph/status',
-      status,
-      nodeCount: nodeIds?.length || 0,
-      edgeCount: edgeIds?.length || 0,
-      duration: totalDuration,
-    });
-
-    res.json({
-      success: true,
-      message: `Updated ${(nodeIds?.length || 0) + (edgeIds?.length || 0)} items to status: ${status}`,
-      source: 'SQLite',
-      userAuth: !!userAccessToken,
-      databricksEnabled: !!userAccessToken,
-      databricksError: null,
-      timestamp: new Date().toISOString(),
-      duration: `${totalDuration}ms`,
-      updatedNodes: nodeIds?.length || 0,
-      updatedEdges: edgeIds?.length || 0,
-      metadata: {
-        source: 'SQLite',
-        userAuth: !!userAccessToken,
-        databricksEnabled: !!userAccessToken,
-        databricksError: null,
-        timestamp: new Date().toISOString(),
-        duration: `${totalDuration}ms`,
-      },
-    });
-  } catch (error) {
-    const totalDuration = Date.now() - startTime;
-    logger.error({
-      type: 'api_error',
-      method: 'PATCH',
-      endpoint: '/api/graph/status',
-      error: error.message,
-      duration: totalDuration,
-    });
-
-    res.status(500).json({
-      success: false,
-      message: `Failed to update status: ${sanitizeErrorForClient(error)}`,
-      source: 'error',
-      userAuth: !!userAccessToken,
-      databricksEnabled: !!userAccessToken,
-      databricksError: null,
-      timestamp: new Date().toISOString(),
-      duration: `${totalDuration}ms`,
-      metadata: {
-        source: 'error',
-        userAuth: !!userAccessToken,
-        databricksEnabled: !!userAccessToken,
-        databricksError: null,
-        timestamp: new Date().toISOString(),
-        duration: `${totalDuration}ms`,
-      },
-    });
-  }
-});
-
-/**
- * POST /api/graph/seed
- * Reseed the database with mock data
- */
-app.post('/api/graph/seed', async (req, res) => {
-  const startTime = Date.now();
-
-  // Extract user's access token from Databricks Apps header
-  const userAccessToken = req.headers['x-forwarded-access-token'];
-
-  try {
-    // Close current connection
-    db.close();
-
-    // Reseed
-    seedDatabase(true);
-
-    // Reinitialize connection
-    db = initDatabase();
-
-    const nodes = getAllNodes(db);
-    const edges = getAllEdges(db);
-
-    const totalDuration = Date.now() - startTime;
-    logger.info({
-      type: 'api_success',
-      method: 'POST',
-      endpoint: '/api/graph/seed',
-      nodeCount: nodes.length,
-      edgeCount: edges.length,
-      duration: totalDuration,
-    });
-
-    res.json({
-      success: true,
-      message: 'Database reseeded successfully',
-      source: 'SQLite',
-      userAuth: !!userAccessToken,
-      databricksEnabled: !!userAccessToken,
-      databricksError: null,
-      timestamp: new Date().toISOString(),
-      duration: `${totalDuration}ms`,
-      nodeCount: nodes.length,
-      edgeCount: edges.length,
-      metadata: {
-        source: 'SQLite',
-        userAuth: !!userAccessToken,
-        databricksEnabled: !!userAccessToken,
-        databricksError: null,
-        timestamp: new Date().toISOString(),
-        duration: `${totalDuration}ms`,
-      },
-    });
-  } catch (error) {
-    const totalDuration = Date.now() - startTime;
-    logger.error({
-      type: 'api_error',
-      method: 'POST',
-      endpoint: '/api/graph/seed',
-      error: error.message,
-      duration: totalDuration,
-    });
-
-    res.status(500).json({
-      success: false,
-      message: `Failed to reseed database: ${sanitizeErrorForClient(error)}`,
-      source: 'error',
-      userAuth: !!userAccessToken,
-      databricksEnabled: !!userAccessToken,
-      databricksError: null,
-      timestamp: new Date().toISOString(),
-      duration: `${totalDuration}ms`,
-      metadata: {
-        source: 'error',
-        userAuth: !!userAccessToken,
-        databricksEnabled: !!userAccessToken,
-        databricksError: null,
-        timestamp: new Date().toISOString(),
-        duration: `${totalDuration}ms`,
-      },
-    });
-  }
-});
-
-/**
- * DELETE /api/graph/node/:nodeId
- * Delete a node and its connected edges from the database
- * Tries Databricks first, falls back to SQLite
- */
-app.delete('/api/graph/node/:nodeId', async (req, res) => {
-  const { nodeId } = req.params;
-  const startTime = Date.now();
-  let target = 'SQLite';
-  let deleteError = null;
-
-  // Extract user's access token from Databricks Apps header
-  const userAccessToken = req.headers['x-forwarded-access-token'];
-
-  // Extract table name from query parameter
-  let tableName;
-  try {
-    tableName = validateTableName(req.query.tableName);
-  } catch (error) {
-    return res.status(400).json({
-      success: false,
-      error: error.message,
-      timestamp: new Date().toISOString(),
-    });
-  }
-
-  try {
-    // Try deleting from Databricks only if user token is available
-    if (userAccessToken) {
-      try {
-        let connection = await createDatabricksConnection(userAccessToken);
-        const session = await connection.openSession();
-
-        // Delete edges connected to this node first
-        const deleteEdgesQuery = `
-          DELETE FROM ${tableName}
-          WHERE node_start_id = '${nodeId}' OR node_end_id = '${nodeId}'
-        `;
-        const deleteEdgesOp = await session.executeStatement(deleteEdgesQuery, {
-          runAsync: false,
-        });
-        await deleteEdgesOp.close();
-
-        await session.close();
-        await connection.close();
-        target = 'Databricks (user auth)';
-      } catch (error) {
-        deleteError = error.message;
-        logger.warn({
-          type: 'api_fallback',
-          endpoint: 'DELETE /api/graph/node',
-          reason: 'databricks_failed',
-          error: sanitizeErrorForClient(error),
-          tableName,
-        });
-      }
-    }
-
-    // Also delete from SQLite (either as fallback or as primary)
-    // Delete connected edges first
-    const deleteEdgesStmt = db.prepare('DELETE FROM edges WHERE source = ? OR target = ?');
-    deleteEdgesStmt.run(nodeId, nodeId);
-
-    // Delete the node
-    const deleteNodeStmt = db.prepare('DELETE FROM nodes WHERE id = ?');
-    const result = deleteNodeStmt.run(nodeId);
-
-    if (!userAccessToken) {
-      target = 'SQLite';
-    } else if (deleteError) {
-      target = 'SQLite (fallback)';
-    }
-
-    const totalDuration = Date.now() - startTime;
-    const sanitizedError = sanitizeErrorForClient(deleteError);
-    const message = deleteError
-      ? `Deleted node ${nodeId} from ${target} (Databricks unavailable: ${sanitizedError})`
-      : `Deleted node ${nodeId} from ${target}`;
-
-    logger.info({
-      type: 'api_success',
-      method: 'DELETE',
-      endpoint: '/api/graph/node',
-      target,
-      nodeId,
-      duration: totalDuration,
-    });
-
-    res.json({
-      success: true,
-      message,
-      target,
-      nodeId,
-      deleted: result.changes > 0,
-      userAuth: !!userAccessToken,
-      databricksError: sanitizedError,
-      timestamp: new Date().toISOString(),
-      duration: `${totalDuration}ms`,
-    });
-  } catch (error) {
-    const totalDuration = Date.now() - startTime;
-    logger.error({
-      type: 'api_error',
-      method: 'DELETE',
-      endpoint: '/api/graph/node',
-      error: error.message,
-      duration: totalDuration,
-    });
-
-    res.status(500).json({
-      success: false,
-      message: `Failed to delete node: ${sanitizeErrorForClient(error)}`,
-      userAuth: !!userAccessToken,
-      databricksError: sanitizeErrorForClient(deleteError || error),
-      timestamp: new Date().toISOString(),
-      duration: `${totalDuration}ms`,
-    });
-  }
-});
-
-/**
- * DELETE /api/graph/edge/:edgeId
- * Delete an edge from the database
- * Tries Databricks first, falls back to SQLite
- */
-app.delete('/api/graph/edge/:edgeId', async (req, res) => {
-  const { edgeId } = req.params;
-  const startTime = Date.now();
-  let target = 'SQLite';
-  let deleteError = null;
-
-  // Extract user's access token from Databricks Apps header
-  const userAccessToken = req.headers['x-forwarded-access-token'];
-
-  // Extract table name from query parameter
-  let tableName;
-  try {
-    tableName = validateTableName(req.query.tableName);
-  } catch (error) {
-    return res.status(400).json({
-      success: false,
-      error: error.message,
-      timestamp: new Date().toISOString(),
-    });
-  }
-
-  try {
-    // Get edge details from SQLite first to identify it in Databricks
-    const edge = db.prepare('SELECT * FROM edges WHERE id = ?').get(edgeId);
-
-    if (!edge) {
-      return res.status(404).json({
-        success: false,
-        message: `Edge ${edgeId} not found`,
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    // Try deleting from Databricks only if user token is available
-    if (userAccessToken) {
-      try {
-        let connection = await createDatabricksConnection(userAccessToken);
-        const session = await connection.openSession();
-
-        // Delete edge from Databricks
-        // Note: Databricks edge table doesn't have an 'id' column,
-        // so we need to match by node_start_id, node_end_id, and relationship
-        const deleteEdgeQuery = `
-          DELETE FROM ${tableName}
-          WHERE node_start_id = '${edge.source}'
-            AND node_end_id = '${edge.target}'
-            AND relationship = '${edge.relationshipType}'
-        `;
-        const deleteEdgeOp = await session.executeStatement(deleteEdgeQuery, {
-          runAsync: false,
-        });
-        await deleteEdgeOp.close();
-
-        await session.close();
-        await connection.close();
-        target = 'Databricks (user auth)';
-      } catch (error) {
-        deleteError = error.message;
-        logger.warn({
-          type: 'api_fallback',
-          endpoint: 'DELETE /api/graph/edge',
-          reason: 'databricks_failed',
-          error: sanitizeErrorForClient(error),
-          tableName,
-        });
-      }
-    }
-
-    // Also delete from SQLite (either as fallback or as primary)
-    const deleteEdgeStmt = db.prepare('DELETE FROM edges WHERE id = ?');
-    const result = deleteEdgeStmt.run(edgeId);
-
-    if (!userAccessToken) {
-      target = 'SQLite';
-    } else if (deleteError) {
-      target = 'SQLite (fallback)';
-    }
-
-    const totalDuration = Date.now() - startTime;
-    const sanitizedError = sanitizeErrorForClient(deleteError);
-    const message = deleteError
-      ? `Deleted edge ${edgeId} from ${target} (Databricks unavailable: ${sanitizedError})`
-      : `Deleted edge ${edgeId} from ${target}`;
-
-    logger.info({
-      type: 'api_success',
-      method: 'DELETE',
-      endpoint: '/api/graph/edge',
-      target,
-      edgeId,
-      duration: totalDuration,
-    });
-
-    res.json({
-      success: true,
-      message,
-      target,
-      edgeId,
-      deleted: result.changes > 0,
-      userAuth: !!userAccessToken,
-      databricksError: sanitizedError,
-      timestamp: new Date().toISOString(),
-      duration: `${totalDuration}ms`,
-    });
-  } catch (error) {
-    const totalDuration = Date.now() - startTime;
-    logger.error({
-      type: 'api_error',
-      method: 'DELETE',
-      endpoint: '/api/graph/edge',
-      error: error.message,
-      duration: totalDuration,
-    });
-
-    res.status(500).json({
-      success: false,
-      message: `Failed to delete edge: ${sanitizeErrorForClient(error)}`,
-      userAuth: !!userAccessToken,
-      databricksError: sanitizeErrorForClient(deleteError || error),
-      timestamp: new Date().toISOString(),
-      duration: `${totalDuration}ms`,
-    });
-  }
-});
-
-/**
- * GET /api/job/:jobId
- * Check job status (simplified for demo)
- */
-app.get('/api/job/:jobId', (req, res) => {
-  const { jobId } = req.params;
-
-  res.json({
-    jobId,
-    status: 'SUCCESS',
-    message: 'Write operation completed successfully',
-  });
-});
-
-/**
- * GET /api/cases
- * Fetch all cases from database
- */
-app.get('/api/cases', async (req, res) => {
-  const startTime = Date.now();
-  const userAccessToken = req.headers['x-forwarded-access-token'];
-
-  try {
-    const cases = getAllCases(db);
-    const duration = Date.now() - startTime;
-
-    logger.info({
-      type: 'api_success',
-      method: 'GET',
-      endpoint: '/api/cases',
-      caseCount: cases.length,
-      duration,
-    });
-
-    res.json({
-      success: true,
-      source: 'SQLite',
-      userAuth: !!userAccessToken,
-      timestamp: new Date().toISOString(),
-      duration: `${duration}ms`,
-      cases,
-    });
-  } catch (error) {
-    const duration = Date.now() - startTime;
-    logger.error({
-      type: 'api_error',
-      method: 'GET',
-      endpoint: '/api/cases',
-      error: error.message,
-      duration,
-    });
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch cases',
-      message: sanitizeErrorForClient(error),
-      timestamp: new Date().toISOString(),
-      duration: `${duration}ms`,
-    });
-  }
-});
-
-/**
- * GET /api/cases/:caseId
- * Fetch a single case by ID
- */
-app.get('/api/cases/:caseId', async (req, res) => {
-  const { caseId } = req.params;
-  const startTime = Date.now();
-  const userAccessToken = req.headers['x-forwarded-access-token'];
-
-  try {
-    const caseData = getCaseById(db, caseId);
-
-    if (!caseData) {
-      return res.status(404).json({
-        success: false,
-        error: `Case ${caseId} not found`,
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    const duration = Date.now() - startTime;
-
-    logger.info({
-      type: 'api_success',
-      method: 'GET',
-      endpoint: '/api/cases/:caseId',
-      caseId,
-      duration,
-    });
-
-    res.json({
-      success: true,
-      source: 'SQLite',
-      userAuth: !!userAccessToken,
-      timestamp: new Date().toISOString(),
-      duration: `${duration}ms`,
-      case: caseData,
-    });
-  } catch (error) {
-    const duration = Date.now() - startTime;
-    logger.error({
-      type: 'api_error',
-      method: 'GET',
-      endpoint: '/api/cases/:caseId',
-      error: error.message,
-      duration,
-    });
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch case',
-      message: sanitizeErrorForClient(error),
-      timestamp: new Date().toISOString(),
-      duration: `${duration}ms`,
-    });
-  }
-});
-
-/**
- * POST /api/cases
- * Create a new case
- */
-app.post('/api/cases', async (req, res) => {
-  const caseData = req.body;
-  const startTime = Date.now();
-  const userAccessToken = req.headers['x-forwarded-access-token'];
-
-  if (!caseData || !caseData.id) {
-    return res.status(400).json({
-      success: false,
-      message: 'Missing case data or case ID in request body',
-      timestamp: new Date().toISOString(),
-    });
-  }
-
-  try {
-    insertCase(db, caseData);
-
-    const duration = Date.now() - startTime;
-    logger.info({
-      type: 'api_success',
-      method: 'POST',
-      endpoint: '/api/cases',
-      caseId: caseData.id,
-      duration,
-    });
-
-    res.json({
-      success: true,
-      message: `Created case ${caseData.caseNumber}`,
-      source: 'SQLite',
-      userAuth: !!userAccessToken,
-      timestamp: new Date().toISOString(),
-      duration: `${duration}ms`,
-      case: caseData,
-    });
-  } catch (error) {
-    const duration = Date.now() - startTime;
-    logger.error({
-      type: 'api_error',
-      method: 'POST',
-      endpoint: '/api/cases',
-      error: error.message,
-      duration,
-    });
-
-    res.status(500).json({
-      success: false,
-      message: `Failed to create case: ${sanitizeErrorForClient(error)}`,
-      timestamp: new Date().toISOString(),
-      duration: `${duration}ms`,
-    });
-  }
-});
-
-/**
- * PATCH /api/cases/:caseId
- * Update an existing case
- */
-app.patch('/api/cases/:caseId', async (req, res) => {
-  const { caseId } = req.params;
-  const updates = req.body;
-  const startTime = Date.now();
-  const userAccessToken = req.headers['x-forwarded-access-token'];
-
-  if (!updates || Object.keys(updates).length === 0) {
-    return res.status(400).json({
-      success: false,
-      message: 'No updates provided in request body',
-      timestamp: new Date().toISOString(),
-    });
-  }
-
-  try {
-    // Check if case exists
-    const existingCase = getCaseById(db, caseId);
-    if (!existingCase) {
-      return res.status(404).json({
-        success: false,
-        error: `Case ${caseId} not found`,
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    updateCase(db, caseId, updates);
-
-    const duration = Date.now() - startTime;
-    logger.info({
-      type: 'api_success',
-      method: 'PATCH',
-      endpoint: '/api/cases/:caseId',
-      caseId,
-      duration,
-    });
-
-    res.json({
-      success: true,
-      message: `Updated case ${caseId}`,
-      source: 'SQLite',
-      userAuth: !!userAccessToken,
-      timestamp: new Date().toISOString(),
-      duration: `${duration}ms`,
-    });
-  } catch (error) {
-    const duration = Date.now() - startTime;
-    logger.error({
-      type: 'api_error',
-      method: 'PATCH',
-      endpoint: '/api/cases/:caseId',
-      error: error.message,
-      duration,
-    });
-
-    res.status(500).json({
-      success: false,
-      message: `Failed to update case: ${sanitizeErrorForClient(error)}`,
-      timestamp: new Date().toISOString(),
-      duration: `${duration}ms`,
-    });
-  }
-});
-
-/**
- * DELETE /api/cases/:caseId
- * Delete a case
- */
-app.delete('/api/cases/:caseId', async (req, res) => {
-  const { caseId } = req.params;
-  const startTime = Date.now();
-  const userAccessToken = req.headers['x-forwarded-access-token'];
-
-  try {
-    const deleted = deleteCase(db, caseId);
-
-    if (!deleted) {
-      return res.status(404).json({
-        success: false,
-        error: `Case ${caseId} not found`,
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    const duration = Date.now() - startTime;
-    logger.info({
-      type: 'api_success',
-      method: 'DELETE',
-      endpoint: '/api/cases/:caseId',
-      caseId,
-      duration,
-    });
-
-    res.json({
-      success: true,
-      message: `Deleted case ${caseId}`,
-      source: 'SQLite',
-      userAuth: !!userAccessToken,
-      timestamp: new Date().toISOString(),
-      duration: `${duration}ms`,
-    });
-  } catch (error) {
-    const duration = Date.now() - startTime;
-    logger.error({
-      type: 'api_error',
-      method: 'DELETE',
-      endpoint: '/api/cases/:caseId',
-      error: error.message,
-      duration,
-    });
-
-    res.status(500).json({
-      success: false,
-      message: `Failed to delete case: ${sanitizeErrorForClient(error)}`,
-      timestamp: new Date().toISOString(),
-      duration: `${duration}ms`,
-    });
-  }
-});
-
-/**
- * GET /api/documents
- * List all available PDF and HTML documents from scrapers
- */
-app.get('/api/documents', (req, res) => {
-  try {
-    const scrapersDir = path.join(__dirname, '../scrapers/data/reports');
-    const files = [];
-
-    if (!fs.existsSync(scrapersDir)) {
-      return res.json({ files: [] });
-    }
-
-    function scanDirectory(dir, relativePath = '') {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
-
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-        const relativeFilePath = path.join(relativePath, entry.name);
-
-        if (entry.isDirectory()) {
-          scanDirectory(fullPath, relativeFilePath);
-        } else if (entry.isFile()) {
-          const ext = entry.name.toLowerCase();
-          if (ext.endsWith('.pdf') || ext.endsWith('.html')) {
-            const stats = fs.statSync(fullPath);
-            const source = relativePath.split(path.sep)[0] || 'unknown';
-            const type = ext.endsWith('.pdf') ? 'pdf' : 'html';
-
-            files.push({
-              name: entry.name,
-              path: relativeFilePath.replace(/\\/g, '/'), // Normalize path separators
-              source: source,
-              type: type,
-              size: stats.size,
-              date: stats.mtime.toISOString(),
-            });
-          }
-        }
-      }
-    }
-
-    scanDirectory(scrapersDir);
-
-    res.json({
-      success: true,
-      files: files.sort((a, b) => b.date.localeCompare(a.date)),
-      count: files.length,
-    });
-  } catch (error) {
-    logger.error({
-      type: 'api_error',
-      method: 'GET',
-      endpoint: '/api/documents',
-      error: error.message,
-    });
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to list documents',
-      message: error.message,
-      files: [],
-    });
-  }
-});
-
-/**
- * GET /api/documents/:path
- * Serve a PDF or HTML document by path
- */
-app.get('/api/documents/:path(*)', (req, res) => {
-  try {
-    const requestedPath = req.params.path;
-
-    // Security: Prevent directory traversal
-    if (
-      requestedPath.includes('..') ||
-      (requestedPath.includes('/') && requestedPath.startsWith('/'))
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid path',
-      });
-    }
-
-    const scrapersDir = path.join(__dirname, '../scrapers/data/reports');
-    const filePath = path.join(scrapersDir, requestedPath);
-
-    // Ensure the file is within the scrapers directory
-    if (!filePath.startsWith(scrapersDir)) {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied',
-      });
-    }
-
-    // Check if file exists
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({
-        success: false,
-        error: 'File not found',
-      });
-    }
-
-    const ext = filePath.toLowerCase();
-    const isPDF = ext.endsWith('.pdf');
-    const isHTML = ext.endsWith('.html');
-
-    if (!isPDF && !isHTML) {
-      return res.status(400).json({
-        success: false,
-        error: 'File must be PDF or HTML',
-      });
-    }
-
-    if (isPDF) {
-      // Set headers for PDF
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="${path.basename(filePath)}"`);
-    } else {
-      // Set headers for HTML
-      res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      res.setHeader('Content-Disposition', `inline; filename="${path.basename(filePath)}"`);
-    }
-
-    // Stream the file
-    const fileStream = fs.createReadStream(filePath);
-    fileStream.pipe(res);
-
-    fileStream.on('error', (error) => {
-      logger.error({
-        type: 'api_error',
-        method: 'GET',
-        endpoint: '/api/documents/:path',
-        error: error.message,
-      });
-
-      if (!res.headersSent) {
-        res.status(500).json({
-          success: false,
-          error: 'Failed to read file',
-        });
-      }
-    });
-  } catch (error) {
-    logger.error({
-      type: 'api_error',
-      method: 'GET',
-      endpoint: '/api/documents/:path',
-      error: error.message,
-    });
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to serve document',
-      message: error.message,
-    });
-  }
-});
-
-/**
- * GET /api/investigative/cells
- * Get device counts per H3 cell for a specific time bucket
- */
-app.get('/api/investigative/cells', (req, res) => {
-  const { time_bucket, city } = req.query;
-
-  try {
-    let events = investigativeData.location_events;
-
-    // Filter by time bucket if provided
-    if (time_bucket) {
-      events = events.filter((e) => e.time_bucket === time_bucket);
-    }
-
-    // Filter by city if provided
-    if (city) {
-      events = events.filter((e) => e.city === city);
-    }
-
-    // Group by H3 cell and count devices
-    const cellCounts = {};
-    events.forEach((event) => {
-      if (!cellCounts[event.h3_cell]) {
-        cellCounts[event.h3_cell] = {
-          h3_cell: event.h3_cell,
-          device_count: 0,
-          devices: new Set(),
-          city: event.city,
-          state: event.state,
-          neighborhood: event.neighborhood || 'Unknown',
-          latitude: event.latitude,
-          longitude: event.longitude,
-          incident_id: event.incident_id,
-        };
-      }
-      cellCounts[event.h3_cell].devices.add(event.entity_id);
-    });
-
-    // Convert to array and add device count
-    const cells = Object.values(cellCounts).map((cell) => ({
-      ...cell,
-      device_count: cell.devices.size,
-      devices: Array.from(cell.devices),
+    const towers = getAllCellTowers(db);
+    const cases = getAllDemoCases(db);
+    const keyFrames = cases.map((c) => ({
+      id: c.id,
+      caseNumber: c.case_number,
+      hour: c.hour,
+      lat: c.latitude,
+      lng: c.longitude,
+      neighborhood: c.neighborhood,
+      city: c.city,
+      description: c.description,
+      priority: c.priority.toLowerCase(),
     }));
 
     res.json({
       success: true,
-      cells: cells.sort((a, b) => b.device_count - a.device_count),
-      total_cells: cells.length,
-      filters: { time_bucket, city },
+      towers,
+      keyFrames,
+      timeRange: { min: 0, max: 71 },
+      totalHours: 72,
     });
   } catch (error) {
-    logger.error({
-      type: 'api_error',
-      method: 'GET',
-      endpoint: '/api/investigative/cells',
-      error: error.message,
-    });
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch cell data',
-      message: error.message,
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 /**
- * GET /api/investigative/entities-in-cell
- * Get all entities (devices) in a specific H3 cell at a specific time
+ * GET /api/demo/towers
+ * Get all cell towers
  */
-app.get('/api/investigative/entities-in-cell', (req, res) => {
-  const { h3_cell, time_bucket } = req.query;
-
-  if (!h3_cell || !time_bucket) {
-    return res.status(400).json({
-      success: false,
-      error: 'Missing required parameters: h3_cell and time_bucket',
-    });
-  }
-
+app.get('/api/demo/towers', (req, res) => {
   try {
-    const events = investigativeData.location_events.filter(
-      (e) => e.h3_cell === h3_cell && e.time_bucket === time_bucket
-    );
-
-    // Get unique entities
-    const entityIds = [...new Set(events.map((e) => e.entity_id))];
-
-    // Enrich with profile data
-    const entities = entityIds.map((entityId) => {
-      const profile = investigativeData.entity_profiles.find((p) => p.entity_id === entityId);
-      const event = events.find((e) => e.entity_id === entityId);
-
-      return {
-        entity_id: entityId,
-        entity_type: event.entity_type,
-        latitude: event.latitude,
-        longitude: event.longitude,
-        case_id: event.case_id,
-        profile: profile || null,
-      };
-    });
-
-    res.json({
-      success: true,
-      h3_cell,
-      time_bucket,
-      entity_count: entities.length,
-      entities,
-    });
+    const towers = getAllCellTowers(db);
+    res.json({ success: true, towers });
   } catch (error) {
-    logger.error({
-      type: 'api_error',
-      method: 'GET',
-      endpoint: '/api/investigative/entities-in-cell',
-      error: error.message,
-    });
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch entities',
-      message: error.message,
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 /**
- * GET /api/investigative/co-presence
- * Get co-presence edges for entities, optionally filtered by case type
+ * GET /api/demo/persons
+ * Get all persons (optionally filter to suspects only)
  */
-app.get('/api/investigative/co-presence', (req, res) => {
-  const { entity_ids, case_filter } = req.query;
-
+app.get('/api/demo/persons', (req, res) => {
   try {
-    let edges = investigativeData.co_presence_edges;
+    const suspectsOnly = req.query.suspects === 'true';
+    const persons = suspectsOnly ? getSuspects(db) : getAllPersons(db);
+    res.json({ success: true, persons });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
-    // Filter by entities if provided
-    if (entity_ids) {
-      const entityList = Array.isArray(entity_ids) ? entity_ids : entity_ids.split(',');
-      edges = edges.filter(
-        (edge) => entityList.includes(edge.entity1) || entityList.includes(edge.entity2)
-      );
+/**
+ * GET /api/demo/persons/:id
+ * Get a single person by ID
+ */
+app.get('/api/demo/persons/:id', (req, res) => {
+  try {
+    const person = getPersonById(db, req.params.id);
+    if (!person) {
+      return res.status(404).json({ success: false, error: 'Person not found' });
     }
+    res.json({ success: true, person });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
-    // Filter by case type if provided
-    if (case_filter === 'burglary_only') {
-      edges = edges.filter((edge) =>
-        edge.case_ids.some((caseId) => caseId.includes('CASE_DC') || caseId.includes('CASE_TN'))
-      );
+/**
+ * GET /api/demo/devices
+ * Get all devices with owner info
+ */
+app.get('/api/demo/devices', (req, res) => {
+  try {
+    const devices = getAllDevices(db);
+    res.json({ success: true, devices });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/demo/devices/:id
+ * Get a single device by ID
+ */
+app.get('/api/demo/devices/:id', (req, res) => {
+  try {
+    const device = getDeviceById(db, req.params.id);
+    if (!device) {
+      return res.status(404).json({ success: false, error: 'Device not found' });
     }
-
-    res.json({
-      success: true,
-      edges,
-      edge_count: edges.length,
-    });
+    res.json({ success: true, device });
   } catch (error) {
-    logger.error({
-      type: 'api_error',
-      method: 'GET',
-      endpoint: '/api/investigative/co-presence',
-      error: error.message,
-    });
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch co-presence data',
-      message: error.message,
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 /**
- * POST /api/investigative/rank-entities
- * Rank entities for a specific case based on co-presence patterns
+ * GET /api/demo/positions/:hour
+ * Get all device positions at a specific hour
  */
-app.post('/api/investigative/rank-entities', (req, res) => {
-  const { case_id, entity_ids } = req.body;
-
-  if (!case_id || !entity_ids || !Array.isArray(entity_ids)) {
-    return res.status(400).json({
-      success: false,
-      error: 'Missing required parameters: case_id and entity_ids (array)',
-    });
-  }
-
+app.get('/api/demo/positions/:hour', (req, res) => {
   try {
-    // Get all co-presence edges for these entities
-    const edges = investigativeData.co_presence_edges.filter(
-      (edge) =>
-        (entity_ids.includes(edge.entity1) || entity_ids.includes(edge.entity2)) &&
-        edge.case_ids.some((cid) => cid.includes('CASE_DC') || cid.includes('CASE_TN'))
-    );
-
-    // Score each entity
-    const entityScores = {};
-    entity_ids.forEach((entityId) => {
-      const relevantEdges = edges.filter((e) => e.entity1 === entityId || e.entity2 === entityId);
-
-      // Calculate score based on:
-      // - Number of co-presence relationships
-      // - Weight of those relationships
-      // - Cross-case overlap
-      const score = relevantEdges.reduce((sum, edge) => {
-        const crossCaseBonus = edge.case_ids.length > 1 ? 2 : 1;
-        return sum + edge.weight * crossCaseBonus;
-      }, 0);
-
-      entityScores[entityId] = {
-        entity_id: entityId,
-        score,
-        edge_count: relevantEdges.length,
-        cross_case_count: relevantEdges.filter((e) => e.case_ids.length > 1).length,
-      };
-    });
-
-    // Sort by score and return top entities
-    const rankedEntities = Object.values(entityScores)
-      .sort((a, b) => b.score - a.score)
-      .map((entity, index) => ({
-        ...entity,
-        rank: index + 1,
-        profile: investigativeData.entity_profiles.find((p) => p.entity_id === entity.entity_id),
-      }));
-
+    const hour = parseInt(req.params.hour, 10);
+    if (isNaN(hour) || hour < 0 || hour > 71) {
+      return res.status(400).json({ success: false, error: 'Hour must be 0-71' });
+    }
+    const positions = getDevicePositionsAtHour(db, hour);
     res.json({
       success: true,
-      case_id,
-      ranked_entities: rankedEntities,
-      top_suspects: rankedEntities.slice(0, 2),
-    });
-  } catch (error) {
-    logger.error({
-      type: 'api_error',
-      method: 'POST',
-      endpoint: '/api/investigative/rank-entities',
-      error: error.message,
-    });
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to rank entities',
-      message: error.message,
-    });
-  }
-});
-
-/**
- * GET /api/investigative/handoff-candidates
- * Get potential burner phone handoff detections
- */
-app.get('/api/investigative/handoff-candidates', (req, res) => {
-  try {
-    const candidates = investigativeData.handoff_candidates;
-
-    res.json({
-      success: true,
-      candidates,
-      top_candidate: candidates.find((c) => c.confidence === 'High'),
-    });
-  } catch (error) {
-    logger.error({
-      type: 'api_error',
-      method: 'GET',
-      endpoint: '/api/investigative/handoff-candidates',
-      error: error.message,
-    });
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch handoff candidates',
-      message: error.message,
-    });
-  }
-});
-
-/**
- * POST /api/investigative/evidence-card
- * Generate an evidence card for suspects and cases
- */
-app.post('/api/investigative/evidence-card', (req, res) => {
-  const { entity_ids, case_ids } = req.body;
-
-  if (!entity_ids || !Array.isArray(entity_ids) || entity_ids.length === 0) {
-    return res.status(400).json({
-      success: false,
-      error: 'Missing required parameter: entity_ids (array)',
-    });
-  }
-
-  try {
-    // Get entity profiles
-    const entities = entity_ids
-      .map((id) => investigativeData.entity_profiles.find((p) => p.entity_id === id))
-      .filter(Boolean);
-
-    // Get cases
-    const cases = investigativeData.cases.filter((c) =>
-      case_ids ? case_ids.includes(c.id) : true
-    );
-
-    // Get co-presence evidence
-    const coPresenceEdges = investigativeData.co_presence_edges.filter(
-      (edge) => entity_ids.includes(edge.entity1) || entity_ids.includes(edge.entity2)
-    );
-
-    // Get social links
-    const socialLinks = investigativeData.social_links.filter(
-      (link) => entity_ids.includes(link.entity1) || entity_ids.includes(link.entity2)
-    );
-
-    // Build evidence card
-    const evidenceCard = {
-      title: 'Cross-Jurisdictional Burglary Crew Evidence',
-      generated_at: new Date().toISOString(),
-      entities: entities.map((e) => ({
-        id: e.entity_id,
-        name: e.owner_name,
-        alias: e.owner_alias,
-        image: e.image_url,
+      hour,
+      positions: positions.map((p) => ({
+        deviceId: p.device_id,
+        deviceName: p.device_name,
+        lat: p.latitude,
+        lng: p.longitude,
+        towerId: p.tower_id,
+        towerName: p.tower_name,
+        towerCity: p.tower_city,
+        ownerId: p.owner_id,
+        ownerName: p.owner_name,
+        ownerAlias: p.owner_alias,
+        isSuspect: p.is_suspect === 1,
       })),
-      linked_cases: cases.map((c) => ({
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/demo/hotspots/:hour
+ * Get hotspots (towers with device counts) at a specific hour
+ */
+app.get('/api/demo/hotspots/:hour', (req, res) => {
+  try {
+    const hour = parseInt(req.params.hour, 10);
+    if (isNaN(hour) || hour < 0 || hour > 71) {
+      return res.status(400).json({ success: false, error: 'Hour must be 0-71' });
+    }
+    const hotspots = getHotspotsAtHour(db, hour);
+    res.json({
+      success: true,
+      hour,
+      hotspots: hotspots.map((h) => ({
+        towerId: h.tower_id,
+        towerName: h.tower_name,
+        lat: h.latitude,
+        lng: h.longitude,
+        city: h.city,
+        deviceCount: h.device_count,
+        suspectCount: h.suspect_count,
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/demo/cases
+ * Get all demo cases
+ */
+app.get('/api/demo/cases', (req, res) => {
+  try {
+    const cases = getAllDemoCases(db);
+    res.json({
+      success: true,
+      cases: cases.map((c) => ({
         id: c.id,
-        case_number: c.case_number,
+        caseNumber: c.case_number,
         title: c.title,
+        description: c.description,
         city: c.city,
         state: c.state,
+        neighborhood: c.neighborhood,
+        lat: c.latitude,
+        lng: c.longitude,
+        hour: c.hour,
+        status: c.status,
+        priority: c.priority,
+        assignedTo: c.assigned_to,
+        estimatedLoss: c.estimated_loss,
+        methodOfEntry: c.method_of_entry,
+        stolenItems: c.stolen_items,
+        persons: c.persons,
+        devices: c.devices,
+        createdAt: c.created_at,
+        updatedAt: c.updated_at,
       })),
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/demo/cases/:id
+ * Get a single case by ID
+ */
+app.get('/api/demo/cases/:id', (req, res) => {
+  try {
+    const caseData = getDemoCaseById(db, req.params.id);
+    if (!caseData) {
+      return res.status(404).json({ success: false, error: 'Case not found' });
+    }
+    res.json({ success: true, case: caseData });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/demo/cases/at-hour/:hour
+ * Get cases that occur at a specific hour (key frames)
+ */
+app.get('/api/demo/cases/at-hour/:hour', (req, res) => {
+  try {
+    const hour = parseInt(req.params.hour, 10);
+    const cases = getDemoCaseByHour(db, hour);
+    res.json({ success: true, hour, cases });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * PATCH /api/demo/cases/:id/status
+ * Update case status
+ */
+app.patch('/api/demo/cases/:id/status', (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!['investigating', 'review', 'adjudicated'].includes(status)) {
+      return res.status(400).json({ success: false, error: 'Invalid status' });
+    }
+    updateDemoCaseStatus(db, req.params.id, status);
+    res.json({ success: true, message: `Case ${req.params.id} updated to ${status}` });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/demo/relationships
+ * Get all person relationships (for graph view)
+ */
+app.get('/api/demo/relationships', (req, res) => {
+  try {
+    const relationships = getAllRelationships(db);
+    res.json({
+      success: true,
+      relationships: relationships.map((r) => ({
+        person1Id: r.person1_id,
+        person1Name: r.person1_name,
+        person1Alias: r.person1_alias,
+        person2Id: r.person2_id,
+        person2Name: r.person2_name,
+        person2Alias: r.person2_alias,
+        type: r.relationship_type,
+        count: r.count,
+        cities: r.cities,
+        notes: r.notes,
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/demo/relationships/:personId
+ * Get relationships for a specific person
+ */
+app.get('/api/demo/relationships/:personId', (req, res) => {
+  try {
+    const relationships = getRelationshipsForPerson(db, req.params.personId);
+    res.json({ success: true, relationships });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/demo/graph-data
+ * Get graph data for network visualization (suspects, locations, relationships)
+ */
+app.get('/api/demo/graph-data', (req, res) => {
+  try {
+    const suspects = getSuspects(db);
+    const cases = getAllDemoCases(db);
+    const relationships = getAllRelationships(db);
+
+    // Build nodes: suspects
+    const nodes = suspects.map((s) => ({
+      id: s.id,
+      name: s.name,
+      alias: s.alias,
+      type: 'person',
+      isSuspect: true,
+      threatLevel: s.threat_level,
+      criminalHistory: s.criminal_history,
+    }));
+
+    // Build nodes: locations from cases
+    const locationMap = new Map();
+    cases.forEach((c) => {
+      const locId = `loc_${c.neighborhood.toLowerCase().replace(/\s+/g, '_')}`;
+      if (!locationMap.has(locId)) {
+        locationMap.set(locId, {
+          id: locId,
+          name: c.neighborhood,
+          type: 'location',
+          city: c.city,
+          lat: c.latitude,
+          lng: c.longitude,
+          caseCount: 1,
+        });
+      } else {
+        locationMap.get(locId).caseCount++;
+      }
+    });
+    nodes.push(...locationMap.values());
+
+    // Build links: suspect relationships
+    const links = relationships.map((r) => ({
+      source: r.person1_id,
+      target: r.person2_id,
+      type: r.relationship_type,
+      count: r.count,
+      cities: r.cities,
+    }));
+
+    // Build links: suspects to locations
+    suspects.forEach((s) => {
+      locationMap.forEach((loc) => {
+        links.push({
+          source: s.id,
+          target: loc.id,
+          type: 'DETECTED_AT',
+          count: 1,
+        });
+      });
+    });
+
+    res.json({ success: true, nodes, links });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /api/demo/evidence-card
+ * Generate an evidence card summary for given suspects
+ */
+app.post('/api/demo/evidence-card', (req, res) => {
+  try {
+    const { personIds } = req.body;
+    if (!personIds || !Array.isArray(personIds)) {
+      return res.status(400).json({ success: false, error: 'personIds array required' });
+    }
+
+    const suspects = personIds.map((id) => getPersonById(db, id)).filter(Boolean);
+    const cases = getAllDemoCases(db);
+    const relationships = getAllRelationships(db).filter(
+      (r) => personIds.includes(r.person1_id) || personIds.includes(r.person2_id)
+    );
+
+    const coLocations = relationships.find((r) => r.relationship_type === 'CO_LOCATED');
+    const contacts = relationships.find((r) => r.relationship_type === 'CONTACTED');
+
+    const evidenceCard = {
+      title: 'Cross-Jurisdictional Burglary Crew Evidence',
+      generatedAt: new Date().toISOString(),
+      suspects: suspects.map((s) => ({
+        id: s.id,
+        name: s.name,
+        alias: s.alias,
+        threatLevel: s.threat_level,
+        criminalHistory: s.criminal_history,
+      })),
+      linkedCases: cases
+        .filter((c) => c.persons.some((p) => personIds.includes(p.id)))
+        .map((c) => ({
+          id: c.id,
+          caseNumber: c.case_number,
+          title: c.title,
+          city: c.city,
+          status: c.status,
+          estimatedLoss: c.estimated_loss,
+        })),
       signals: {
         geospatial: [
           {
-            claim: `Suspects co-located at ${coPresenceEdges.length} different crime scenes across DC and Nashville`,
-            support: coPresenceEdges.map((e) => ({
-              type: 'co_presence_edge',
-              id: e.id,
-              cities: e.cities,
-              occurrences: e.occurrences,
-            })),
+            claim: `Suspects co-located at ${coLocations?.count || 10} different crime scenes across DC and Nashville`,
             confidence: 'High',
           },
           {
-            claim: 'Both suspects present at DC burglary on December 1, 2024 at 10:30 PM',
-            support: [
-              {
-                type: 'location_event',
-                h3_cell: investigativeData.config.dc_incident.h3_cell,
-                time: investigativeData.config.dc_incident.time_bucket,
-              },
-            ],
-            confidence: 'High',
-          },
-          {
-            claim: 'Both suspects present at Nashville burglary on November 24, 2024',
-            support: [{ type: 'case', case_id: 'CASE_TN_007' }],
+            claim: 'Both suspects present at Georgetown burglary (Hour 25) - PRIMARY INCIDENT',
             confidence: 'High',
           },
         ],
         narrative: [
           {
-            claim:
-              'Consistent method of operation: "Rear window smash" entry across all linked cases',
-            support: cases
-              .filter((c) => c.method_of_entry === 'Rear window smash')
-              .map((c) => ({
-                type: 'case',
-                case_id: c.id,
-                case_number: c.case_number,
-                excerpt: c.method_of_entry,
-              })),
+            claim: 'Consistent MO: "Rear window smash" entry across all linked cases',
             confidence: 'High',
           },
           {
             claim: 'Jewelry targeted in all burglaries, indicating specialized crew',
-            support: cases
-              .filter((c) => c.stolen_items?.includes('Jewelry'))
-              .map((c) => ({
-                type: 'case',
-                case_id: c.id,
-                stolen_items: c.stolen_items,
-              })),
             confidence: 'High',
           },
         ],
-        social: socialLinks.map((link) => ({
-          claim: `${link.entity1} and ${link.entity2}: ${link.relationship_type}`,
-          support: [
-            {
-              type: 'social_link',
-              id: link.id,
-              source: link.source,
-              since: link.since,
-              notes: link.notes,
-            },
-          ],
-          confidence: link.confidence,
-        })),
+        social: [
+          {
+            claim: `${contacts?.count || 47} phone contacts between suspects in investigation period`,
+            confidence: 'High',
+          },
+          {
+            claim: 'Prior arrests together in Virginia confirm known association',
+            confidence: 'High',
+          },
+        ],
       },
-      summary: `Intelligence analysis reveals a coordinated burglary crew operating across DC and Nashville. The two primary suspects (${entities.map((e) => e.owner_name).join(' and ')}) have been co-located at multiple burglary scenes, demonstrating a consistent modus operandi of rear window entry and jewelry theft. Social network analysis confirms they are known associates with prior joint criminal history. Geospatial evidence places both suspects at the December 1, 2024 DC incident and the November 24, 2024 Nashville incident. This represents a traveling crew with cross-jurisdictional coordination.`,
-      recommended_action:
-        'Coordinate with Nashville PD for joint investigation. Issue warrants for both suspects. Surveillance on known associate Victor Martinez (fence) in Baltimore.',
+      summary: `Intelligence analysis reveals a coordinated burglary crew operating across DC and Nashville. Primary suspects ${suspects.map((s) => s.name).join(' and ')} have been co-located at multiple crime scenes with consistent MO. Geospatial evidence places both at the December 1 Georgetown incident (est. loss $185K). Cross-jurisdictional pattern suggests organized operation.`,
+      recommendedAction:
+        'Coordinate with Nashville PD for joint investigation. Issue warrants for both suspects. Monitor for burner phone activity.',
     };
 
-    res.json({
-      success: true,
-      evidence_card: evidenceCard,
-    });
-  } catch (error) {
-    logger.error({
-      type: 'api_error',
-      method: 'POST',
-      endpoint: '/api/investigative/evidence-card',
-      error: error.message,
-    });
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to generate evidence card',
-      message: error.message,
-    });
-  }
-});
-
-/**
- * GET /api/investigative/config
- * Get demo configuration for frontend
- */
-app.get('/api/investigative/config', (req, res) => {
-  try {
-    res.json({
-      success: true,
-      config: investigativeData.config,
-      cases: investigativeData.cases,
-      cell_metadata: investigativeData.cell_metadata,
-    });
-  } catch (error) {
-    logger.error({
-      type: 'api_error',
-      method: 'GET',
-      endpoint: '/api/investigative/config',
-      error: error.message,
-    });
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch config',
-      message: error.message,
-    });
-  }
-});
-
-/**
- * GET /api/investigative/time-buckets
- * Get all available time buckets for filtering
- */
-app.get('/api/investigative/time-buckets', (req, res) => {
-  try {
-    res.json({
-      success: true,
-      time_buckets: investigativeData.time_buckets || [],
-      cases: investigativeData.cases || [],
-    });
-  } catch (error) {
-    logger.error({
-      type: 'api_error',
-      method: 'GET',
-      endpoint: '/api/investigative/time-buckets',
-      error: error.message,
-    });
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch time buckets',
-      message: error.message,
-    });
-  }
-});
-
-/**
- * GET /api/investigative/cases
- * Get all pre-created cases (key frames)
- */
-app.get('/api/investigative/cases', (req, res) => {
-  try {
-    res.json({
-      success: true,
-      cases: investigativeData.cases || [],
-    });
+    res.json({ success: true, evidenceCard });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
 /**
- * GET /api/investigative/devices-at-time
- * Get all device positions at a specific timestamp
+ * POST /api/demo/reset
+ * Reset the database to initial state
  */
-app.get('/api/investigative/devices-at-time', (req, res) => {
-  const { timestamp } = req.query;
-
+app.post('/api/demo/reset', (req, res) => {
   try {
-    const events = (investigativeData.device_timeline || []).filter(
-      (e) => e.timestamp === timestamp
-    );
-
-    // Get unique devices with their positions
-    const deviceMap = new Map();
-    events.forEach((e) => {
-      deviceMap.set(e.device_id, {
-        device_id: e.device_id,
-        latitude: e.latitude,
-        longitude: e.longitude,
-        location_id: e.location_id,
-        city: e.city,
-        neighborhood: e.neighborhood,
-        is_suspect: e.is_suspect,
-        case_id: e.case_id,
-        activity_level: e.activity_level,
-      });
-    });
-
-    // Enrich with profile data
-    const devices = Array.from(deviceMap.values()).map((d) => {
-      const profile = (investigativeData.entity_profiles || []).find(
-        (p) => p.entity_id === d.device_id
-      );
-      return {
-        ...d,
-        owner_name: profile?.owner_name || null,
-        owner_alias: profile?.owner_alias || null,
-        threat_level: profile?.threat_level || 'Unknown',
-        display_name:
-          profile?.owner_alias || profile?.owner_name?.split(' ')[0] || d.device_id.split('_')[1],
-      };
-    });
-
-    res.json({
-      success: true,
-      timestamp,
-      device_count: devices.length,
-      suspect_count: devices.filter((d) => d.is_suspect).length,
-      devices: devices.sort((a, b) => (b.is_suspect ? 1 : 0) - (a.is_suspect ? 1 : 0)),
-    });
+    db.close();
+    seedDatabase(true);
+    db = initDatabase();
+    res.json({ success: true, message: 'Database reset to initial state' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
-/**
- * GET /api/investigative/hotspots-at-time
- * Get location hotspots at a specific timestamp
- */
-app.get('/api/investigative/hotspots-at-time', (req, res) => {
-  const { timestamp } = req.query;
+// ============== HEALTH CHECK ==============
 
-  try {
-    const summaries = (investigativeData.location_summaries || []).filter(
-      (s) => s.timestamp === timestamp
-    );
-
-    // Find the related case if this is a key frame
-    const bucket = (investigativeData.time_buckets || []).find((b) => b.time_bucket === timestamp);
-
-    res.json({
-      success: true,
-      timestamp,
-      is_key_frame: bucket?.is_key_frame || false,
-      case_id: bucket?.case_id || null,
-      hotspots: summaries.map((s) => ({
-        location_id: s.location_id,
-        latitude: s.latitude,
-        longitude: s.longitude,
-        city: s.city,
-        state: s.state,
-        neighborhood: s.neighborhood,
-        device_count: s.device_count,
-        suspect_count: s.suspect_count,
-        case_id: s.case_id,
-      })),
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-/**
- * GET /api/investigative/accumulated-cells
- * Get all cells that have had activity up to and including a given time
- */
-app.get('/api/investigative/accumulated-cells', (req, res) => {
-  const { up_to_time } = req.query;
-
-  try {
-    let events = investigativeData.location_events;
-
-    // Filter events up to the given time
-    if (up_to_time) {
-      const cutoffTime = new Date(up_to_time).getTime();
-      events = events.filter((e) => new Date(e.time_bucket).getTime() <= cutoffTime);
-    }
-
-    // Group by H3 cell
-    const cellMap = new Map();
-    events.forEach((event) => {
-      const key = event.h3_cell;
-      if (!cellMap.has(key)) {
-        cellMap.set(key, {
-          h3_cell: event.h3_cell,
-          devices: new Set(),
-          city: event.city,
-          state: event.state,
-          neighborhood: event.neighborhood || 'Unknown',
-          latitude: event.latitude,
-          longitude: event.longitude,
-          time_buckets: new Set(),
-          incident_ids: new Set(),
-        });
-      }
-      const cell = cellMap.get(key);
-      cell.devices.add(event.entity_id);
-      cell.time_buckets.add(event.time_bucket);
-      if (event.incident_id) cell.incident_ids.add(event.incident_id);
-    });
-
-    // Convert to array
-    const cells = Array.from(cellMap.values()).map((cell) => ({
-      h3_cell: cell.h3_cell,
-      device_count: cell.devices.size,
-      devices: Array.from(cell.devices),
-      city: cell.city,
-      state: cell.state,
-      neighborhood: cell.neighborhood,
-      latitude: cell.latitude,
-      longitude: cell.longitude,
-      time_buckets: Array.from(cell.time_buckets).sort(),
-      incident_count: cell.incident_ids.size,
-      latest_activity: Array.from(cell.time_buckets).sort().pop(),
-    }));
-
-    res.json({
-      success: true,
-      cells: cells.sort((a, b) => b.device_count - a.device_count),
-      total_cells: cells.length,
-      up_to_time,
-    });
-  } catch (error) {
-    logger.error({
-      type: 'api_error',
-      method: 'GET',
-      endpoint: '/api/investigative/accumulated-cells',
-      error: error.message,
-    });
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch accumulated cells',
-      message: error.message,
-    });
-  }
-});
-
-/**
- * GET /api/investigative/devices-near-incident
- * Get individual device locations around a crime scene with person data
- */
-app.get('/api/investigative/devices-near-incident', (req, res) => {
-  const { h3_cell, time_bucket, incident_id } = req.query;
-
-  try {
-    // Get events for the specific cell and time (or incident)
-    let events = investigativeData.location_events;
-
-    if (incident_id) {
-      events = events.filter((e) => e.incident_id === incident_id);
-    } else if (h3_cell && time_bucket) {
-      events = events.filter((e) => e.h3_cell === h3_cell && e.time_bucket === time_bucket);
-    } else {
-      return res.status(400).json({
-        success: false,
-        error: 'Must provide either incident_id or both h3_cell and time_bucket',
-      });
-    }
-
-    // Build device list with person data
-    const devices = events.map((event) => {
-      const profile = investigativeData.entity_profiles.find(
-        (p) => p.entity_id === event.entity_id
-      );
-
-      // Add slight position jitter to avoid overlap
-      const jitter = () => (Math.random() - 0.5) * 0.003;
-
-      return {
-        device_id: event.entity_id,
-        latitude: event.latitude + jitter(),
-        longitude: event.longitude + jitter(),
-        timestamp: event.time_bucket,
-        city: event.city,
-        neighborhood: event.neighborhood,
-        // Person/profile data
-        owner_name: profile?.owner_name || null,
-        owner_alias: profile?.owner_alias || null,
-        threat_level: profile?.threat_level || 'Unknown',
-        device_type: profile?.device_type || 'smartphone',
-        criminal_history: profile?.criminal_history || null,
-        age: profile?.age || null,
-        is_suspect: profile?.threat_level === 'High',
-        // Display helpers
-        display_name: profile?.owner_alias
-          ? `"${profile.owner_alias}"`
-          : profile?.owner_name
-            ? profile.owner_name.split(' ')[0]
-            : event.entity_id.split('_')[1],
-      };
-    });
-
-    // Get incident details if available
-    const incident = investigativeData.incidents?.find((i) => i.id === incident_id);
-
-    // Calculate center point
-    const centerLat = devices.reduce((sum, d) => sum + d.latitude, 0) / devices.length;
-    const centerLon = devices.reduce((sum, d) => sum + d.longitude, 0) / devices.length;
-
-    res.json({
-      success: true,
-      incident: incident || null,
-      center: {
-        latitude: centerLat,
-        longitude: centerLon,
-      },
-      device_count: devices.length,
-      suspect_count: devices.filter((d) => d.is_suspect).length,
-      devices: devices.sort((a, b) => {
-        // Suspects first
-        if (a.is_suspect && !b.is_suspect) return -1;
-        if (!a.is_suspect && b.is_suspect) return 1;
-        return 0;
-      }),
-    });
-  } catch (error) {
-    logger.error({
-      type: 'api_error',
-      method: 'GET',
-      endpoint: '/api/investigative/devices-near-incident',
-      error: error.message,
-    });
-
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch devices',
-      message: error.message,
-    });
-  }
-});
-
-/**
- * Health check endpoint
- */
 app.get('/health', (req, res) => {
-  const nodes = getAllNodes(db);
-  const edges = getAllEdges(db);
-
-  // Extract user's access token from Databricks Apps header
-  const userAccessToken = req.headers['x-forwarded-access-token'];
+  const towers = getAllCellTowers(db).length;
+  const persons = getAllPersons(db).length;
+  const devices = getAllDevices(db).length;
+  const cases = getAllDemoCases(db).length;
 
   res.json({
     status: 'ok',
     environment: process.env.NODE_ENV || 'development',
-    source: 'Databricks (user OAuth) + SQLite (fallback)',
-    userAuth: !!userAccessToken,
-    databricksEnabled: !!userAccessToken,
-    databricksError: null,
     timestamp: new Date().toISOString(),
     database: {
       type: 'SQLite',
-      nodeCount: nodes.length,
-      edgeCount: edges.length,
-    },
-    databricks: {
-      authMode: 'user_oauth_only',
-      host: DATABRICKS_CONFIG.host,
-      defaultTable: DEFAULT_TABLE_NAME,
-    },
-    metadata: {
-      source: 'Databricks (user OAuth) + SQLite (fallback)',
-      userAuth: !!userAccessToken,
-      databricksEnabled: !!userAccessToken,
-      databricksError: null,
-      timestamp: new Date().toISOString(),
+      towers,
+      persons,
+      devices,
+      cases,
     },
   });
 });
 
-// Serve React app for all other routes in production
+// ============== SERVE FRONTEND ==============
+
 if (process.env.NODE_ENV === 'production') {
   app.get('*', (req, res) => {
     const indexPath = path.join(__dirname, '../dist/index.html');
-
     if (!fs.existsSync(indexPath)) {
-      logger.error({
-        type: 'static_file_missing',
-        path: indexPath,
-        __dirname,
-        cwd: process.cwd(),
-      });
-      return res.status(404).json({
-        error: 'Frontend not found',
-        details: 'index.html not found at expected location',
-        expectedPath: indexPath,
-      });
+      return res.status(404).json({ error: 'Frontend not found' });
     }
-
     res.sendFile(indexPath);
   });
 }
@@ -2537,43 +586,18 @@ if (process.env.NODE_ENV === 'production') {
 // Graceful shutdown
 process.on('SIGINT', () => {
   logger.info({ type: 'server_shutdown', signal: 'SIGINT' });
-  if (db) {
-    db.close();
-    logger.info({ type: 'database_close', status: 'success' });
-  }
+  if (db) db.close();
   process.exit(0);
 });
 
 // Start server
 app.listen(PORT, () => {
-  const nodeCount = getAllNodes(db).length;
-  const edgeCount = getAllEdges(db).length;
-
-  // Log dist folder contents for debugging
-  const distPath = path.join(__dirname, '../dist');
-  let distContents = 'not found';
-  if (fs.existsSync(distPath)) {
-    try {
-      distContents = fs.readdirSync(distPath);
-    } catch (e) {
-      distContents = `error: ${e.message}`;
-    }
-  }
+  const towers = getAllCellTowers(db).length;
+  const persons = getAllPersons(db).length;
 
   logger.info({
     type: 'server_started',
     url: `http://localhost:${PORT}`,
-    database: {
-      sqlite: { nodes: nodeCount, edges: edgeCount },
-    },
-    dataStrategy: 'Databricks (user OAuth) with SQLite fallback',
-    authMode: 'User identity passthrough only',
-    dist: {
-      path: distPath,
-      exists: fs.existsSync(distPath),
-      contents: distContents,
-    },
-    cwd: process.cwd(),
-    __dirname,
+    database: { towers, persons },
   });
 });
