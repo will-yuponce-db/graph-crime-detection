@@ -1,0 +1,27 @@
+# Pipeline Resource Configuration
+# Cross-Jurisdictional Investigative Analytics Demo
+
+resources:
+  pipelines:
+    investigative_analytics_pipeline:
+      name: "Investigative Analytics - ${bundle.target}"
+      catalog: ${var.catalog}
+      target: ${var.schema}
+      
+      # Pipeline libraries
+      libraries:
+        - notebook:
+            path: ./pipelines/data_generation_dlt.py
+      
+      # Serverless compute
+      serverless: true
+      
+      # Pipeline settings
+      continuous: false
+      photon: true
+      channel: PREVIEW
+      
+      # Data quality expectations enforcement
+      configuration:
+        "spark.databricks.delta.preview.enabled": "true"
+        "pipelines.numStreamRetryAttempts": "5"

@@ -1,0 +1,44 @@
+# Job Resource Configuration
+# Cross-Jurisdictional Investigative Analytics Demo
+
+resources:
+  jobs:
+    # Demo Pipeline Job - Runs pipeline and validates output
+    demo_pipeline_job:
+      name: "Investigative Analytics Pipeline - ${bundle.target}"
+      description: "Generates demo data and validates output for the investigative analytics demo"
+      
+      # Serverless compute environment
+      environments:
+        - environment_key: serverless_env
+          spec:
+            client: "1"
+      
+      # Tasks
+      tasks:
+        # Task 1: Run the pipeline (full refresh for deterministic demo data)
+        - task_key: run_pipeline
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.investigative_analytics_pipeline.id}
+            full_refresh: true
+        
+        # Task 2: Validate the generated data
+        - task_key: validate_data
+          depends_on:
+            - task_key: run_pipeline
+          notebook_task:
+            notebook_path: ./pipelines/validate_data_generation.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+          environment_key: serverless_env
+      
+      # Email notifications (optional)
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      
+      # Tags
+      tags:
+        project: investigative-analytics
+        environment: ${bundle.target}

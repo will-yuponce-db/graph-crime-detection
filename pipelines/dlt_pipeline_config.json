@@ -1,0 +1,33 @@
+{
+  "name": "investigative_analytics_demo_pipeline",
+  "catalog": "investigative_analytics",
+  "target": "demo",
+  "development": true,
+  "continuous": false,
+  "channel": "PREVIEW",
+  "photon": true,
+  "serverless": true,
+  "configuration": {
+    "pipelines.trigger.interval": "1 hour"
+  },
+  "clusters": [
+    {
+      "label": "default",
+      "autoscale": {
+        "min_workers": 1,
+        "max_workers": 2,
+        "mode": "ENHANCED"
+      }
+    }
+  ],
+  "libraries": [
+    {
+      "notebook": {
+        "path": "/Workspace/Repos/investigative-analytics/pipelines/data_generation_dlt"
+      }
+    }
+  ],
+  "notifications": [],
+  "permissions": []
+}
+

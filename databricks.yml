@@ -1,0 +1,108 @@
+# Databricks Asset Bundle Configuration
+# Cross-Jurisdictional Investigative Analytics Demo
+#
+# Deploy with:
+#   databricks bundle deploy -t dev
+#   databricks bundle deploy -t prod
+#
+# Run pipeline:
+#   databricks bundle run investigative_analytics_pipeline -t dev
+
+bundle:
+  name: investigative-analytics
+
+# Variable definitions for environment-specific values
+variables:
+  catalog:
+    description: Unity Catalog name for pipeline tables
+    default: pubsec_geo_law
+  schema:
+    description: Schema name within the catalog
+    default: demo
+  notification_email:
+    description: Email for job notifications
+    default: ""
+
+# Workspace configuration
+workspace:
+  host: ${var.databricks_host}
+
+# Include additional configuration files
+include:
+  - resources/*.yml
+
+# Environment-specific targets
+targets:
+  # Development environment
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: ${var.databricks_host}
+    variables:
+      catalog: pubsec_geo_law
+      schema: demo
+    resources:
+      pipelines:
+        investigative_analytics_pipeline:
+          development: true
+          serverless: true
+          photon: true
+          channel: PREVIEW
+          catalog: ${var.catalog}
+          target: ${var.schema}
+          configuration:
+            "spark.databricks.delta.preview.enabled": "true"
+          libraries:
+            - notebook:
+                path: ./pipelines/data_generation_dlt.py
+
+  # Staging environment
+  staging:
+    mode: development
+    workspace:
+      host: ${var.databricks_host}
+      root_path: /Workspace/Users/scott.johnson@databricks.com/pubsec-buildathon-team2/${bundle.target}
+    variables:
+      catalog: pubsec_geo_law
+      schema: demo
+    resources:
+      pipelines:
+        investigative_analytics_pipeline:
+          development: true
+          serverless: true
+          photon: true
+          channel: PREVIEW
+          catalog: ${var.catalog}
+          target: ${var.schema}
+          libraries:
+            - notebook:
+                path: ./pipelines/data_generation_dlt.py
+
+  # Production environment
+  prod:
+    mode: production
+    workspace:
+      host: ${var.databricks_host}
+      root_path: /Workspace/Users/scott.johnson@databricks.com/pubsec-buildathon-team2/${bundle.target}
+    variables:
+      catalog: investigative_analytics
+      schema: demo
+    resources:
+      pipelines:
+        investigative_analytics_pipeline:
+          development: false
+          serverless: true
+          photon: true
+          channel: CURRENT
+          catalog: ${var.catalog}
+          target: ${var.schema}
+          libraries:
+            - notebook:
+                path: ./pipelines/data_generation_dlt.py
+          notifications:
+            - email_recipients:
+                - ${var.notification_email}
+              alerts:
+                - on-failure
+                - on-flow-failure
