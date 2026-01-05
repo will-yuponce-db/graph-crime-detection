@@ -1,6 +1,5 @@
 # Databricks Asset Bundles
 .databricks/
-bundle_vars.yml
 *.tfstate
 *.tfstate.*
 
