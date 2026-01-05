@@ -76,9 +76,20 @@ app.use((req, res, next) => {
 });
 
 // Serve static files from React app in production
-if (process.env.NODE_ENV === 'production') {
-  const distPath = path.join(__dirname, '../dist');
-  logger.info({ type: 'static_files', distPath, exists: fs.existsSync(distPath) });
+const distPath = path.join(__dirname, '../dist');
+const indexPath = path.join(distPath, 'index.html');
+
+logger.info({
+  type: 'static_files_config',
+  distPath,
+  indexPath,
+  distExists: fs.existsSync(distPath),
+  indexExists: fs.existsSync(indexPath),
+  nodeEnv: process.env.NODE_ENV,
+});
+
+// Always serve static files if dist exists (monolith mode)
+if (fs.existsSync(distPath)) {
   app.use(
     express.static(distPath, {
       setHeaders: (res, filePath) => {
@@ -88,6 +99,14 @@ if (process.env.NODE_ENV === 'production') {
       },
     })
   );
+  logger.info({ type: 'static_files', status: 'enabled', distPath });
+} else {
+  logger.warn({
+    type: 'static_files',
+    status: 'disabled',
+    reason: 'dist folder not found',
+    distPath,
+  });
 }
 
 // Initialize database
@@ -600,15 +619,29 @@ app.get('/health', (req, res) => {
   res.json(response);
 });
 
-// ============== SERVE FRONTEND ==============
+// ============== SERVE FRONTEND (SPA catch-all) ==============
 
-if (process.env.NODE_ENV === 'production') {
+// Serve index.html for all non-API routes (SPA routing)
+if (fs.existsSync(indexPath)) {
   app.get('*', (req, res) => {
-    const indexPath = path.join(__dirname, '../dist/index.html');
-    if (!fs.existsSync(indexPath)) {
-      return res.status(404).json({ error: 'Frontend not found' });
+    // Don't serve index.html for API routes that weren't matched
+    if (req.path.startsWith('/api/')) {
+      return res.status(404).json({ error: 'API endpoint not found' });
     }
     res.sendFile(indexPath);
+  });
+  logger.info({ type: 'spa_routing', status: 'enabled' });
+} else {
+  // Fallback: show diagnostic info if frontend not built
+  app.get('/', (req, res) => {
+    res.json({
+      error: 'Frontend not built',
+      hint: 'Run npm run build to create dist folder',
+      distPath,
+      indexPath,
+      distExists: fs.existsSync(distPath),
+      nodeEnv: process.env.NODE_ENV,
+    });
   });
 }
 
