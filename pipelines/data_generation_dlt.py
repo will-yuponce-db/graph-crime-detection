@@ -15,6 +15,7 @@ Reference: https://docs.databricks.com/aws/en/ldp/developer/python-ref
 
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F
+from pyspark.sql.window import Window
 from pyspark.sql.types import (
     StructType, StructField, StringType, DoubleType, 
     TimestampType, IntegerType, ArrayType, LongType
@@ -510,9 +511,9 @@ def social_edges_bronze():
     name="location_events_silver",
     comment="Cleaned location events with proper timestamps and enrichment"
 )
-@dp.expect("valid_entity_id", "entity_id IS NOT NULL AND LENGTH(entity_id) > 0", action="drop")
-@dp.expect("valid_coordinates", "latitude BETWEEN -90 AND 90 AND longitude BETWEEN -180 AND 180", action="drop")
-@dp.expect("valid_h3_cell", "h3_cell IS NOT NULL AND LENGTH(h3_cell) = 15", action="drop")
+@dp.expect_or_drop("valid_entity_id", "entity_id IS NOT NULL AND LENGTH(entity_id) > 0")
+@dp.expect_or_drop("valid_coordinates", "latitude BETWEEN -90 AND 90 AND longitude BETWEEN -180 AND 180")
+@dp.expect_or_drop("valid_h3_cell", "h3_cell IS NOT NULL AND LENGTH(h3_cell) = 15")
 def location_events_silver():
     """Clean and enrich location events."""
     return (
@@ -534,8 +535,8 @@ def location_events_silver():
     name="cases_silver",
     comment="Cleaned case data with time windows"
 )
-@dp.expect("valid_case_id", "case_id IS NOT NULL", action="drop")
-@dp.expect("valid_case_type", "case_type IS NOT NULL", action="drop")
+@dp.expect_or_drop("valid_case_id", "case_id IS NOT NULL")
+@dp.expect_or_drop("valid_case_type", "case_type IS NOT NULL")
 def cases_silver():
     """Clean and enrich case data."""
     return (
@@ -556,8 +557,8 @@ def cases_silver():
     name="social_edges_silver",
     comment="Cleaned social network edges"
 )
-@dp.expect("valid_entities", "entity_id_1 IS NOT NULL AND entity_id_2 IS NOT NULL", action="drop")
-@dp.expect("valid_weight", "weight BETWEEN 0 AND 1", action="drop")
+@dp.expect_or_drop("valid_entities", "entity_id_1 IS NOT NULL AND entity_id_2 IS NOT NULL")
+@dp.expect_or_drop("valid_weight", "weight BETWEEN 0 AND 1")
 def social_edges_silver():
     """Clean social edges."""
     return (
@@ -693,14 +694,13 @@ def suspect_rankings():
     copresence_scores = (
         copresence
         .groupBy(F.col("entity_id_1").alias("entity_id"))
-        .agg(F.sum("weight").alias("copresence_weight_1"))
+        .agg(F.sum("weight").alias("copresence_weight"))
     ).union(
         copresence
         .groupBy(F.col("entity_id_2").alias("entity_id"))
-        .agg(F.sum("weight").alias("copresence_weight_2"))
+        .agg(F.sum("weight").alias("copresence_weight"))
     ).groupBy("entity_id").agg(
-        F.sum(F.coalesce(F.col("copresence_weight_1"), F.lit(0)) + 
-              F.coalesce(F.col("copresence_weight_2"), F.lit(0))).alias("total_copresence_weight")
+        F.sum("copresence_weight").alias("total_copresence_weight")
     )
     
     # Sum social edge weights per entity
@@ -732,7 +732,7 @@ def suspect_rankings():
                     F.col("cross_jurisdiction_score") + 
                     F.col("network_score"))
         .withColumn("rank", F.dense_rank().over(
-            F.Window.orderBy(F.desc("total_score"))))
+            Window.orderBy(F.desc("total_score"))))
     )
     
     return rankings
@@ -867,7 +867,7 @@ def handoff_candidates():
                     F.col("temporal_score") + 
                     F.col("partner_score"))
         .withColumn("rank", F.dense_rank().over(
-            F.Window.orderBy(F.desc("handoff_score"))))
+            Window.orderBy(F.desc("handoff_score"))))
         .withColumnRenamed("h.old_entity_id", "old_entity_id")
         .withColumnRenamed("h.new_entity_id", "new_entity_id")
         .withColumnRenamed("h.h3_cell", "h3_cell")
@@ -941,7 +941,7 @@ def evidence_card_data():
             F.collect_list(
                 F.struct(
                     F.col("case_id"),
-                    F.col("city"),
+                    F.col("cases_silver.city"),
                     F.col("address"),
                     F.col("h3_cell"),
                     F.col("time_bucket")

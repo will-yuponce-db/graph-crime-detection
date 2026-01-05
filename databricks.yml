@@ -21,15 +21,58 @@ variables:
     default: demo
   notification_email:
     description: Email for job notifications
-    default: ""
+    default: "scott.johnson@databricks.com"
 
-# Workspace configuration
+# Default workspace - uses CLI auth profile
 workspace:
-  host: ${var.databricks_host}
+  profile: pubsec_buildathon
 
-# Include additional configuration files
-include:
-  - resources/*.yml
+# Shared resource definitions
+resources:
+  pipelines:
+    investigative_analytics_pipeline:
+      name: "Investigative Analytics - ${bundle.target}"
+      catalog: ${var.catalog}
+      target: ${var.schema}
+      libraries:
+        - file:
+            path: ./pipelines/data_generation_dlt.py
+      serverless: true
+      continuous: false
+      photon: true
+      channel: PREVIEW
+      configuration:
+        "spark.databricks.delta.preview.enabled": "true"
+        "pipelines.numStreamRetryAttempts": "5"
+
+  jobs:
+    demo_pipeline_job:
+      name: "Investigative Analytics Pipeline - ${bundle.target}"
+      description: "Generates demo data and validates output for the investigative analytics demo"
+      environments:
+        - environment_key: serverless_env
+          spec:
+            client: "1"
+      tasks:
+        - task_key: run_pipeline
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.investigative_analytics_pipeline.id}
+            full_refresh: true
+        - task_key: validate_data
+          depends_on:
+            - task_key: run_pipeline
+          notebook_task:
+            notebook_path: ./pipelines/validate_data_generation.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+          environment_key: serverless_env
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      tags:
+        project: investigative-analytics
+        environment: ${bundle.target}
 
 # Environment-specific targets
 targets:
@@ -38,30 +81,6 @@ targets:
     mode: development
     default: true
     workspace:
-      host: ${var.databricks_host}
-    variables:
-      catalog: pubsec_geo_law
-      schema: demo
-    resources:
-      pipelines:
-        investigative_analytics_pipeline:
-          development: true
-          serverless: true
-          photon: true
-          channel: PREVIEW
-          catalog: ${var.catalog}
-          target: ${var.schema}
-          configuration:
-            "spark.databricks.delta.preview.enabled": "true"
-          libraries:
-            - notebook:
-                path: ./pipelines/data_generation_dlt.py
-
-  # Staging environment
-  staging:
-    mode: development
-    workspace:
-      host: ${var.databricks_host}
       root_path: /Workspace/Users/scott.johnson@databricks.com/pubsec-buildathon-team2/${bundle.target}
     variables:
       catalog: pubsec_geo_law
@@ -70,20 +89,24 @@ targets:
       pipelines:
         investigative_analytics_pipeline:
           development: true
-          serverless: true
-          photon: true
-          channel: PREVIEW
-          catalog: ${var.catalog}
-          target: ${var.schema}
-          libraries:
-            - notebook:
-                path: ./pipelines/data_generation_dlt.py
+
+  # Staging environment
+  staging:
+    mode: development
+    workspace:
+      root_path: /Workspace/Users/scott.johnson@databricks.com/pubsec-buildathon-team2/${bundle.target}
+    variables:
+      catalog: pubsec_geo_law
+      schema: demo
+    resources:
+      pipelines:
+        investigative_analytics_pipeline:
+          development: true
 
   # Production environment
   prod:
     mode: production
     workspace:
-      host: ${var.databricks_host}
       root_path: /Workspace/Users/scott.johnson@databricks.com/pubsec-buildathon-team2/${bundle.target}
     variables:
       catalog: investigative_analytics
@@ -92,14 +115,7 @@ targets:
       pipelines:
         investigative_analytics_pipeline:
           development: false
-          serverless: true
-          photon: true
           channel: CURRENT
-          catalog: ${var.catalog}
-          target: ${var.schema}
-          libraries:
-            - notebook:
-                path: ./pipelines/data_generation_dlt.py
           notifications:
             - email_recipients:
                 - ${var.notification_email}

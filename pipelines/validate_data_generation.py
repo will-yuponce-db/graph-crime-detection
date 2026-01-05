@@ -21,7 +21,7 @@
 
 # COMMAND ----------
 
-CATALOG = "investigative_analytics"
+CATALOG = "pubsec_geo_law"
 SCHEMA = "demo"
 
 # Expected values from config
@@ -331,7 +331,7 @@ all_passed = run_all_validations()
 # MAGIC %sql
 # MAGIC -- Preview: DC Incident Cell Entities
 # MAGIC SELECT entity_id, time_bucket, h3_cell, city
-# MAGIC FROM investigative_analytics.demo.location_events_silver
+# MAGIC FROM pubsec_geo_law.demo.location_events_silver
 # MAGIC WHERE h3_cell = '892a1008003ffff'
 # MAGIC   AND time_bucket = '2025-01-15T14:30'
 # MAGIC ORDER BY entity_id
@@ -342,7 +342,7 @@ all_passed = run_all_validations()
 # MAGIC %sql
 # MAGIC -- Preview: Suspect Movement Timeline
 # MAGIC SELECT entity_id, time_bucket, h3_cell, city, state
-# MAGIC FROM investigative_analytics.demo.location_events_silver
+# MAGIC FROM pubsec_geo_law.demo.location_events_silver
 # MAGIC WHERE entity_id IN ('E_0412', 'E_1098', 'E_7734')
 # MAGIC ORDER BY time_bucket, entity_id
 
@@ -351,7 +351,7 @@ all_passed = run_all_validations()
 # MAGIC %sql
 # MAGIC -- Preview: Cases
 # MAGIC SELECT case_id, case_type, city, state, incident_time_bucket, method_of_entry, estimated_loss
-# MAGIC FROM investigative_analytics.demo.cases_silver
+# MAGIC FROM pubsec_geo_law.demo.cases_silver
 # MAGIC ORDER BY incident_time_bucket
 
 # COMMAND ----------
@@ -360,7 +360,7 @@ all_passed = run_all_validations()
 # MAGIC -- Preview: Top Handoff Candidates
 # MAGIC SELECT old_entity_id, new_entity_id, h3_cell, old_last_bucket, new_first_bucket,
 # MAGIC        time_diff_minutes, shared_partner_count, handoff_score, rank
-# MAGIC FROM investigative_analytics.demo.handoff_candidates
+# MAGIC FROM pubsec_geo_law.demo.handoff_candidates
 # MAGIC ORDER BY rank
 # MAGIC LIMIT 10
 
@@ -370,7 +370,7 @@ all_passed = run_all_validations()
 # MAGIC -- Preview: Top Suspect Rankings
 # MAGIC SELECT entity_id, rank, total_score, unique_cases, states_count, 
 # MAGIC        linked_cases, linked_cities
-# MAGIC FROM investigative_analytics.demo.suspect_rankings
+# MAGIC FROM pubsec_geo_law.demo.suspect_rankings
 # MAGIC ORDER BY rank
 # MAGIC LIMIT 10
 
@@ -380,7 +380,7 @@ all_passed = run_all_validations()
 # MAGIC -- Preview: Co-Presence Edges for Suspects
 # MAGIC SELECT entity_id_1, entity_id_2, h3_cell, city, state, 
 # MAGIC        co_occurrence_count, weight, time_buckets
-# MAGIC FROM investigative_analytics.demo.co_presence_edges
+# MAGIC FROM pubsec_geo_law.demo.co_presence_edges
 # MAGIC WHERE entity_id_1 IN ('E_0412', 'E_1098', 'E_7734')
 # MAGIC    OR entity_id_2 IN ('E_0412', 'E_1098', 'E_7734')
 # MAGIC ORDER BY weight DESC
@@ -391,7 +391,7 @@ all_passed = run_all_validations()
 # MAGIC -- Preview: Cell Device Counts (for Heatmap)
 # MAGIC SELECT h3_cell, time_bucket, city, device_count, activity_category,
 # MAGIC        center_lat, center_lon
-# MAGIC FROM investigative_analytics.demo.cell_device_counts
+# MAGIC FROM pubsec_geo_law.demo.cell_device_counts
 # MAGIC WHERE device_count >= 10
 # MAGIC ORDER BY device_count DESC
 # MAGIC LIMIT 20
