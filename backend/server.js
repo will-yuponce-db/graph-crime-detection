@@ -33,7 +33,24 @@ const {
 const { seedDatabase } = require('./db/seed');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+
+// Databricks Apps environment configuration
+const DATABRICKS_CONFIG = {
+  appName: process.env.DATABRICKS_APP_NAME,
+  appUrl: process.env.DATABRICKS_APP_URL,
+  host: process.env.DATABRICKS_HOST,
+  workspaceId: process.env.DATABRICKS_WORKSPACE_ID,
+  clientId: process.env.DATABRICKS_CLIENT_ID,
+  // Note: DATABRICKS_CLIENT_SECRET is available for API calls but not logged
+};
+
+const isDatabricksApp = !!DATABRICKS_CONFIG.appName;
+
+// Port: Databricks sets DATABRICKS_APP_PORT and PORT (both 8000)
+const PORT = parseInt(process.env.DATABRICKS_APP_PORT || process.env.PORT || '8000', 10);
+
+// Host: Databricks requires 0.0.0.0, local dev can use localhost
+const HOST = isDatabricksApp ? '0.0.0.0' : process.env.HOST || '0.0.0.0';
 
 // Middleware
 app.use(cors());
@@ -557,7 +574,7 @@ app.get('/health', (req, res) => {
   const devices = getAllDevices(db).length;
   const cases = getAllDemoCases(db).length;
 
-  res.json({
+  const response = {
     status: 'ok',
     environment: process.env.NODE_ENV || 'development',
     timestamp: new Date().toISOString(),
@@ -568,7 +585,19 @@ app.get('/health', (req, res) => {
       devices,
       cases,
     },
-  });
+  };
+
+  // Include Databricks info when running in Databricks Apps
+  if (isDatabricksApp) {
+    response.databricks = {
+      appName: DATABRICKS_CONFIG.appName,
+      appUrl: DATABRICKS_CONFIG.appUrl,
+      host: DATABRICKS_CONFIG.host,
+      workspaceId: DATABRICKS_CONFIG.workspaceId,
+    };
+  }
+
+  res.json(response);
 });
 
 // ============== SERVE FRONTEND ==============
@@ -591,13 +620,27 @@ process.on('SIGINT', () => {
 });
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, HOST, () => {
   const towers = getAllCellTowers(db).length;
   const persons = getAllPersons(db).length;
 
-  logger.info({
+  const serverInfo = {
     type: 'server_started',
-    url: `http://localhost:${PORT}`,
+    host: HOST,
+    port: PORT,
+    localUrl: `http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`,
     database: { towers, persons },
-  });
+  };
+
+  // Add Databricks-specific info when available
+  if (isDatabricksApp) {
+    serverInfo.databricks = {
+      appName: DATABRICKS_CONFIG.appName,
+      appUrl: DATABRICKS_CONFIG.appUrl,
+      host: DATABRICKS_CONFIG.host,
+      workspaceId: DATABRICKS_CONFIG.workspaceId,
+    };
+  }
+
+  logger.info(serverInfo);
 });
