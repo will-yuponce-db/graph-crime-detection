@@ -493,7 +493,7 @@ const GraphExplorer: React.FC = () => {
           type: link.type,
           edgeCategory,
           color: isCoLocated ? '#fbbf24' : isSocial ? '#a78bfa' : '#3b82f640',
-          width: isCoLocated ? 9 : isSocial ? 6 : 3,
+          width: isCoLocated ? 2 : isSocial ? 1.5 : 1,
           count: isCoLocated ? link.count : undefined,
           curvature: isSocial ? 0.25 : 0,
         });
@@ -515,7 +515,7 @@ const GraphExplorer: React.FC = () => {
             type: 'CO_LOCATED',
             edgeCategory: 'colocation',
             color: '#fbbf24',
-            width: 9,
+            width: 2,
             count: Math.floor(Math.random() * 8) + 3, // Random co-location count 3-10
           });
         }
@@ -544,7 +544,7 @@ const GraphExplorer: React.FC = () => {
             type: 'DETECTED',
             edgeCategory: 'location',
             color: `${loc.color}40`,
-            width: 3,
+            width: 1,
             curvature: 0,
           });
         });
@@ -594,7 +594,7 @@ const GraphExplorer: React.FC = () => {
         target: 'loc_baltimore',
         type: 'FLED_TO',
         color: '#f9731680',
-        width: 2,
+        width: 1.5,
       });
 
       return { nodes: newNodes, links: newLinks };
@@ -917,8 +917,8 @@ const GraphExplorer: React.FC = () => {
                 ctx.lineTo(end.x, end.y);
               }
               ctx.strokeStyle =
-                l.type === 'FLED_TO' ? 'rgba(251, 146, 60, 0.3)' : 'rgba(251, 191, 36, 0.3)';
-              ctx.lineWidth = l.width * 4;
+                l.type === 'FLED_TO' ? 'rgba(251, 146, 60, 0.2)' : 'rgba(251, 191, 36, 0.2)';
+              ctx.lineWidth = l.width * 2;
               ctx.stroke();
             }
 
@@ -944,7 +944,7 @@ const GraphExplorer: React.FC = () => {
               ctx.lineTo(end.x, end.y);
             }
             ctx.strokeStyle = gradient;
-            ctx.lineWidth = l.width * (isImportant ? 1.5 : 1);
+            ctx.lineWidth = l.width;
             ctx.stroke();
 
             // Label badge for important connections (only CO_LOCATED between people and FLED_TO)
