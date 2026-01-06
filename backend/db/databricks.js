@@ -224,6 +224,97 @@ async function runCustomQuery(sql) {
 }
 
 /**
+ * Update entity properties (name, custom fields stored as JSON)
+ * This allows naming entities without schema changes
+ * @param {string} tableName - Table to update (e.g., 'suspect_rankings', 'cases_silver')
+ * @param {string} entityIdColumn - Column name for entity ID (e.g., 'entity_id', 'case_id')
+ * @param {string} entityId - The entity's ID value
+ * @param {object} properties - JSON object with properties to merge
+ */
+async function updateEntityProperties(tableName, entityIdColumn, entityId, properties) {
+  const sess = await initDatabricks();
+  if (!sess) {
+    throw new Error('Databricks not connected');
+  }
+
+  // Merge with existing properties if they exist
+  const existingQuery = `
+    SELECT properties FROM ${getTableName(tableName)} 
+    WHERE ${entityIdColumn} = '${entityId}'
+    LIMIT 1
+  `;
+  const existing = await executeQuery(existingQuery);
+
+  let mergedProperties = properties;
+  if (existing.length > 0 && existing[0].properties) {
+    try {
+      const existingProps = JSON.parse(existing[0].properties);
+      mergedProperties = { ...existingProps, ...properties };
+    } catch {
+      // If parsing fails, just use the new properties
+    }
+  }
+
+  const propsJson = JSON.stringify(mergedProperties).replace(/'/g, "''");
+
+  const sql = `
+    UPDATE ${getTableName(tableName)}
+    SET properties = '${propsJson}'
+    WHERE ${entityIdColumn} = '${entityId}'
+  `;
+
+  const operation = await sess.executeStatement(sql, {
+    runAsync: true,
+  });
+  await operation.close();
+
+  return mergedProperties;
+}
+
+/**
+ * Set display name for an entity
+ * @param {string} tableName - Table name
+ * @param {string} entityIdColumn - ID column name
+ * @param {string} entityId - Entity ID
+ * @param {string} displayName - The display name to set
+ */
+async function setEntityName(tableName, entityIdColumn, entityId, displayName) {
+  return updateEntityProperties(tableName, entityIdColumn, entityId, {
+    display_name: displayName,
+  });
+}
+
+/**
+ * Get entity with parsed properties
+ * @param {string} tableName - Table name
+ * @param {string} entityIdColumn - ID column name
+ * @param {string} entityId - Entity ID
+ */
+async function getEntityWithProperties(tableName, entityIdColumn, entityId) {
+  const sql = `
+    SELECT * FROM ${getTableName(tableName)} 
+    WHERE ${entityIdColumn} = '${entityId}'
+    LIMIT 1
+  `;
+  const results = await executeQuery(sql);
+
+  if (results.length === 0) return null;
+
+  const entity = results[0];
+  if (entity.properties) {
+    try {
+      entity.properties = JSON.parse(entity.properties);
+    } catch {
+      entity.properties = {};
+    }
+  } else {
+    entity.properties = {};
+  }
+
+  return entity;
+}
+
+/**
  * Get unique locations from location events
  */
 async function getUniqueLocations(limit = 50) {
@@ -286,6 +377,10 @@ module.exports = {
   listTables,
   describeTable,
   closeDatabricks,
+  // Entity property management (for naming entities)
+  updateEntityProperties,
+  setEntityName,
+  getEntityWithProperties,
   CATALOG,
   SCHEMA,
 };

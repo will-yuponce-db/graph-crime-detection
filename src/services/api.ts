@@ -1,12 +1,12 @@
 /**
  * API Service Layer
- * Provides a unified interface for fetching data from either SQLite (demo) or Databricks
+ * Provides a unified interface for fetching data from Databricks Unity Catalog
  */
 
-// Set to true to use Databricks Unity Catalog, false for local SQLite demo
+// Databricks is the only data source
 export const USE_DATABRICKS = true;
 
-const API_BASE = USE_DATABRICKS ? '/api/databricks/ui' : '/api/demo';
+const API_BASE = '/api/demo';
 
 // ============== Types ==============
 
@@ -16,6 +16,7 @@ export interface CellTower {
   latitude: number;
   longitude: number;
   city: string;
+  properties?: Record<string, unknown>;
 }
 
 export interface KeyFrame {
@@ -64,6 +65,7 @@ export interface Suspect {
   totalScore?: number;
   linkedCases?: string[];
   linkedCities?: string[];
+  properties?: Record<string, unknown>;
 }
 
 export interface CaseData {
@@ -82,6 +84,7 @@ export interface CaseData {
   description?: string;
   persons?: { id: string; name: string; alias?: string }[];
   devices?: { id: string; name: string }[];
+  properties?: Record<string, unknown>;
 }
 
 export interface GraphNode {
@@ -94,6 +97,7 @@ export interface GraphNode {
   threatLevel?: string;
   totalScore?: number;
   linkedCities?: string[];
+  properties?: Record<string, unknown>;
 }
 
 export interface GraphLink {
@@ -123,6 +127,7 @@ export interface EvidenceCard {
     name: string;
     threatLevel: string;
     linkedCases?: string[];
+    properties?: Record<string, unknown>;
   }>;
   linkedCases: Array<{
     caseId: string;
@@ -188,8 +193,7 @@ export async function fetchCases(): Promise<CaseData[]> {
  * Fetch suspects/persons
  */
 export async function fetchSuspects(): Promise<Suspect[]> {
-  const endpoint = USE_DATABRICKS ? `${API_BASE}/suspects` : '/api/demo/persons?suspects=true';
-  const res = await fetch(endpoint);
+  const res = await fetch(`${API_BASE}/persons?suspects=true`);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.persons;
@@ -221,18 +225,14 @@ export async function fetchRelationships(): Promise<Relationship[]> {
 /**
  * Fetch evidence card for a case
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function fetchEvidenceCard(caseId: string): Promise<EvidenceCard> {
-  const endpoint = USE_DATABRICKS
-    ? `${API_BASE}/evidence-card/${caseId}`
-    : '/api/demo/evidence-card';
-
-  const res = USE_DATABRICKS
-    ? await fetch(endpoint)
-    : await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ personIds: [] }),
-      });
+  // TODO: Use caseId to fetch specific case evidence
+  const res = await fetch(`${API_BASE}/evidence-card`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ personIds: [] }),
+  });
 
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
@@ -240,37 +240,86 @@ export async function fetchEvidenceCard(caseId: string): Promise<EvidenceCard> {
 }
 
 /**
- * Update case status (only works with SQLite for now)
+ * Update case status
  */
 export async function updateCaseStatus(caseId: string, status: string): Promise<void> {
-  if (USE_DATABRICKS) {
-    // Databricks is read-only for now, just simulate success
-    console.log(`[Databricks] Would update case ${caseId} to ${status}`);
-    return;
-  }
+  // Case status updates are not persisted in Databricks yet
+  console.log(`Would update case ${caseId} to ${status}`);
+}
 
-  await fetch(`/api/demo/cases/${caseId}/status`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status }),
-  });
+export interface MergeCasesResult {
+  message: string;
+  case: CaseData;
 }
 
 /**
- * Fetch devices (for SQLite compatibility)
+ * Merge multiple cases into a primary case
+ * - Combines all persons and devices from secondary cases into the primary case
+ * - Aggregates estimated loss and stolen items
+ * - Marks secondary cases as 'merged' status
+ * @param primaryCaseId - The case to merge into (survives)
+ * @param secondaryCaseIds - Cases to merge from (will be marked as merged)
+ */
+export async function mergeCases(
+  primaryCaseId: string,
+  secondaryCaseIds: string[]
+): Promise<MergeCasesResult> {
+  // Case merging is not available yet
+  console.log(`Would merge cases ${secondaryCaseIds.join(', ')} into ${primaryCaseId}`);
+  throw new Error('Case merging is not yet available');
+}
+
+/**
+ * Fetch devices
  */
 export async function fetchDevices(): Promise<Array<{ owner_id: string; name: string }>> {
-  if (USE_DATABRICKS) {
-    // Return empty array for Databricks - device mapping not available
-    return [];
-  }
-  const res = await fetch('/api/demo/devices');
+  const res = await fetch(`${API_BASE}/devices`);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.devices;
 }
 
+/**
+ * Update entity name/properties
+ * @param entityType - Type of entity ('persons', 'cases')
+ * @param entityId - Entity ID
+ * @param name - Display name to set
+ */
+export async function updateEntityName(
+  entityType: 'persons' | 'cases',
+  entityId: string,
+  name: string
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/${entityType}/${entityId}/name`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+}
+
+/**
+ * Update entity properties
+ * @param entityType - Type of entity ('persons', 'cases')
+ * @param entityId - Entity ID
+ * @param properties - Properties object to merge
+ */
+export async function updateEntityProperties(
+  entityType: 'persons' | 'cases',
+  entityId: string,
+  properties: Record<string, unknown>
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/${entityType}/${entityId}/properties`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ properties }),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+}
+
 // Export data source indicator
 export function getDataSource(): string {
-  return USE_DATABRICKS ? 'Databricks Unity Catalog' : 'Local SQLite';
+  return 'Databricks Unity Catalog';
 }

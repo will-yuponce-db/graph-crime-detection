@@ -35,6 +35,7 @@ import {
   TrendingUp,
   Cloud,
   Close,
+  Download,
 } from '@mui/icons-material';
 import { fetchCases, updateCaseStatus, USE_DATABRICKS } from '../services/api';
 
@@ -98,6 +99,8 @@ const CaseView: React.FC = () => {
   const [selectedCase, setSelectedCase] = useState<CaseData | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [newCaseOpen, setNewCaseOpen] = useState(false);
+  const [draggedCase, setDraggedCase] = useState<string | null>(null);
+  const [dragOverColumn, setDragOverColumn] = useState<CaseStatus | null>(null);
   const [newCaseData, setNewCaseData] = useState({
     title: '',
     neighborhood: '',
@@ -155,6 +158,45 @@ const CaseView: React.FC = () => {
 
   const getCasesByStatus = (status: CaseStatus) => cases.filter((c) => c.status === status);
 
+  // Export cases to CSV
+  const exportToCSV = () => {
+    const headers = [
+      'Case Number',
+      'Title',
+      'Status',
+      'Priority',
+      'City',
+      'State',
+      'Neighborhood',
+      'Assigned To',
+      'Created',
+      'Updated',
+    ];
+    const rows = cases.map((c) => [
+      c.caseNumber,
+      c.title,
+      c.status,
+      c.priority,
+      c.city,
+      c.state,
+      c.neighborhood,
+      c.assignedTo,
+      new Date(c.createdAt).toLocaleDateString(),
+      new Date(c.updatedAt).toLocaleDateString(),
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map((row) => row.map((cell) => `"${cell}"`).join(',')),
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `cases_export_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+  };
+
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -195,17 +237,30 @@ const CaseView: React.FC = () => {
 
   const CaseCard: React.FC<{ caseData: CaseData }> = ({ caseData }) => (
     <Card
+      draggable
+      onDragStart={(e) => {
+        setDraggedCase(caseData.id);
+        e.dataTransfer.effectAllowed = 'move';
+      }}
+      onDragEnd={() => {
+        setDraggedCase(null);
+        setDragOverColumn(null);
+      }}
       sx={{
         mb: 1.5,
         bgcolor: 'background.paper',
         border: 1,
         borderColor:
           caseData.priority === 'Critical' ? `${theme.palette.accent.red}40` : 'border.main',
-        cursor: 'pointer',
+        cursor: 'grab',
         transition: 'all 0.2s',
+        opacity: draggedCase === caseData.id ? 0.5 : 1,
         '&:hover': {
           borderColor: theme.palette.accent.orange,
           transform: 'translateY(-2px)',
+        },
+        '&:active': {
+          cursor: 'grabbing',
         },
       }}
       onClick={() => {
@@ -279,16 +334,45 @@ const CaseView: React.FC = () => {
     const config = STATUS_CONFIG[status];
     const statusCases = getCasesByStatus(status);
 
+    const handleDragOver = (e: React.DragEvent) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      setDragOverColumn(status);
+    };
+
+    const handleDragLeave = () => {
+      setDragOverColumn(null);
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+      e.preventDefault();
+      if (draggedCase) {
+        const caseToMove = cases.find((c) => c.id === draggedCase);
+        if (caseToMove && caseToMove.status !== status) {
+          handleStatusChange(draggedCase, status);
+        }
+      }
+      setDraggedCase(null);
+      setDragOverColumn(null);
+    };
+
     return (
-      <Box sx={{ flex: 1, minWidth: 280 }}>
+      <Box
+        sx={{ flex: 1, minWidth: 280 }}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
         <Paper
           sx={{
             p: 1.5,
             mb: 2,
-            bgcolor: config.bgColor,
-            border: 1,
-            borderColor: `${config.color}40`,
+            bgcolor: dragOverColumn === status ? `${config.color}30` : config.bgColor,
+            border: 2,
+            borderColor: dragOverColumn === status ? config.color : `${config.color}40`,
             borderRadius: 2,
+            borderStyle: dragOverColumn === status ? 'dashed' : 'solid',
+            transition: 'all 0.2s',
           }}
         >
           <Stack direction="row" alignItems="center" spacing={1}>
@@ -308,7 +392,7 @@ const CaseView: React.FC = () => {
           </Stack>
         </Paper>
 
-        <Box sx={{ maxHeight: 'calc(100vh - 280px)', overflow: 'auto', pr: 1 }}>
+        <Box sx={{ maxHeight: 'calc(100vh - 280px)', overflow: 'auto', pr: 1, minHeight: 100 }}>
           {statusCases.map((c) => (
             <CaseCard key={c.id} caseData={c} />
           ))}
@@ -317,7 +401,7 @@ const CaseView: React.FC = () => {
               variant="body2"
               sx={{ color: 'text.secondary', textAlign: 'center', py: 4 }}
             >
-              No cases
+              {dragOverColumn === status ? 'Drop here' : 'No cases'}
             </Typography>
           )}
         </Box>
@@ -399,6 +483,14 @@ const CaseView: React.FC = () => {
                 '& .MuiChip-icon': { color: theme.palette.accent.blue },
               }}
             />
+            <Button
+              variant="outlined"
+              startIcon={<Download />}
+              onClick={exportToCSV}
+              sx={{ borderColor: 'border.main', color: 'text.secondary' }}
+            >
+              Export CSV
+            </Button>
             <Button
               variant="outlined"
               startIcon={<Add />}

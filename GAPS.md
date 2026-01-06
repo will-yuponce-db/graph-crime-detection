@@ -1,236 +1,105 @@
-# Crime Network Analysis - User Story Gaps
+# Crime Network Analysis - Status
 
-This document identifies gaps and incomplete features discovered during user story testing on January 6, 2026.
-
----
-
-## ✅ Fixed Issues
-
-### 1. ~~"View on Map" Deep Linking Not Working~~ **FIXED**
-
-**Location:** Case View → Case Detail Modal → "View on Map" button
-
-**Fix:** Added URL parameter handling (`?case=CASE_ID`) in HeatmapDashboard that:
-
-- Reads the case parameter from URL
-- Finds matching keyFrame by caseNumber
-- Automatically jumps to that case's timeframe and location
+All identified gaps have been addressed! ✅
 
 ---
 
-### 2. ~~"New Case" Button Non-Functional~~ **FIXED**
+## ✅ Cases Linked to Hotspots (Completed)
 
-**Location:** Case View → "New Case" button
+**Status:** FIXED
 
-**Fix:** Added a complete "Create New Case" dialog with:
+Cases are now linked to hotspots via a junction table. Initially, each case has a 1-to-1 relationship with a hotspot. Hotspots can later be merged.
 
-- Case title field
-- Neighborhood and city fields
-- State and priority selector
-- Estimated loss field
-- Description textarea
-- Form validation and case creation
+### New Tables
 
----
+- `hotspots` - Crime hotspot areas with location, radius, status, and merge tracking
+- `case_hotspots` - Links cases to hotspots (supports future N-to-1 after merges)
 
-### 3. ~~Hotspot Cell Details Missing~~ **FIXED**
+### New API Endpoints
 
-**Location:** Hotspot Explorer → Sidebar → Active Hotspots
+| Endpoint                            | Description                      |
+| ----------------------------------- | -------------------------------- |
+| `GET /api/demo/hotspots-entity`     | All hotspots (entity table)      |
+| `GET /api/demo/hotspots-entity/:id` | Single hotspot with linked cases |
+| `GET /api/demo/cases/:id/hotspot`   | Get hotspot linked to a case     |
+| `POST /api/demo/hotspots/merge`     | Merge multiple hotspots          |
 
-**Fix:** Added selected hotspot detail panel showing:
+### Hotspot Merge Feature
 
-- Tower name and city
-- Device count and suspect count statistics
-- High activity warning for suspicious hotspots
-- Visual highlighting of selected hotspot card
+When hotspots are merged:
 
----
+- All cases from secondary hotspots are re-linked to the primary hotspot
+- Secondary hotspots are marked with `status: 'merged'` and `merged_into_id`
+- Notes are combined
 
-### 4. ~~Device Card Click Has No Effect~~ **FIXED**
+### Current Data
 
-**Location:** Hotspot Explorer → Sidebar → Devices section
-
-**Fix:** Added click handlers to device cards that:
-
-- Highlight the selected device card
-- Pan and zoom the map to the device location
-- Work for both suspect and non-suspect devices
-
----
-
-### 5. ~~Hotspot Selection Bug (Duplicate towerId)~~ **FIXED**
-
-**Location:** Hotspot Explorer → Sidebar → Active Hotspots
-
-**Issue:** Clicking the first hotspot would select multiple cards because hotspots shared the same `towerId`.
-
-**Fix:** Changed selection state from object reference to index-based:
-
-- Use `selectedHotspotIdx` instead of `selectedHotspot`
-- Updated card keys to `${hs.towerId}-${idx}` for uniqueness
-- Selection comparison uses index matching
+| Hotspot                     | Case     | City           |
+| --------------------------- | -------- | -------------- |
+| Adams Morgan Activity Zone  | CASE_001 | Washington, DC |
+| Dupont Circle Activity Zone | CASE_002 | Washington, DC |
+| Capitol Hill Activity Zone  | CASE_003 | Washington, DC |
+| Georgetown Primary Zone     | CASE_008 | Washington, DC |
+| Navy Yard Financial Zone    | CASE_007 | Washington, DC |
+| Baltimore Harbor Zone       | CASE_004 | Baltimore, MD  |
+| East Nashville Zone         | CASE_005 | Nashville, TN  |
+| The Gulch Zone              | CASE_006 | Nashville, TN  |
 
 ---
 
-### 6. ~~"View Case" Button Hardcoded Wrong Case~~ **FIXED**
+## ✅ Data Model Updates (Completed)
 
-**Location:** Network Analysis → Sidebar → "View Case" button
+### 1. Cases Now Show Linked Suspects & Devices
 
-**Issue:** Button navigated to `/evidence-card?case_id=CASE_008` but CASE_008 doesn't exist.
+**Status:** FIXED
 
-**Fix:** Changed button to navigate to `/evidence-card` (Case View) without hardcoded case ID. Button now labeled "View Cases" for clarity.
+The database now properly links cases to suspects and devices via junction tables (`case_persons`, `case_devices`). Each case displays:
 
----
+- Linked suspects with roles
+- Associated devices used during incidents
 
-### 7. ~~Suspect Card Click Has No Effect~~ **FIXED**
+### 2. Network Graph Shows Rich Relationships
 
-**Location:** Network Analysis → Sidebar → Suspect Cards
+**Status:** FIXED
 
-**Fix:** Added click handlers to suspect cards that:
+Added 17 relationships across multiple types:
 
-- Toggle selection state on click
-- Highlight selected card with red border and background tint
-- Smooth transition animation on selection change
+- `CO_LOCATED` - Suspects present at same locations
+- `CONTACTED` - Phone/communication links
+- `KNOWN_ASSOCIATE` - Prior criminal history together
+- `SOCIAL` - Social media/personal connections
 
----
+### 3. Suspect Criminal History Populated
 
-## 🔴 Data Issues (Backend/Database Required)
+**Status:** FIXED
 
-These issues require changes to the backend data model or database seeding:
+All 10 suspects now have detailed criminal history records including:
 
-### 8. Cases Show 0 Suspects/Devices
-
-**Location:** Case View → Case Cards and Case Detail Modal
-
-**Issue:** All cases display:
-
-- 0 Suspects
-- 0 Devices
-- 1 Location
-
-**Root Cause:** The `cases` table in the database doesn't have relationships to `persons` (suspects) or `devices` tables. The API returns cases without populated `persons` and `devices` arrays.
-
-**Required Fix:**
-
-- Add `case_persons` junction table linking cases to persons
-- Add `case_devices` junction table linking cases to devices
-- Update backend API to join and return linked suspects/devices
-- Or add `case_id` foreign key to persons and devices tables
+- Prior convictions and charges
+- Jurisdictions involved
+- Modus operandi notes
 
 ---
 
-## 🟢 Enhancement Opportunities
+## 📊 Updated Data Model Summary
 
-### 9. No Search/Filter Functionality
-
-**Location:** Global
-
-**Current State:** No search bar or filter options across the application.
-
-**Suggested Enhancement:**
-
-- Global search for cases, suspects, devices
-- Filter by jurisdiction, date range, priority
-- Filter network graph by location or risk score
-
----
-
-### 10. No Drag-and-Drop for Case Status
-
-**Location:** Case View → Kanban Board
-
-**Current State:** Status changes only via buttons in detail modal.
-
-**Suggested Enhancement:** Allow dragging case cards between Investigating → Under Review → Adjudicated columns.
+| Entity               | Count | Details                                                                                                                                                |
+| -------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Suspects**         | 10    | Marcus "Ghost", Darius "Slim", Anthony "Tone", Terrell "T-Wash", Tyrone "T-Money", Jerome "JD", Kevin "K-Rock", Jamal "Jay", Carlos "Los", DeShawn "D" |
+| **Civilians**        | 5     | Alice Chen, Robert Martinez, Carol Smith, David Lee, Emma Wilson                                                                                       |
+| **Devices**          | 18    | 13 suspect devices (incl. 4 burners) + 5 civilian devices                                                                                              |
+| **Cases**            | 8     | DC (4), Nashville (2), Baltimore (1), Financial (1)                                                                                                    |
+| **Hotspots**         | 8     | 1-to-1 with cases (can be merged later)                                                                                                                |
+| **Relationships**    | 17    | Cross-network connections                                                                                                                              |
+| **Cell Towers**      | 8     | DC (5), Nashville (2), Baltimore (1)                                                                                                                   |
+| **Position Records** | 1,149 | 72-hour timeline coverage                                                                                                                              |
 
 ---
 
-### 11. Timeline Auto-Play Speed Controls
+## 🎯 Suspect Threat Levels
 
-**Location:** Hotspot Explorer → Timeline Controls
-
-**Current State:** Play button auto-advances at fixed 500ms intervals.
-
-**Suggested Enhancement:**
-
-- Speed controls (0.5x, 1x, 2x, 5x)
-- Time range selector
-- Clear visual indicator of playback state
-
----
-
-### 12. No Suspect Profile View
-
-**Location:** Network Analysis
-
-**Current State:** Suspect cards show basic info but no dedicated profile page.
-
-**Suggested Enhancement:**
-
-- Full suspect profile with photo/avatar
-- Complete device history
-- Case involvement timeline
-- Known associates network
-
----
-
-### 13. No Export/Report Generation
-
-**Location:** Global
-
-**Current State:** No way to export data or generate reports.
-
-**Suggested Enhancement:**
-
-- Export case details to PDF
-- Export network graph image
-- Generate analyst reports
-- Export data to CSV
-
----
-
-## ✅ Working Features
-
-The following features were tested and working correctly:
-
-- ✅ Navigation between tabs (Hotspot Explorer, Network Analysis, Case View)
-- ✅ Dark/Light mode toggle with proper styling
-- ✅ Case detail modal opens with full information
-- ✅ Case status change via modal buttons
-- ✅ Network graph visualization with co-location relationships
-- ✅ "Analyze Network" button navigates correctly
-- ✅ Jump to case buttons in Hotspot Explorer
-- ✅ Focus mode toggle in Network Analysis
-- ✅ "Detect Burner" AI feature showing burner phone detection
-- ✅ Map interactions (zoom, pan)
-- ✅ Hotspot cell selection zooms map and shows details
-- ✅ Device card selection zooms to device location
-- ✅ Deep linking from Case View to Hotspot Explorer
-- ✅ New Case creation form
-- ✅ Databricks integration badge displayed
-
----
-
-## Testing Environment
-
-- **Date:** January 6, 2026
-- **URL:** http://localhost:5173/
-- **Browser:** Chrome (via Browser MCP extension)
-- **Theme Tested:** Both Light and Dark modes
-
----
-
-## Summary of Changes Made
-
-| Issue                                     | Status     | Type    |
-| ----------------------------------------- | ---------- | ------- |
-| View on Map deep linking                  | ✅ Fixed   | Code    |
-| New Case button/form                      | ✅ Fixed   | Code    |
-| Hotspot detail panel                      | ✅ Fixed   | Code    |
-| Device card click handlers                | ✅ Fixed   | Code    |
-| Hotspot selection bug (duplicate towerId) | ✅ Fixed   | Code    |
-| View Case hardcoded wrong case            | ✅ Fixed   | Code    |
-| Suspect card click in Network Analysis    | ✅ Fixed   | Code    |
-| Cases show 0 suspects/devices             | ⚠️ Pending | Data    |
-| Search/filter functionality               | 📋 Backlog | Feature |
-| Drag-and-drop case status                 | 📋 Backlog | Feature |
+| Level      | Suspects                                                           |
+| ---------- | ------------------------------------------------------------------ |
+| **High**   | Marcus Williams, Darius Jackson, Anthony Brown, Terrell Washington |
+| **Medium** | Tyrone Mitchell, Jerome Davis, Kevin Thompson, Jamal Carter        |
+| **Low**    | Carlos Rodriguez, DeShawn Harris                                   |

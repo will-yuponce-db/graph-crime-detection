@@ -139,7 +139,28 @@ erDiagram
         text device_id PK,FK
     }
 
+    HOTSPOTS {
+        text id PK
+        text name
+        real latitude
+        real longitude
+        real radius_km
+        text city
+        text state
+        text status
+        text merged_into_id FK
+        text notes
+    }
+
+    CASE_HOTSPOTS {
+        text case_id PK,FK
+        text hotspot_id PK,FK
+    }
+
     PERSONS ||--o{ DEVICES : "owns"
+    DEMO_CASES ||--o{ CASE_HOTSPOTS : "linked_to"
+    HOTSPOTS ||--o{ CASE_HOTSPOTS : "has"
+    HOTSPOTS ||--o| HOTSPOTS : "merged_into"
     DEVICES ||--o{ DEVICE_POSITIONS : "has"
     CELL_TOWERS ||--o{ DEVICE_POSITIONS : "detected_at"
     PERSONS ||--o{ PERSON_RELATIONSHIPS : "related_to"
@@ -162,12 +183,14 @@ erDiagram
 
 ### Relationship Tables
 
-| Table                  | Description                                   | Record Count |
-| ---------------------- | --------------------------------------------- | ------------ |
-| `device_positions`     | Hourly device locations (72 hrs × ~7 devices) | ~511         |
-| `person_relationships` | CO_LOCATED, CONTACTED, KNOWN_ASSOCIATE        | 3            |
-| `case_persons`         | Links persons to cases                        | ~10          |
-| `case_devices`         | Links devices to cases                        | ~10          |
+| Table                  | Description                                       | Record Count |
+| ---------------------- | ------------------------------------------------- | ------------ |
+| `device_positions`     | Hourly device locations (72 hrs × ~7 devices)     | ~511         |
+| `person_relationships` | CO_LOCATED, CONTACTED, KNOWN_ASSOCIATE            | 17           |
+| `case_persons`         | Links persons to cases                            | ~10          |
+| `case_devices`         | Links devices to cases                            | ~10          |
+| `hotspots`             | Crime hotspot areas (initially 1-to-1 with cases) | 8            |
+| `case_hotspots`        | Links cases to hotspots                           | 8            |
 
 ## Key Data
 
@@ -216,13 +239,18 @@ erDiagram
 
 ## API Endpoints
 
-| Endpoint                           | Description                    |
-| ---------------------------------- | ------------------------------ |
-| `GET /api/demo/config`             | Towers + key frames            |
-| `GET /api/demo/positions/:hour`    | Device locations at hour       |
-| `GET /api/demo/hotspots/:hour`     | Tower activity counts          |
-| `GET /api/demo/cases`              | All cases with persons/devices |
-| `GET /api/demo/relationships`      | Person relationships for graph |
-| `GET /api/demo/graph-data`         | Network graph nodes/links      |
-| `PATCH /api/demo/cases/:id/status` | Update case status             |
-| `POST /api/demo/reset`             | Reseed database                |
+| Endpoint                            | Description                      |
+| ----------------------------------- | -------------------------------- |
+| `GET /api/demo/config`              | Towers + key frames              |
+| `GET /api/demo/positions/:hour`     | Device locations at hour         |
+| `GET /api/demo/hotspots/:hour`      | Tower activity counts (dynamic)  |
+| `GET /api/demo/cases`               | All cases with persons/devices   |
+| `GET /api/demo/relationships`       | Person relationships for graph   |
+| `GET /api/demo/graph-data`          | Network graph nodes/links        |
+| `PATCH /api/demo/cases/:id/status`  | Update case status               |
+| `POST /api/demo/cases/merge`        | Merge multiple cases             |
+| `GET /api/demo/hotspots-entity`     | All hotspots (entity table)      |
+| `GET /api/demo/hotspots-entity/:id` | Single hotspot with linked cases |
+| `GET /api/demo/cases/:id/hotspot`   | Get hotspot linked to a case     |
+| `POST /api/demo/hotspots/merge`     | Merge multiple hotspots          |
+| `POST /api/demo/reset`              | Reseed database                  |

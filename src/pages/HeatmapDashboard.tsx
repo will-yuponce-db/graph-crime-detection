@@ -20,6 +20,8 @@ import {
   ListItemIcon,
   ListItemText,
   CircularProgress,
+  TextField,
+  InputAdornment,
   useTheme,
 } from '@mui/material';
 import {
@@ -41,9 +43,19 @@ import {
   Folder,
   CheckCircle,
   Cloud,
+  Search,
+  Clear,
 } from '@mui/icons-material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { MapContainer, TileLayer, CircleMarker, Marker, Popup, useMap } from 'react-leaflet';
+import {
+  MapContainer,
+  TileLayer,
+  CircleMarker,
+  Marker,
+  Popup,
+  Tooltip,
+  useMap,
+} from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { fetchConfig, fetchPositions, fetchHotspots, USE_DATABRICKS } from '../services/api';
@@ -142,6 +154,7 @@ const HeatmapDashboard: React.FC = () => {
   const [currentHour, setCurrentHour] = useState(25);
   const [pendingCaseJump, setPendingCaseJump] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1); // 0.5x, 1x, 2x, 5x
   const [showDevices, setShowDevices] = useState(true);
   const [mapCenter, setMapCenter] = useState<[number, number]>([38.9076, -77.0723]);
   const [mapZoom, setMapZoom] = useState(13);
@@ -157,9 +170,26 @@ const HeatmapDashboard: React.FC = () => {
   const [caseMenuAnchor, setCaseMenuAnchor] = useState<null | HTMLElement>(null);
   const [selectedHotspotIdx, setSelectedHotspotIdx] = useState<number | null>(null);
   const [selectedDevice, setSelectedDevice] = useState<DevicePosition | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Derived selected hotspot
   const selectedHotspot = selectedHotspotIdx !== null ? hotspots[selectedHotspotIdx] : null;
+
+  // Filtered data based on search query
+  const filteredHotspots = hotspots.filter(
+    (hs) =>
+      searchQuery === '' ||
+      hs.towerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      hs.city.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const filteredPositions = positions.filter(
+    (d) =>
+      searchQuery === '' ||
+      d.deviceName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (d.ownerName && d.ownerName.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (d.ownerAlias && d.ownerAlias.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
 
   const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -249,19 +279,20 @@ const HeatmapDashboard: React.FC = () => {
     }
   }, [currentHour, keyFrames]);
 
-  // Playback
+  // Playback with speed control
   useEffect(() => {
     if (isPlaying) {
+      const interval = 500 / playbackSpeed; // Faster speed = shorter interval
       playIntervalRef.current = setInterval(() => {
         setCurrentHour((h) => (h >= 71 ? 0 : h + 1));
-      }, 500);
+      }, interval);
     } else {
       if (playIntervalRef.current) clearInterval(playIntervalRef.current);
     }
     return () => {
       if (playIntervalRef.current) clearInterval(playIntervalRef.current);
     };
-  }, [isPlaying]);
+  }, [isPlaying, playbackSpeed]);
 
   const jumpToKeyFrame = useCallback((kf: KeyFrame) => {
     setCurrentHour(kf.hour);
@@ -360,25 +391,58 @@ const HeatmapDashboard: React.FC = () => {
             </React.Fragment>
           ))}
 
-          {/* Hotspots */}
+          {/* Hotspots - subtle ring indicators */}
           {hotspots.map((hs) => (
-            <CircleMarker
-              key={hs.towerId}
-              center={[hs.lat, hs.lng]}
-              radius={Math.min(30, 8 + hs.deviceCount * 3)}
-              pathOptions={{
-                color: hs.suspectCount > 0 ? '#ef4444' : '#f97316',
-                fillColor: hs.suspectCount > 0 ? '#ef4444' : '#f97316',
-                fillOpacity: 0.1,
-                weight: 1.5,
-              }}
-            >
-              <Popup>
-                <strong>📡 {hs.towerName}</strong>
-                <br />
-                {hs.deviceCount} devices{hs.suspectCount > 0 && `, ${hs.suspectCount} suspects`}
-              </Popup>
-            </CircleMarker>
+            <React.Fragment key={hs.towerId}>
+              {/* Outer pulse ring for high activity */}
+              {hs.suspectCount > 0 && (
+                <CircleMarker
+                  center={[hs.lat, hs.lng]}
+                  radius={Math.min(24, 12 + hs.deviceCount * 2)}
+                  pathOptions={{
+                    color: 'rgba(239, 68, 68, 0.15)',
+                    fillColor: 'transparent',
+                    fillOpacity: 0,
+                    weight: 1,
+                    dashArray: '4, 4',
+                  }}
+                />
+              )}
+              {/* Main indicator ring */}
+              <CircleMarker
+                center={[hs.lat, hs.lng]}
+                radius={Math.min(18, 8 + hs.deviceCount * 1.5)}
+                pathOptions={{
+                  color:
+                    hs.suspectCount > 0 ? 'rgba(239, 68, 68, 0.6)' : 'rgba(100, 116, 139, 0.4)',
+                  fillColor: hs.suspectCount > 0 ? 'rgba(239, 68, 68, 0.04)' : 'transparent',
+                  fillOpacity: 1,
+                  weight: hs.suspectCount > 0 ? 1.5 : 1,
+                }}
+              >
+                <Tooltip direction="top" offset={[0, -5]} opacity={0.95}>
+                  <div style={{ padding: '4px 8px', minWidth: '120px' }}>
+                    <div style={{ fontWeight: 600, fontSize: '12px', marginBottom: '4px' }}>
+                      📡 {hs.towerName}
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#666' }}>
+                      {hs.deviceCount} devices
+                      {hs.suspectCount > 0 && (
+                        <span style={{ color: '#ef4444', fontWeight: 600 }}>
+                          {' '}
+                          • {hs.suspectCount} suspects
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </Tooltip>
+                <Popup>
+                  <strong>📡 {hs.towerName}</strong>
+                  <br />
+                  {hs.deviceCount} devices{hs.suspectCount > 0 && `, ${hs.suspectCount} suspects`}
+                </Popup>
+              </CircleMarker>
+            </React.Fragment>
           ))}
 
           {/* Devices */}
@@ -395,6 +459,48 @@ const HeatmapDashboard: React.FC = () => {
                   weight: d.isSuspect ? 2 : 1,
                 }}
               >
+                <Tooltip direction="top" offset={[0, -5]} opacity={0.95}>
+                  <div
+                    style={{
+                      padding: '4px 8px',
+                      minWidth: '140px',
+                      fontFamily: 'system-ui, -apple-system, sans-serif',
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        fontSize: '13px',
+                        marginBottom: '4px',
+                        color: d.isSuspect ? '#ef4444' : '#3b82f6',
+                      }}
+                    >
+                      {d.isSuspect ? '⚠️ SUSPECT' : '📱 Device'}
+                    </div>
+                    <div style={{ fontWeight: 600, fontSize: '12px', marginBottom: '2px' }}>
+                      {d.ownerAlias ? `"${d.ownerAlias}"` : d.ownerName || 'Unknown'}
+                    </div>
+                    {d.ownerAlias && d.ownerName && (
+                      <div style={{ fontSize: '11px', color: '#666', marginBottom: '2px' }}>
+                        {d.ownerName}
+                      </div>
+                    )}
+                    <div style={{ fontSize: '10px', color: '#888' }}>{d.deviceName}</div>
+                    {d.towerName && (
+                      <div
+                        style={{
+                          fontSize: '10px',
+                          color: '#888',
+                          marginTop: '4px',
+                          borderTop: '1px solid #eee',
+                          paddingTop: '4px',
+                        }}
+                      >
+                        📡 {d.towerName}
+                      </div>
+                    )}
+                  </div>
+                </Tooltip>
                 <Popup>
                   <strong>{d.deviceName}</strong>
                   <br />
@@ -704,6 +810,45 @@ const HeatmapDashboard: React.FC = () => {
             >
               {formatHour(currentHour)}
             </Typography>
+
+            {/* Speed Controls */}
+            <Stack direction="row" spacing={0.5} sx={{ ml: 2 }}>
+              {[0.5, 1, 2, 5].map((speed) => (
+                <Chip
+                  key={speed}
+                  label={`${speed}x`}
+                  size="small"
+                  onClick={() => setPlaybackSpeed(speed)}
+                  sx={{
+                    bgcolor:
+                      playbackSpeed === speed
+                        ? theme.palette.accent.orange
+                        : theme.palette.mode === 'dark'
+                          ? '#1f1f23'
+                          : '#e2e8f0',
+                    color:
+                      playbackSpeed === speed
+                        ? theme.palette.mode === 'dark'
+                          ? '#000'
+                          : '#fff'
+                        : 'text.secondary',
+                    fontSize: '0.65rem',
+                    height: 22,
+                    minWidth: 36,
+                    cursor: 'pointer',
+                    fontWeight: playbackSpeed === speed ? 700 : 400,
+                    '&:hover': {
+                      bgcolor:
+                        playbackSpeed === speed
+                          ? theme.palette.primary.light
+                          : theme.palette.mode === 'dark'
+                            ? '#2a2a2e'
+                            : '#cbd5e1',
+                    },
+                  }}
+                />
+              ))}
+            </Stack>
           </Stack>
 
           <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
@@ -801,6 +946,40 @@ const HeatmapDashboard: React.FC = () => {
           flexDirection: 'column',
         }}
       >
+        {/* Search Box */}
+        <Box sx={{ p: 1.5, borderBottom: 1, borderColor: 'border.main' }}>
+          <TextField
+            size="small"
+            placeholder="Search hotspots, devices..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            fullWidth
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <Search sx={{ color: 'text.secondary', fontSize: 18 }} />
+                </InputAdornment>
+              ),
+              endAdornment: searchQuery && (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={() => setSearchQuery('')}>
+                    <Clear sx={{ fontSize: 16 }} />
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                bgcolor: theme.palette.mode === 'dark' ? '#1f1f23' : '#f1f5f9',
+                fontSize: '0.8rem',
+                '& fieldset': { borderColor: 'transparent' },
+                '&:hover fieldset': { borderColor: 'border.main' },
+                '&.Mui-focused fieldset': { borderColor: theme.palette.accent.orange },
+              },
+            }}
+          />
+        </Box>
+
         {/* Selected Case Info */}
         {isKeyFrame && selectedCase ? (
           <Paper
@@ -946,7 +1125,9 @@ const HeatmapDashboard: React.FC = () => {
               Active Hotspots
             </Typography>
             <Chip
-              label={hotspots.length}
+              label={
+                searchQuery ? `${filteredHotspots.length}/${hotspots.length}` : hotspots.length
+              }
               size="small"
               sx={{
                 bgcolor: `${theme.palette.accent.orange}20`,
@@ -957,13 +1138,13 @@ const HeatmapDashboard: React.FC = () => {
             />
           </Stack>
 
-          {hotspots.length === 0 ? (
+          {filteredHotspots.length === 0 ? (
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-              No hotspots active
+              {searchQuery ? 'No matching hotspots' : 'No hotspots active'}
             </Typography>
           ) : (
             <Stack spacing={1}>
-              {hotspots.slice(0, 4).map((hs, idx) => (
+              {filteredHotspots.slice(0, 4).map((hs, idx) => (
                 <Card
                   key={`${hs.towerId}-${idx}`}
                   sx={{
@@ -1061,7 +1242,7 @@ const HeatmapDashboard: React.FC = () => {
           </Stack>
 
           <Stack spacing={0.5}>
-            {positions
+            {filteredPositions
               .filter((d) => d.isSuspect)
               .map((d) => (
                 <Card
@@ -1118,7 +1299,7 @@ const HeatmapDashboard: React.FC = () => {
                   </CardContent>
                 </Card>
               ))}
-            {positions
+            {filteredPositions
               .filter((d) => !d.isSuspect)
               .slice(0, 3)
               .map((d) => (
