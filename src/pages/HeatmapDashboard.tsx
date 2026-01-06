@@ -10,6 +10,7 @@ import {
   Avatar,
   Card,
   CardContent,
+  CardActionArea,
   Button,
   ToggleButtonGroup,
   ToggleButton,
@@ -19,6 +20,7 @@ import {
   ListItemIcon,
   ListItemText,
   CircularProgress,
+  useTheme,
 } from '@mui/material';
 import {
   PlayArrow,
@@ -28,15 +30,23 @@ import {
   CellTower,
   Devices,
   ArrowForward,
+  ArrowUpward,
+  ArrowDownward,
+  ArrowBack,
+  ZoomIn,
+  ZoomOut,
+  CenterFocusStrong,
   Person,
   Warning,
   Folder,
   CheckCircle,
+  Cloud,
 } from '@mui/icons-material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { MapContainer, TileLayer, CircleMarker, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { fetchConfig, fetchPositions, fetchHotspots, USE_DATABRICKS } from '../services/api';
 
 // Types
 interface CellTower {
@@ -125,10 +135,12 @@ const formatHour = (hour: number): string => {
 
 const HeatmapDashboard: React.FC = () => {
   const navigate = useNavigate();
-  useSearchParams();
+  const [searchParams] = useSearchParams();
+  const theme = useTheme();
 
   const [loading, setLoading] = useState(true);
   const [currentHour, setCurrentHour] = useState(25);
+  const [pendingCaseJump, setPendingCaseJump] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [showDevices, setShowDevices] = useState(true);
   const [mapCenter, setMapCenter] = useState<[number, number]>([38.9076, -77.0723]);
@@ -143,46 +155,82 @@ const HeatmapDashboard: React.FC = () => {
   // UI state
   const [selectedCase, setSelectedCase] = useState<KeyFrame | null>(null);
   const [caseMenuAnchor, setCaseMenuAnchor] = useState<null | HTMLElement>(null);
+  const [selectedHotspotIdx, setSelectedHotspotIdx] = useState<number | null>(null);
+  const [selectedDevice, setSelectedDevice] = useState<DevicePosition | null>(null);
+
+  // Derived selected hotspot
+  const selectedHotspot = selectedHotspotIdx !== null ? hotspots[selectedHotspotIdx] : null;
 
   const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Map navigation functions
+  const PAN_AMOUNT = 0.02; // Degrees to pan
+  const panMap = (direction: 'up' | 'down' | 'left' | 'right') => {
+    setMapCenter(([lat, lng]) => {
+      switch (direction) {
+        case 'up':
+          return [lat + PAN_AMOUNT, lng] as [number, number];
+        case 'down':
+          return [lat - PAN_AMOUNT, lng] as [number, number];
+        case 'left':
+          return [lat, lng - PAN_AMOUNT] as [number, number];
+        case 'right':
+          return [lat, lng + PAN_AMOUNT] as [number, number];
+        default:
+          return [lat, lng] as [number, number];
+      }
+    });
+  };
+
+  const zoomMap = (direction: 'in' | 'out') => {
+    setMapZoom((z) => {
+      if (direction === 'in') return Math.min(z + 1, 18);
+      return Math.max(z - 1, 5);
+    });
+  };
+
+  const resetMapView = () => {
+    setMapCenter([38.9076, -77.0723]);
+    setMapZoom(13);
+  };
+
+  // Map tile URL based on theme
+  const mapTileUrl =
+    theme.palette.mode === 'dark'
+      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+
   // Fetch initial config
   useEffect(() => {
-    const fetchConfig = async () => {
+    const loadConfig = async () => {
       try {
-        const res = await fetch('/api/demo/config');
-        const data = await res.json();
-        if (data.success) {
-          setTowers(data.towers);
-          setKeyFrames(data.keyFrames);
-        }
+        const config = await fetchConfig();
+        setTowers(config.towers || []);
+        setKeyFrames(config.keyFrames || []);
       } catch (err) {
         console.error('Failed to fetch config:', err);
       } finally {
         setLoading(false);
       }
     };
-    fetchConfig();
+    loadConfig();
   }, []);
 
   // Fetch positions and hotspots when hour changes
   useEffect(() => {
-    const fetchData = async () => {
+    const loadData = async () => {
       try {
-        const [posRes, hotRes] = await Promise.all([
-          fetch(`/api/demo/positions/${currentHour}`),
-          fetch(`/api/demo/hotspots/${currentHour}`),
+        const [positionsData, hotspotsData] = await Promise.all([
+          fetchPositions(currentHour),
+          fetchHotspots(currentHour),
         ]);
-        const posData = await posRes.json();
-        const hotData = await hotRes.json();
-
-        if (posData.success) setPositions(posData.positions);
-        if (hotData.success) setHotspots(hotData.hotspots);
+        setPositions(positionsData || []);
+        setHotspots(hotspotsData || []);
       } catch (err) {
         console.error('Failed to fetch positions:', err);
       }
     };
-    fetchData();
+    loadData();
   }, [currentHour]);
 
   // Get cases at current hour
@@ -223,6 +271,27 @@ const HeatmapDashboard: React.FC = () => {
     setIsPlaying(false);
   }, []);
 
+  // Handle deep link from case view - store pending case on mount
+  useEffect(() => {
+    const caseParam = searchParams.get('case');
+    if (caseParam) {
+      setPendingCaseJump(caseParam);
+    }
+  }, [searchParams]);
+
+  // Jump to case once keyFrames are loaded
+  useEffect(() => {
+    if (pendingCaseJump && keyFrames.length > 0) {
+      const targetCase = keyFrames.find(
+        (kf) => kf.caseNumber === pendingCaseJump || kf.id === pendingCaseJump
+      );
+      if (targetCase) {
+        jumpToKeyFrame(targetCase);
+      }
+      setPendingCaseJump(null);
+    }
+  }, [pendingCaseJump, keyFrames, jumpToKeyFrame]);
+
   const handleCaseChipClick = (event: React.MouseEvent<HTMLElement>) => {
     if (casesAtCurrentHour.length > 1) {
       setCaseMenuAnchor(event.currentTarget);
@@ -231,23 +300,41 @@ const HeatmapDashboard: React.FC = () => {
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
-        <CircularProgress sx={{ color: '#f97316' }} />
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: '80vh',
+          bgcolor: 'background.default',
+        }}
+      >
+        <CircularProgress sx={{ color: theme.palette.accent.orange }} />
       </Box>
     );
   }
 
   return (
-    <Box sx={{ height: 'calc(100vh - 64px)', display: 'flex', bgcolor: '#09090b' }}>
+    <Box
+      sx={{
+        height: 'calc(100vh - 64px)',
+        display: 'flex',
+        bgcolor: 'background.default',
+      }}
+    >
       {/* Map */}
       <Box sx={{ flex: 1, position: 'relative' }}>
         <MapContainer
           center={mapCenter}
           zoom={mapZoom}
-          style={{ height: '100%', width: '100%', background: '#09090b' }}
+          style={{
+            height: '100%',
+            width: '100%',
+            background: theme.palette.background.default,
+          }}
           zoomControl={false}
         >
-          <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png" />
+          <TileLayer url={mapTileUrl} />
           <MapController center={mapCenter} zoom={mapZoom} />
 
           {/* Cell Towers */}
@@ -282,8 +369,8 @@ const HeatmapDashboard: React.FC = () => {
               pathOptions={{
                 color: hs.suspectCount > 0 ? '#ef4444' : '#f97316',
                 fillColor: hs.suspectCount > 0 ? '#ef4444' : '#f97316',
-                fillOpacity: 0.3,
-                weight: 2,
+                fillOpacity: 0.1,
+                weight: 1.5,
               }}
             >
               <Popup>
@@ -336,32 +423,144 @@ const HeatmapDashboard: React.FC = () => {
           )}
         </MapContainer>
 
+        {/* Map Navigation Controls */}
+        <Paper
+          sx={{
+            position: 'absolute',
+            bottom: 110,
+            right: 0,
+            p: 1,
+            bgcolor: theme.palette.surface.overlay,
+            borderLeft: 1,
+            borderTop: 1,
+            borderColor: 'border.main',
+            borderRadius: 0,
+            backdropFilter: 'blur(8px)',
+            zIndex: 1000,
+          }}
+        >
+          <Stack spacing={0.5}>
+            <Typography
+              variant="caption"
+              sx={{ color: 'text.secondary', textAlign: 'center', fontSize: '0.6rem' }}
+            >
+              NAV
+            </Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+              <IconButton
+                size="small"
+                onClick={() => panMap('up')}
+                sx={{ color: 'text.secondary', '&:hover': { color: theme.palette.accent.orange } }}
+                title="Pan Up"
+              >
+                <ArrowUpward sx={{ fontSize: 18 }} />
+              </IconButton>
+            </Box>
+            <Stack direction="row" spacing={0.5} justifyContent="center">
+              <IconButton
+                size="small"
+                onClick={() => panMap('left')}
+                sx={{ color: 'text.secondary', '&:hover': { color: theme.palette.accent.orange } }}
+                title="Pan Left"
+              >
+                <ArrowBack sx={{ fontSize: 18 }} />
+              </IconButton>
+              <IconButton
+                size="small"
+                onClick={resetMapView}
+                sx={{ color: 'text.secondary', '&:hover': { color: theme.palette.accent.blue } }}
+                title="Reset View"
+              >
+                <CenterFocusStrong sx={{ fontSize: 18 }} />
+              </IconButton>
+              <IconButton
+                size="small"
+                onClick={() => panMap('right')}
+                sx={{ color: 'text.secondary', '&:hover': { color: theme.palette.accent.orange } }}
+                title="Pan Right"
+              >
+                <ArrowForward sx={{ fontSize: 18 }} />
+              </IconButton>
+            </Stack>
+            <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+              <IconButton
+                size="small"
+                onClick={() => panMap('down')}
+                sx={{ color: 'text.secondary', '&:hover': { color: theme.palette.accent.orange } }}
+                title="Pan Down"
+              >
+                <ArrowDownward sx={{ fontSize: 18 }} />
+              </IconButton>
+            </Box>
+            <Stack
+              direction="row"
+              spacing={0.5}
+              justifyContent="center"
+              sx={{ mt: 1, pt: 1, borderTop: 1, borderColor: 'border.main' }}
+            >
+              <IconButton
+                size="small"
+                onClick={() => zoomMap('out')}
+                sx={{ color: 'text.secondary', '&:hover': { color: theme.palette.accent.orange } }}
+                title="Zoom Out"
+              >
+                <ZoomOut sx={{ fontSize: 18 }} />
+              </IconButton>
+              <IconButton
+                size="small"
+                onClick={() => zoomMap('in')}
+                sx={{ color: 'text.secondary', '&:hover': { color: theme.palette.accent.orange } }}
+                title="Zoom In"
+              >
+                <ZoomIn sx={{ fontSize: 18 }} />
+              </IconButton>
+            </Stack>
+          </Stack>
+        </Paper>
+
         {/* Header */}
         <Paper
           sx={{
             position: 'absolute',
-            top: 16,
-            left: 16,
-            right: 340,
+            top: 0,
+            left: 0,
+            right: 0,
             p: 2,
-            bgcolor: 'rgba(9, 9, 11, 0.9)',
-            border: '1px solid #27272a',
-            borderRadius: 2,
+            bgcolor: theme.palette.surface.overlay,
+            borderBottom: 1,
+            borderColor: 'border.main',
+            borderRadius: 0,
             backdropFilter: 'blur(8px)',
             zIndex: 1000,
           }}
         >
           <Stack direction="row" justifyContent="space-between" alignItems="center">
             <Stack direction="row" alignItems="center" spacing={2}>
-              <Avatar sx={{ bgcolor: '#f97316', width: 36, height: 36 }}>
+              <Avatar sx={{ bgcolor: theme.palette.accent.orange, width: 36, height: 36 }}>
                 <CellTower sx={{ fontSize: 20 }} />
               </Avatar>
               <Box>
-                <Typography variant="subtitle1" sx={{ color: '#fff', fontWeight: 700 }}>
-                  Hotspot Explorer
-                </Typography>
-                <Typography variant="caption" sx={{ color: '#52525b' }}>
-                  {towers.length} towers • {positions.length} devices
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <Typography variant="subtitle1" sx={{ color: 'text.primary', fontWeight: 700 }}>
+                    Hotspot Explorer
+                  </Typography>
+                  {USE_DATABRICKS && (
+                    <Chip
+                      icon={<Cloud sx={{ fontSize: 12 }} />}
+                      label="Databricks"
+                      size="small"
+                      sx={{
+                        height: 18,
+                        fontSize: '0.6rem',
+                        bgcolor: `${theme.palette.accent.orange}20`,
+                        color: theme.palette.accent.orange,
+                        '& .MuiChip-icon': { color: theme.palette.accent.orange },
+                      }}
+                    />
+                  )}
+                </Stack>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                  {towers.length} cells • {positions.length} entities
                 </Typography>
               </Box>
             </Stack>
@@ -378,11 +577,15 @@ const HeatmapDashboard: React.FC = () => {
                 sx={{
                   bgcolor: selectedCase
                     ? `${PRIORITY_COLORS[selectedCase.priority]}20`
-                    : '#fbbf2420',
-                  color: selectedCase ? PRIORITY_COLORS[selectedCase.priority] : '#fbbf24',
+                    : `${theme.palette.accent.yellow}20`,
+                  color: selectedCase
+                    ? PRIORITY_COLORS[selectedCase.priority]
+                    : theme.palette.accent.yellow,
                   cursor: casesAtCurrentHour.length > 1 ? 'pointer' : 'default',
                   '& .MuiChip-icon': {
-                    color: selectedCase ? PRIORITY_COLORS[selectedCase.priority] : '#fbbf24',
+                    color: selectedCase
+                      ? PRIORITY_COLORS[selectedCase.priority]
+                      : theme.palette.accent.yellow,
                   },
                 }}
               />
@@ -393,7 +596,13 @@ const HeatmapDashboard: React.FC = () => {
               anchorEl={caseMenuAnchor}
               open={Boolean(caseMenuAnchor)}
               onClose={() => setCaseMenuAnchor(null)}
-              PaperProps={{ sx: { bgcolor: '#18181b', border: '1px solid #27272a' } }}
+              PaperProps={{
+                sx: {
+                  bgcolor: 'background.paper',
+                  border: 1,
+                  borderColor: 'border.main',
+                },
+              }}
             >
               {casesAtCurrentHour.map((c) => (
                 <MenuItem
@@ -404,14 +613,14 @@ const HeatmapDashboard: React.FC = () => {
                   }}
                   selected={selectedCase?.id === c.id}
                   sx={{
-                    color: '#fff',
-                    '&:hover': { bgcolor: '#27272a' },
-                    '&.Mui-selected': { bgcolor: '#27272a' },
+                    color: 'text.primary',
+                    '&:hover': { bgcolor: 'action.hover' },
+                    '&.Mui-selected': { bgcolor: 'action.selected' },
                   }}
                 >
                   <ListItemIcon>
                     {selectedCase?.id === c.id ? (
-                      <CheckCircle sx={{ color: '#22c55e' }} />
+                      <CheckCircle sx={{ color: theme.palette.accent.green }} />
                     ) : (
                       <Folder sx={{ color: PRIORITY_COLORS[c.priority] }} />
                     )}
@@ -419,8 +628,8 @@ const HeatmapDashboard: React.FC = () => {
                   <ListItemText
                     primary={c.caseNumber}
                     secondary={c.neighborhood}
-                    primaryTypographyProps={{ sx: { color: '#fff', fontSize: '0.875rem' } }}
-                    secondaryTypographyProps={{ sx: { color: '#71717a' } }}
+                    primaryTypographyProps={{ sx: { color: 'text.primary', fontSize: '0.875rem' } }}
+                    secondaryTypographyProps={{ sx: { color: 'text.secondary' } }}
                   />
                 </MenuItem>
               ))}
@@ -432,29 +641,33 @@ const HeatmapDashboard: React.FC = () => {
         <Paper
           sx={{
             position: 'absolute',
-            bottom: 16,
-            left: 16,
-            right: 340,
+            bottom: 0,
+            left: 0,
+            right: 0,
             p: 2,
-            bgcolor: 'rgba(9, 9, 11, 0.95)',
-            border: '1px solid #27272a',
-            borderRadius: 2,
+            bgcolor: theme.palette.surface.overlay,
+            borderTop: 1,
+            borderColor: 'border.main',
+            borderRadius: 0,
             zIndex: 1000,
           }}
         >
           <Stack direction="row" alignItems="center" spacing={2}>
             <IconButton
               onClick={() => setCurrentHour((h) => Math.max(0, h - 1))}
-              sx={{ color: '#71717a' }}
+              sx={{ color: 'text.secondary' }}
             >
               <SkipPrevious />
             </IconButton>
-            <IconButton onClick={() => setIsPlaying(!isPlaying)} sx={{ color: '#f97316' }}>
+            <IconButton
+              onClick={() => setIsPlaying(!isPlaying)}
+              sx={{ color: theme.palette.accent.orange }}
+            >
               {isPlaying ? <Pause /> : <PlayArrow />}
             </IconButton>
             <IconButton
               onClick={() => setCurrentHour((h) => Math.min(71, h + 1))}
-              sx={{ color: '#71717a' }}
+              sx={{ color: 'text.secondary' }}
             >
               <SkipNext />
             </IconButton>
@@ -469,9 +682,9 @@ const HeatmapDashboard: React.FC = () => {
                 sx={{
                   color: isKeyFrame
                     ? PRIORITY_COLORS[selectedCase?.priority || 'medium']
-                    : '#52525b',
+                    : 'text.secondary',
                   '& .MuiSlider-mark': {
-                    bgcolor: '#fbbf24',
+                    bgcolor: theme.palette.accent.yellow,
                     width: 6,
                     height: 6,
                     borderRadius: '50%',
@@ -483,7 +696,7 @@ const HeatmapDashboard: React.FC = () => {
             <Typography
               variant="body2"
               sx={{
-                color: isKeyFrame ? '#fbbf24' : '#71717a',
+                color: isKeyFrame ? theme.palette.accent.yellow : 'text.secondary',
                 minWidth: 120,
                 fontFamily: 'monospace',
                 fontWeight: isKeyFrame ? 700 : 400,
@@ -494,7 +707,7 @@ const HeatmapDashboard: React.FC = () => {
           </Stack>
 
           <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
-            <Typography variant="caption" sx={{ color: '#3f3f46', mr: 1 }}>
+            <Typography variant="caption" sx={{ color: 'text.secondary', mr: 1 }}>
               JUMP TO:
             </Typography>
             {keyFrames.map((kf) => (
@@ -505,8 +718,12 @@ const HeatmapDashboard: React.FC = () => {
                 onClick={() => jumpToKeyFrame(kf)}
                 sx={{
                   bgcolor:
-                    currentHour === kf.hour ? `${PRIORITY_COLORS[kf.priority]}20` : '#1f1f23',
-                  color: currentHour === kf.hour ? PRIORITY_COLORS[kf.priority] : '#52525b',
+                    currentHour === kf.hour
+                      ? `${PRIORITY_COLORS[kf.priority]}20`
+                      : theme.palette.mode === 'dark'
+                        ? '#1f1f23'
+                        : '#f1f5f9',
+                  color: currentHour === kf.hour ? PRIORITY_COLORS[kf.priority] : 'text.secondary',
                   fontSize: '0.65rem',
                   height: 22,
                   cursor: 'pointer',
@@ -525,33 +742,47 @@ const HeatmapDashboard: React.FC = () => {
         <Paper
           sx={{
             position: 'absolute',
-            bottom: 130,
-            left: 16,
+            bottom: 110,
+            left: 0,
             p: 1.5,
-            bgcolor: 'rgba(9, 9, 11, 0.9)',
-            border: '1px solid #27272a',
-            borderRadius: 1,
-            zIndex: 1000,
+            bgcolor: theme.palette.surface.overlay,
+            borderRight: 1,
+            borderTop: 1,
+            borderColor: 'border.main',
+            borderRadius: 0,
+            zIndex: 1001,
           }}
         >
           <Stack spacing={0.5}>
             <Stack direction="row" alignItems="center" spacing={1}>
               <Box sx={{ fontSize: 12 }}>📡</Box>
-              <Typography variant="caption" sx={{ color: '#52525b' }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 Tower
               </Typography>
             </Stack>
             <Stack direction="row" alignItems="center" spacing={1}>
-              <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#ef4444' }} />
-              <Typography variant="caption" sx={{ color: '#52525b' }}>
+              <Box
+                sx={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  bgcolor: theme.palette.accent.red,
+                }}
+              />
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 Suspect
               </Typography>
             </Stack>
             <Stack direction="row" alignItems="center" spacing={1}>
               <Box
-                sx={{ width: 8, height: 8, borderRadius: '50%', border: '2px dashed #f97316' }}
+                sx={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  border: `2px dashed ${theme.palette.accent.orange}`,
+                }}
               />
-              <Typography variant="caption" sx={{ color: '#52525b' }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 Case
               </Typography>
             </Stack>
@@ -563,8 +794,9 @@ const HeatmapDashboard: React.FC = () => {
       <Box
         sx={{
           width: 320,
-          borderLeft: '1px solid #27272a',
-          bgcolor: '#0f0f0f',
+          borderLeft: 1,
+          borderColor: 'border.main',
+          bgcolor: 'background.paper',
           display: 'flex',
           flexDirection: 'column',
         }}
@@ -582,7 +814,7 @@ const HeatmapDashboard: React.FC = () => {
           >
             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
               <Folder sx={{ color: PRIORITY_COLORS[selectedCase.priority], fontSize: 18 }} />
-              <Typography variant="subtitle2" sx={{ color: '#fff', fontWeight: 700 }}>
+              <Typography variant="subtitle2" sx={{ color: 'text.primary', fontWeight: 700 }}>
                 {selectedCase.caseNumber}
               </Typography>
               <Chip
@@ -597,100 +829,203 @@ const HeatmapDashboard: React.FC = () => {
                 }}
               />
             </Stack>
-            <Typography variant="body2" sx={{ color: '#a1a1aa' }}>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
               {selectedCase.neighborhood}, {selectedCase.city}
             </Typography>
-            <Typography variant="caption" sx={{ color: '#71717a', display: 'block', mt: 0.5 }}>
+            <Typography
+              variant="caption"
+              sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}
+            >
               {selectedCase.description}
             </Typography>
           </Paper>
         ) : (
           <Paper
             elevation={0}
-            sx={{ p: 2, borderRadius: 0, bgcolor: '#18181b', borderBottom: '1px solid #27272a' }}
+            sx={{
+              p: 2,
+              borderRadius: 0,
+              bgcolor: 'background.paper',
+              borderBottom: 1,
+              borderColor: 'border.main',
+            }}
           >
-            <Typography variant="subtitle2" sx={{ color: '#52525b' }}>
+            <Typography variant="subtitle2" sx={{ color: 'text.secondary' }}>
               No case at this time
             </Typography>
-            <Typography variant="caption" sx={{ color: '#3f3f46' }}>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
               Navigate to a key frame to view case details
             </Typography>
+          </Paper>
+        )}
+
+        {/* Selected Hotspot Detail */}
+        {selectedHotspot && (
+          <Paper
+            elevation={0}
+            sx={{
+              p: 2,
+              borderRadius: 0,
+              bgcolor: `${theme.palette.accent.orange}10`,
+              borderBottom: `2px solid ${theme.palette.accent.orange}`,
+            }}
+          >
+            <Stack
+              direction="row"
+              alignItems="center"
+              justifyContent="space-between"
+              sx={{ mb: 1 }}
+            >
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <CellTower sx={{ color: theme.palette.accent.orange, fontSize: 18 }} />
+                <Typography variant="subtitle2" sx={{ color: 'text.primary', fontWeight: 700 }}>
+                  {selectedHotspot.towerName}
+                </Typography>
+              </Stack>
+              <Chip
+                label="×"
+                size="small"
+                onClick={() => setSelectedHotspotIdx(null)}
+                sx={{
+                  cursor: 'pointer',
+                  bgcolor: 'transparent',
+                  color: 'text.secondary',
+                  '&:hover': { bgcolor: 'action.hover' },
+                }}
+              />
+            </Stack>
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1 }}>
+              {selectedHotspot.city}
+            </Typography>
+            <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
+              <Box sx={{ textAlign: 'center' }}>
+                <Typography variant="h6" sx={{ color: theme.palette.accent.blue, fontWeight: 700 }}>
+                  {selectedHotspot.deviceCount}
+                </Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                  Devices
+                </Typography>
+              </Box>
+              <Box sx={{ textAlign: 'center' }}>
+                <Typography variant="h6" sx={{ color: theme.palette.accent.red, fontWeight: 700 }}>
+                  {selectedHotspot.suspectCount}
+                </Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                  Suspects
+                </Typography>
+              </Box>
+            </Stack>
+            {selectedHotspot.suspectCount > 0 && (
+              <Chip
+                label="⚠️ High Activity"
+                size="small"
+                sx={{
+                  mt: 1.5,
+                  bgcolor: `${theme.palette.accent.red}20`,
+                  color: theme.palette.accent.red,
+                  fontSize: '0.65rem',
+                }}
+              />
+            )}
           </Paper>
         )}
 
         {/* Hotspots */}
         <Paper
           elevation={0}
-          sx={{ p: 2, borderRadius: 0, bgcolor: '#18181b', borderBottom: '1px solid #27272a' }}
+          sx={{
+            p: 2,
+            borderRadius: 0,
+            bgcolor: 'background.paper',
+            borderBottom: 1,
+            borderColor: 'border.main',
+          }}
         >
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-            <Typography variant="subtitle2" sx={{ color: '#fff', fontWeight: 700 }}>
+            <Typography variant="subtitle2" sx={{ color: 'text.primary', fontWeight: 700 }}>
               Active Hotspots
             </Typography>
             <Chip
               label={hotspots.length}
               size="small"
-              sx={{ bgcolor: '#f9731620', color: '#f97316', height: 20, fontSize: '0.7rem' }}
+              sx={{
+                bgcolor: `${theme.palette.accent.orange}20`,
+                color: theme.palette.accent.orange,
+                height: 20,
+                fontSize: '0.7rem',
+              }}
             />
           </Stack>
 
           {hotspots.length === 0 ? (
-            <Typography variant="caption" sx={{ color: '#3f3f46' }}>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
               No hotspots active
             </Typography>
           ) : (
             <Stack spacing={1}>
-              {hotspots.slice(0, 4).map((hs) => (
+              {hotspots.slice(0, 4).map((hs, idx) => (
                 <Card
-                  key={hs.towerId}
+                  key={`${hs.towerId}-${idx}`}
                   sx={{
-                    bgcolor: '#09090b',
-                    border: `1px solid ${hs.suspectCount > 0 ? '#ef444430' : '#27272a'}`,
-                    cursor: 'pointer',
-                    '&:hover': { borderColor: '#f97316' },
-                  }}
-                  onClick={() => {
-                    setMapCenter([hs.lat, hs.lng]);
-                    setMapZoom(15);
+                    bgcolor:
+                      selectedHotspotIdx === idx
+                        ? `${theme.palette.accent.orange}15`
+                        : 'background.default',
+                    border: 1,
+                    borderColor:
+                      selectedHotspotIdx === idx
+                        ? theme.palette.accent.orange
+                        : hs.suspectCount > 0
+                          ? `${theme.palette.accent.red}30`
+                          : 'border.main',
+                    '&:hover': { borderColor: theme.palette.accent.orange },
                   }}
                 >
-                  <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
-                    <Stack direction="row" justifyContent="space-between" alignItems="center">
-                      <Typography variant="body2" sx={{ color: '#fff', fontWeight: 500 }}>
-                        📡 {hs.towerName}
-                      </Typography>
-                      <Stack direction="row" spacing={1}>
-                        <Badge
-                          badgeContent={hs.deviceCount}
-                          sx={{
-                            '& .MuiBadge-badge': {
-                              bgcolor: '#3b82f6',
-                              fontSize: '0.65rem',
-                              minWidth: 16,
-                              height: 16,
-                            },
-                          }}
-                        >
-                          <Devices sx={{ color: '#52525b', fontSize: 16 }} />
-                        </Badge>
-                        {hs.suspectCount > 0 && (
+                  <CardActionArea
+                    onClick={() => {
+                      setMapCenter([hs.lat, hs.lng]);
+                      setMapZoom(15);
+                      setSelectedHotspotIdx(idx);
+                    }}
+                  >
+                    <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center">
+                        <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 500 }}>
+                          📡 {hs.towerName}
+                        </Typography>
+                        <Stack direction="row" spacing={1}>
                           <Badge
-                            badgeContent={hs.suspectCount}
+                            badgeContent={hs.deviceCount}
                             sx={{
                               '& .MuiBadge-badge': {
-                                bgcolor: '#ef4444',
+                                bgcolor: theme.palette.accent.blue,
                                 fontSize: '0.65rem',
                                 minWidth: 16,
                                 height: 16,
                               },
                             }}
                           >
-                            <Person sx={{ color: '#52525b', fontSize: 16 }} />
+                            <Devices sx={{ color: 'text.secondary', fontSize: 16 }} />
                           </Badge>
-                        )}
+                          {hs.suspectCount > 0 && (
+                            <Badge
+                              badgeContent={hs.suspectCount}
+                              sx={{
+                                '& .MuiBadge-badge': {
+                                  bgcolor: theme.palette.accent.red,
+                                  fontSize: '0.65rem',
+                                  minWidth: 16,
+                                  height: 16,
+                                },
+                              }}
+                            >
+                              <Person sx={{ color: 'text.secondary', fontSize: 16 }} />
+                            </Badge>
+                          )}
+                        </Stack>
                       </Stack>
-                    </Stack>
-                  </CardContent>
+                    </CardContent>
+                  </CardActionArea>
                 </Card>
               ))}
             </Stack>
@@ -700,7 +1035,7 @@ const HeatmapDashboard: React.FC = () => {
         {/* Devices */}
         <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-            <Typography variant="overline" sx={{ color: '#3f3f46', fontSize: '0.65rem' }}>
+            <Typography variant="overline" sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>
               Devices
             </Typography>
             <ToggleButtonGroup
@@ -713,8 +1048,11 @@ const HeatmapDashboard: React.FC = () => {
                 value={true}
                 sx={{
                   p: 0.5,
-                  color: '#52525b',
-                  '&.Mui-selected': { color: '#f97316', bgcolor: '#f9731620' },
+                  color: 'text.secondary',
+                  '&.Mui-selected': {
+                    color: theme.palette.accent.orange,
+                    bgcolor: `${theme.palette.accent.orange}20`,
+                  },
                 }}
               >
                 <Devices sx={{ fontSize: 14 }} />
@@ -726,20 +1064,52 @@ const HeatmapDashboard: React.FC = () => {
             {positions
               .filter((d) => d.isSuspect)
               .map((d) => (
-                <Card key={d.deviceId} sx={{ bgcolor: '#18181b', border: '1px solid #ef444430' }}>
+                <Card
+                  key={d.deviceId}
+                  sx={{
+                    bgcolor:
+                      selectedDevice?.deviceId === d.deviceId
+                        ? `${theme.palette.accent.red}15`
+                        : 'background.paper',
+                    border: 1,
+                    borderColor:
+                      selectedDevice?.deviceId === d.deviceId
+                        ? theme.palette.accent.red
+                        : `${theme.palette.accent.red}30`,
+                    cursor: 'pointer',
+                    '&:hover': { borderColor: theme.palette.accent.red },
+                  }}
+                  onClick={() => {
+                    setSelectedDevice(d);
+                    setMapCenter([d.lat, d.lng]);
+                    setMapZoom(16);
+                  }}
+                >
                   <CardContent sx={{ p: 1, '&:last-child': { pb: 1 } }}>
                     <Stack direction="row" alignItems="center" spacing={1}>
-                      <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: '#ef4444' }} />
+                      <Box
+                        sx={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: '50%',
+                          bgcolor: theme.palette.accent.red,
+                        }}
+                      />
                       <Box>
                         <Typography
                           variant="caption"
-                          sx={{ color: '#fff', fontWeight: 600, display: 'block', lineHeight: 1.2 }}
+                          sx={{
+                            color: 'text.primary',
+                            fontWeight: 600,
+                            display: 'block',
+                            lineHeight: 1.2,
+                          }}
                         >
                           {d.ownerAlias ? `"${d.ownerAlias}"` : d.ownerName || 'Unknown'}
                         </Typography>
                         <Typography
                           variant="caption"
-                          sx={{ color: '#52525b', fontSize: '0.65rem' }}
+                          sx={{ color: 'text.secondary', fontSize: '0.65rem' }}
                         >
                           {d.deviceName}
                         </Typography>
@@ -752,11 +1122,38 @@ const HeatmapDashboard: React.FC = () => {
               .filter((d) => !d.isSuspect)
               .slice(0, 3)
               .map((d) => (
-                <Card key={d.deviceId} sx={{ bgcolor: '#18181b', border: '1px solid #27272a' }}>
+                <Card
+                  key={d.deviceId}
+                  sx={{
+                    bgcolor:
+                      selectedDevice?.deviceId === d.deviceId
+                        ? `${theme.palette.accent.blue}15`
+                        : 'background.paper',
+                    border: 1,
+                    borderColor:
+                      selectedDevice?.deviceId === d.deviceId
+                        ? theme.palette.accent.blue
+                        : 'border.main',
+                    cursor: 'pointer',
+                    '&:hover': { borderColor: theme.palette.accent.blue },
+                  }}
+                  onClick={() => {
+                    setSelectedDevice(d);
+                    setMapCenter([d.lat, d.lng]);
+                    setMapZoom(16);
+                  }}
+                >
                   <CardContent sx={{ p: 1, '&:last-child': { pb: 1 } }}>
                     <Stack direction="row" alignItems="center" spacing={1}>
-                      <Box sx={{ width: 5, height: 5, borderRadius: '50%', bgcolor: '#3b82f6' }} />
-                      <Typography variant="caption" sx={{ color: '#52525b' }}>
+                      <Box
+                        sx={{
+                          width: 5,
+                          height: 5,
+                          borderRadius: '50%',
+                          bgcolor: theme.palette.accent.blue,
+                        }}
+                      />
+                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                         {d.ownerName || 'Unknown'}
                       </Typography>
                     </Stack>
@@ -767,17 +1164,17 @@ const HeatmapDashboard: React.FC = () => {
         </Box>
 
         {/* Action */}
-        <Box sx={{ p: 2, borderTop: '1px solid #27272a' }}>
+        <Box sx={{ p: 2, borderTop: 1, borderColor: 'border.main' }}>
           <Button
             variant="contained"
             fullWidth
             endIcon={<ArrowForward />}
             onClick={() => navigate('/graph-explorer')}
             sx={{
-              bgcolor: '#f97316',
-              color: '#000',
+              bgcolor: theme.palette.accent.orange,
+              color: theme.palette.mode === 'dark' ? '#000' : '#fff',
               fontWeight: 700,
-              '&:hover': { bgcolor: '#fb923c' },
+              '&:hover': { bgcolor: theme.palette.primary.light },
             }}
           >
             Analyze Network

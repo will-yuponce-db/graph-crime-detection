@@ -1,47 +1,38 @@
-# Databricks Apps Ignore File
-# Files and directories listed here will not be synced to Databricks Apps
-
-# Build outputs (regenerated on each deploy)
-dist/
-*.log
-
-# Dependency directories (reinstalled on each deploy)
+# Dependencies - will be installed during deploy
 node_modules/
 backend/node_modules/
 
-# Cache directories
+# Build artifacts - will be rebuilt during deploy
+dist/
 .vite/
-node_modules/.vite/
-.cache/
-.turbo/
 
-# Development files
+# Local development files
+.env
+backend/.env
+*.local
+
+# Git and IDE
 .git/
+.gitignore
 .vscode/
 .idea/
+*.sw?
 
-# Local environment files
-.env
-.env.local
-.env.*.local
+# Database files (SQLite demo data - not needed for Databricks)
+*.db
+backend/db/*.db
+
+# Logs
+*.log
+logs/
 
 # OS files
 .DS_Store
 Thumbs.db
 
-# Test coverage
+# Test files
 coverage/
-
-# Database files (will be created on deploy)
-backend/db/graph.db
-backend/db/*.db
-
-# Logs
-logs/
-*.log
-npm-debug.log*
-scrapers/logs/
-
-# Scraper data (too large)
-scrapers/data/
-
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx

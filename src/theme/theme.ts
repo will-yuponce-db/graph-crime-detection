@@ -1,86 +1,169 @@
-import { createTheme } from '@mui/material/styles';
-import type { ThemeOptions } from '@mui/material/styles';
+import { createTheme, alpha } from '@mui/material/styles';
+import type { ThemeOptions, PaletteMode } from '@mui/material/styles';
 
-const getDesignTokens = (mode: 'light' | 'dark'): ThemeOptions => ({
+// Extend the theme to include custom colors
+declare module '@mui/material/styles' {
+  interface Palette {
+    border: {
+      main: string;
+      light: string;
+      dark: string;
+    };
+    surface: {
+      main: string;
+      elevated: string;
+      overlay: string;
+    };
+    accent: {
+      orange: string;
+      red: string;
+      blue: string;
+      green: string;
+      purple: string;
+      yellow: string;
+    };
+  }
+  interface PaletteOptions {
+    border?: {
+      main?: string;
+      light?: string;
+      dark?: string;
+    };
+    surface?: {
+      main?: string;
+      elevated?: string;
+      overlay?: string;
+    };
+    accent?: {
+      orange?: string;
+      red?: string;
+      blue?: string;
+      green?: string;
+      purple?: string;
+      yellow?: string;
+    };
+  }
+}
+
+const getDesignTokens = (mode: PaletteMode): ThemeOptions => ({
   palette: {
     mode,
     ...(mode === 'light'
       ? {
-          // Light mode palette
+          // Light mode palette - Clean, professional aesthetic
           primary: {
-            main: '#1976d2',
-            light: '#42a5f5',
-            dark: '#1565c0',
+            main: '#f97316',
+            light: '#fb923c',
+            dark: '#ea580c',
+            contrastText: '#ffffff',
           },
           secondary: {
-            main: '#9c27b0',
-            light: '#ba68c8',
-            dark: '#7b1fa2',
+            main: '#3b82f6',
+            light: '#60a5fa',
+            dark: '#2563eb',
           },
           background: {
-            default: '#f5f5f5',
+            default: '#f8fafc',
             paper: '#ffffff',
           },
           text: {
-            primary: '#212121',
-            secondary: '#757575',
+            primary: '#0f172a',
+            secondary: '#475569',
           },
+          border: {
+            main: '#e2e8f0',
+            light: '#f1f5f9',
+            dark: '#cbd5e1',
+          },
+          surface: {
+            main: '#ffffff',
+            elevated: '#f8fafc',
+            overlay: 'rgba(255, 255, 255, 0.95)',
+          },
+          accent: {
+            orange: '#f97316',
+            red: '#ef4444',
+            blue: '#3b82f6',
+            green: '#22c55e',
+            purple: '#8b5cf6',
+            yellow: '#eab308',
+          },
+          divider: '#e2e8f0',
         }
       : {
-          // Dark mode palette
+          // Dark mode palette - Sleek, modern dark aesthetic
           primary: {
-            main: '#90caf9',
-            light: '#e3f2fd',
-            dark: '#42a5f5',
+            main: '#f97316',
+            light: '#fb923c',
+            dark: '#ea580c',
+            contrastText: '#000000',
           },
           secondary: {
-            main: '#ce93d8',
-            light: '#f3e5f5',
-            dark: '#ab47bc',
+            main: '#3b82f6',
+            light: '#60a5fa',
+            dark: '#2563eb',
           },
           background: {
-            default: '#121212',
-            paper: '#1e1e1e',
+            default: '#09090b',
+            paper: '#18181b',
           },
           text: {
-            primary: '#ffffff',
-            secondary: '#b0b0b0',
+            primary: '#fafafa',
+            secondary: '#a1a1aa',
           },
+          border: {
+            main: '#27272a',
+            light: '#3f3f46',
+            dark: '#18181b',
+          },
+          surface: {
+            main: '#0f0f12',
+            elevated: '#1c1c1f',
+            overlay: 'rgba(9, 9, 11, 0.95)',
+          },
+          accent: {
+            orange: '#f97316',
+            red: '#ef4444',
+            blue: '#3b82f6',
+            green: '#22c55e',
+            purple: '#a78bfa',
+            yellow: '#fbbf24',
+          },
+          divider: '#27272a',
         }),
   },
   typography: {
     fontFamily: [
+      'Inter',
       '-apple-system',
       'BlinkMacSystemFont',
       '"Segoe UI"',
       'Roboto',
-      '"Helvetica Neue"',
-      'Arial',
       'sans-serif',
     ].join(','),
     h1: {
       fontSize: '2.5rem',
-      fontWeight: 600,
+      fontWeight: 700,
     },
     h2: {
       fontSize: '2rem',
-      fontWeight: 600,
+      fontWeight: 700,
     },
     h3: {
       fontSize: '1.75rem',
-      fontWeight: 500,
+      fontWeight: 600,
     },
     h4: {
       fontSize: '1.5rem',
-      fontWeight: 500,
+      fontWeight: 600,
     },
     h5: {
       fontSize: '1.25rem',
-      fontWeight: 500,
+      fontWeight: 600,
     },
     h6: {
       fontSize: '1rem',
-      fontWeight: 500,
+      fontWeight: 600,
     },
   },
   components: {
@@ -89,6 +172,7 @@ const getDesignTokens = (mode: 'light' | 'dark'): ThemeOptions => ({
         root: {
           textTransform: 'none',
           borderRadius: 8,
+          fontWeight: 600,
         },
       },
     },
@@ -99,9 +183,26 @@ const getDesignTokens = (mode: 'light' | 'dark'): ThemeOptions => ({
         },
       },
     },
+    MuiPaper: {
+      styleOverrides: {
+        root: {
+          backgroundImage: 'none',
+        },
+      },
+    },
+    MuiChip: {
+      styleOverrides: {
+        root: {
+          fontWeight: 600,
+        },
+      },
+    },
   },
 });
 
-export const createAppTheme = (mode: 'light' | 'dark') => {
+export const createAppTheme = (mode: PaletteMode) => {
   return createTheme(getDesignTokens(mode));
 };
+
+// Helper to get alpha colors
+export { alpha };

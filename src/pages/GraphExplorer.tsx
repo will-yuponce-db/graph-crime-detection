@@ -12,10 +12,12 @@ import {
   Alert,
   CircularProgress,
   Divider,
+  useTheme,
 } from '@mui/material';
-import { Hub, ArrowForward } from '@mui/icons-material';
+import { Hub, ArrowForward, Cloud } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import ForceGraph2D from 'react-force-graph-2d';
+import { fetchGraphData, fetchSuspects, USE_DATABRICKS } from '../services/api';
 
 interface GraphNode {
   id: string;
@@ -49,11 +51,14 @@ interface Suspect {
   threatLevel: string;
   criminalHistory: string | null;
   device?: string;
+  linkedCities?: string[];
+  totalScore?: number;
 }
 
 const GraphExplorer: React.FC = () => {
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
+  const theme = useTheme();
 
   const [loading, setLoading] = useState(true);
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; links: GraphLink[] }>({
@@ -63,50 +68,30 @@ const GraphExplorer: React.FC = () => {
   const [suspects, setSuspects] = useState<Suspect[]>([]);
   const [collapsed, setCollapsed] = useState(false);
   const [showBurner, setShowBurner] = useState(false);
+  const [selectedSuspect, setSelectedSuspect] = useState<string | null>(null);
 
   // Fetch graph data from API
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [graphRes, personsRes, devicesRes] = await Promise.all([
-          fetch('/api/demo/graph-data'),
-          fetch('/api/demo/persons?suspects=true'),
-          fetch('/api/demo/devices'),
-        ]);
+        const [graphData, suspectsData] = await Promise.all([fetchGraphData(), fetchSuspects()]);
 
-        const graphJson = await graphRes.json();
-        const personsJson = await personsRes.json();
-        const devicesJson = await devicesRes.json();
-
-        if (personsJson.success) {
-          const deviceMap = new Map(
-            devicesJson.devices?.map((d: { owner_id: string; name: string }) => [
-              d.owner_id,
-              d.name,
-            ]) || []
-          );
-          setSuspects(
-            personsJson.persons.map(
-              (p: {
-                id: string;
-                name: string;
-                alias: string | null;
-                threat_level: string;
-                criminal_history: string | null;
-              }) => ({
-                id: p.id,
-                name: p.name,
-                alias: p.alias,
-                threatLevel: p.threat_level,
-                criminalHistory: p.criminal_history,
-                device: deviceMap.get(p.id) || 'Unknown',
-              })
-            )
-          );
-        }
+        // Map suspects to expected format
+        setSuspects(
+          suspectsData.map((p) => ({
+            id: p.id,
+            name: p.name,
+            alias: p.alias,
+            threatLevel: p.threatLevel || 'Unknown',
+            criminalHistory: p.criminalHistory,
+            device: 'Device ' + p.id.slice(-4),
+            linkedCities: p.linkedCities,
+            totalScore: p.totalScore,
+          }))
+        );
 
         // Build fixed-layout graph
-        buildGraph(graphJson.success ? graphJson : { nodes: [], links: [] });
+        buildGraph(graphData || { nodes: [], links: [] });
       } catch (err) {
         console.error('Failed to fetch graph data:', err);
       } finally {
@@ -125,8 +110,9 @@ const GraphExplorer: React.FC = () => {
       type: string;
       city?: string;
       isSuspect?: boolean;
+      linkedCities?: string[];
     }[];
-    links: { source: string; target: string; type: string; count?: number }[];
+    links: { source: string; target: string; type: string; count?: number; weight?: number }[];
   }) => {
     const nodes: GraphNode[] = [];
     const links: GraphLink[] = [];
@@ -136,33 +122,26 @@ const GraphExplorer: React.FC = () => {
 
     // Find suspects from API data
     const suspectNodes = apiData.nodes?.filter((n) => n.type === 'person' && n.isSuspect) || [];
+    const locationNodes = apiData.nodes?.filter((n) => n.type === 'location') || [];
 
-    // Add suspects (or use defaults if not in API)
+    // Add suspects with positions
     if (suspectNodes.length >= 2) {
-      nodes.push(
-        {
-          id: suspectNodes[0].id,
-          name: suspectNodes[0].name,
-          alias: suspectNodes[0].alias,
+      // Position top suspects in center
+      suspectNodes.slice(0, 4).forEach((suspect, i) => {
+        const angle = (i / Math.min(suspectNodes.length, 4)) * Math.PI * 2 - Math.PI / 2;
+        const radius = 60;
+        nodes.push({
+          id: suspect.id,
+          name: suspect.name,
+          alias: suspect.alias || suspect.id.slice(-4),
           type: 'person',
           color: '#dc2626',
-          size: 12,
+          size: 12 - i * 2,
           isSuspect: true,
-          fx: cx - 80,
-          fy: cy,
-        },
-        {
-          id: suspectNodes[1].id,
-          name: suspectNodes[1].name,
-          alias: suspectNodes[1].alias,
-          type: 'person',
-          color: '#dc2626',
-          size: 12,
-          isSuspect: true,
-          fx: cx + 80,
-          fy: cy,
-        }
-      );
+          fx: cx + Math.cos(angle) * radius,
+          fy: cy + Math.sin(angle) * radius,
+        });
+      });
     } else {
       // Fallback defaults
       nodes.push(
@@ -191,83 +170,105 @@ const GraphExplorer: React.FC = () => {
       );
     }
 
-    // DC locations
-    const dcLocations = [
-      { id: 'loc_georgetown', name: 'Georgetown', city: 'DC' },
-      { id: 'loc_adams_morgan', name: 'Adams Morgan', city: 'DC' },
-      { id: 'loc_dupont_circle', name: 'Dupont Circle', city: 'DC' },
-    ];
-
-    // Nashville locations
-    const nashLocations = [
-      { id: 'loc_east_nashville', name: 'East Nashville', city: 'Nashville' },
-      { id: 'loc_the_gulch', name: 'The Gulch', city: 'Nashville' },
-    ];
-
-    // Position DC locations on left arc
-    dcLocations.forEach((loc, i) => {
-      const angle = Math.PI * (0.8 + i * 0.2);
-      const radius = 180;
-      nodes.push({
-        id: loc.id,
-        name: loc.name,
-        type: 'location',
-        city: loc.city,
-        color: '#3b82f6',
-        size: 8,
-        fx: cx + Math.cos(angle) * radius,
-        fy: cy + Math.sin(angle) * radius,
+    // Use API location nodes or fallback to defaults
+    if (locationNodes.length > 0) {
+      // Position location nodes in a circle around suspects
+      locationNodes.slice(0, 6).forEach((loc, i) => {
+        const angle = (i / Math.min(locationNodes.length, 6)) * Math.PI * 2;
+        const radius = 180;
+        const cityColor =
+          loc.city?.includes('DC') || loc.city?.includes('Washington')
+            ? '#3b82f6'
+            : loc.city?.includes('Nashville')
+              ? '#22c55e'
+              : '#f97316';
+        nodes.push({
+          id: loc.id,
+          name: loc.name || loc.city || 'Location',
+          type: 'location',
+          city: loc.city,
+          color: cityColor,
+          size: 8,
+          fx: cx + Math.cos(angle) * radius,
+          fy: cy + Math.sin(angle) * radius,
+        });
       });
-    });
+    } else {
+      // Fallback: DC and Nashville locations
+      const defaultLocations = [
+        { id: 'loc_georgetown', name: 'Georgetown', city: 'DC' },
+        { id: 'loc_adams_morgan', name: 'Adams Morgan', city: 'DC' },
+        { id: 'loc_dupont_circle', name: 'Dupont Circle', city: 'DC' },
+        { id: 'loc_east_nashville', name: 'East Nashville', city: 'Nashville' },
+        { id: 'loc_the_gulch', name: 'The Gulch', city: 'Nashville' },
+      ];
 
-    // Position Nashville locations on right arc
-    nashLocations.forEach((loc, i) => {
-      const angle = Math.PI * (0.2 - i * 0.2);
-      const radius = 180;
-      nodes.push({
-        id: loc.id,
-        name: loc.name,
-        type: 'location',
-        city: loc.city,
-        color: '#22c55e',
-        size: 8,
-        fx: cx + Math.cos(angle) * radius,
-        fy: cy + Math.sin(angle) * radius,
+      defaultLocations.forEach((loc, i) => {
+        const angle = (i / defaultLocations.length) * Math.PI * 2;
+        const radius = 180;
+        nodes.push({
+          id: loc.id,
+          name: loc.name,
+          type: 'location',
+          city: loc.city,
+          color: loc.city === 'DC' ? '#3b82f6' : '#22c55e',
+          size: 8,
+          fx: cx + Math.cos(angle) * radius,
+          fy: cy + Math.sin(angle) * radius,
+        });
       });
+    }
+
+    // Add links from API data
+    const nodeIds = new Set(nodes.map((n) => n.id));
+
+    // Process API links
+    apiData.links?.forEach((link) => {
+      if (nodeIds.has(link.source) && nodeIds.has(link.target)) {
+        const isCoLocated = link.type === 'CO_LOCATED';
+        const isSocial = link.type === 'SOCIAL' || link.type === 'CONTACTED';
+
+        links.push({
+          source: link.source,
+          target: link.target,
+          type: link.type,
+          color: isCoLocated ? '#fbbf24' : isSocial ? '#a78bfa' : '#3b82f640',
+          width: isCoLocated ? 3 : isSocial ? 2 : 1,
+          count: link.count,
+          curvature: isSocial ? 0.3 : 0,
+        });
+      }
     });
 
-    // Main connection between suspects
-    links.push({
-      source: nodes[0].id,
-      target: nodes[1].id,
-      type: 'CO_LOCATED',
-      color: '#fbbf24',
-      width: 3,
-      count: 10,
-    });
+    // If no links from API, create default connections
+    if (links.length === 0 && nodes.length >= 2) {
+      // Connect first two suspects
+      links.push({
+        source: nodes[0].id,
+        target: nodes[1].id,
+        type: 'CO_LOCATED',
+        color: '#fbbf24',
+        width: 3,
+        count: 10,
+      });
 
-    // Both suspects to all locations
-    const allLocations = [...dcLocations, ...nashLocations];
-    allLocations.forEach((loc) => {
-      links.push(
-        {
-          source: nodes[0].id,
-          target: loc.id,
-          type: 'DETECTED',
-          color: loc.city === 'DC' ? '#3b82f640' : '#22c55e40',
-          width: 1,
-          curvature: 0.2,
-        },
-        {
-          source: nodes[1].id,
-          target: loc.id,
-          type: 'DETECTED',
-          color: loc.city === 'DC' ? '#3b82f640' : '#22c55e40',
-          width: 1,
-          curvature: -0.2,
-        }
-      );
-    });
+      // Connect suspects to locations
+      const locationNodeIds = nodes.filter((n) => n.type === 'location');
+      nodes
+        .filter((n) => n.isSuspect)
+        .forEach((suspect) => {
+          locationNodeIds.forEach((loc) => {
+            links.push({
+              source: suspect.id,
+              target: loc.id,
+              type: 'DETECTED',
+              color: `${loc.color}40`,
+              width: 1,
+              curvature: Math.random() * 0.4 - 0.2,
+            });
+          });
+        });
+    }
 
     setGraphData({ nodes, links });
   };
@@ -327,23 +328,23 @@ const GraphExplorer: React.FC = () => {
           justifyContent: 'center',
           alignItems: 'center',
           height: '80vh',
-          bgcolor: '#0a0a0a',
+          bgcolor: 'background.default',
         }}
       >
-        <CircularProgress sx={{ color: '#f97316' }} />
+        <CircularProgress sx={{ color: theme.palette.accent.orange }} />
       </Box>
     );
   }
 
   return (
-    <Box sx={{ height: 'calc(100vh - 64px)', display: 'flex', bgcolor: '#0a0a0a' }}>
+    <Box sx={{ height: 'calc(100vh - 64px)', display: 'flex', bgcolor: 'background.default' }}>
       {/* Graph Area */}
       <Box ref={containerRef} sx={{ flex: 1, position: 'relative' }}>
         <ForceGraph2D
           graphData={graphData}
           width={containerRef.current?.clientWidth || 800}
           height={containerRef.current?.clientHeight || 600}
-          backgroundColor="#09090b"
+          backgroundColor={theme.palette.background.default}
           nodeRelSize={1}
           nodeVal={(node) => (node as GraphNode).size}
           d3AlphaDecay={1}
@@ -376,7 +377,7 @@ const GraphExplorer: React.FC = () => {
 
               ctx.font = 'bold 11px Inter, -apple-system, sans-serif';
               ctx.textAlign = 'center';
-              ctx.fillStyle = '#fff';
+              ctx.fillStyle = theme.palette.mode === 'dark' ? '#fff' : '#000';
               ctx.fillText(n.alias || n.name, node.x, node.y + r + 14);
             } else {
               const s = r;
@@ -394,7 +395,7 @@ const GraphExplorer: React.FC = () => {
 
               if (n.city) {
                 ctx.font = '8px Inter, sans-serif';
-                ctx.fillStyle = '#52525b';
+                ctx.fillStyle = theme.palette.text.secondary;
                 ctx.fillText(n.city, node.x, node.y + r + 22);
               }
             }
@@ -449,7 +450,7 @@ const GraphExplorer: React.FC = () => {
               ctx.font = '9px Inter, -apple-system, sans-serif';
               const textWidth = ctx.measureText(label).width;
 
-              ctx.fillStyle = '#18181b';
+              ctx.fillStyle = theme.palette.background.paper;
               ctx.beginPath();
               ctx.roundRect(midX - textWidth / 2 - 6, midY - 8, textWidth + 12, 16, 8);
               ctx.fill();
@@ -470,32 +471,49 @@ const GraphExplorer: React.FC = () => {
         <Paper
           sx={{
             position: 'absolute',
-            top: 20,
-            left: 20,
-            right: 340,
+            top: 0,
+            left: 0,
+            right: 0,
             p: 2,
-            bgcolor: 'rgba(9, 9, 11, 0.85)',
-            border: '1px solid #27272a',
-            borderRadius: 2,
+            bgcolor: theme.palette.surface.overlay,
+            borderBottom: 1,
+            borderColor: 'border.main',
+            borderRadius: 0,
             backdropFilter: 'blur(12px)',
             zIndex: 1000,
           }}
         >
           <Stack direction="row" justifyContent="space-between" alignItems="center">
             <Stack direction="row" alignItems="center" spacing={2}>
-              <Avatar sx={{ bgcolor: '#f97316', width: 36, height: 36 }}>
+              <Avatar sx={{ bgcolor: theme.palette.accent.orange, width: 36, height: 36 }}>
                 <Hub sx={{ fontSize: 20 }} />
               </Avatar>
               <Box>
                 <Typography
                   variant="subtitle1"
-                  sx={{ color: '#fff', fontWeight: 700, lineHeight: 1.2 }}
+                  sx={{ color: 'text.primary', fontWeight: 700, lineHeight: 1.2 }}
                 >
                   Network Analysis
                 </Typography>
-                <Typography variant="caption" sx={{ color: '#52525b' }}>
-                  Suspect relationships across jurisdictions
-                </Typography>
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                    Suspect relationships across jurisdictions
+                  </Typography>
+                  {USE_DATABRICKS && (
+                    <Chip
+                      icon={<Cloud sx={{ fontSize: 12 }} />}
+                      label="Databricks"
+                      size="small"
+                      sx={{
+                        height: 18,
+                        fontSize: '0.6rem',
+                        bgcolor: `${theme.palette.accent.orange}20`,
+                        color: theme.palette.accent.orange,
+                        '& .MuiChip-icon': { color: theme.palette.accent.orange },
+                      }}
+                    />
+                  )}
+                </Stack>
               </Box>
             </Stack>
             <Stack direction="row" spacing={1}>
@@ -505,10 +523,13 @@ const GraphExplorer: React.FC = () => {
                   size="small"
                   onClick={handleCollapse}
                   sx={{
-                    borderColor: '#27272a',
-                    color: '#a1a1aa',
+                    borderColor: 'border.main',
+                    color: 'text.secondary',
                     fontSize: '0.75rem',
-                    '&:hover': { borderColor: '#f97316', color: '#f97316' },
+                    '&:hover': {
+                      borderColor: theme.palette.accent.orange,
+                      color: theme.palette.accent.orange,
+                    },
                   }}
                 >
                   Focus
@@ -520,7 +541,7 @@ const GraphExplorer: React.FC = () => {
                   size="small"
                   onClick={handleDetectBurner}
                   sx={{
-                    bgcolor: '#7c3aed',
+                    bgcolor: theme.palette.accent.purple,
                     color: '#fff',
                     fontSize: '0.75rem',
                     '&:hover': { bgcolor: '#6d28d9' },
@@ -537,12 +558,14 @@ const GraphExplorer: React.FC = () => {
         <Paper
           sx={{
             position: 'absolute',
-            bottom: 20,
-            left: 20,
+            bottom: 0,
+            left: 0,
             p: 1.5,
-            bgcolor: 'rgba(9, 9, 11, 0.85)',
-            border: '1px solid #27272a',
-            borderRadius: 2,
+            bgcolor: theme.palette.surface.overlay,
+            borderTop: 1,
+            borderRight: 1,
+            borderColor: 'border.main',
+            borderRadius: 0,
             backdropFilter: 'blur(12px)',
             zIndex: 1000,
           }}
@@ -554,30 +577,51 @@ const GraphExplorer: React.FC = () => {
                   width: 10,
                   height: 10,
                   borderRadius: '50%',
-                  bgcolor: '#dc2626',
+                  bgcolor: theme.palette.accent.red,
                   border: '1.5px solid rgba(255,255,255,0.6)',
                 }}
               />
-              <Typography variant="caption" sx={{ color: '#71717a' }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 Suspect
               </Typography>
             </Stack>
             <Stack direction="row" alignItems="center" spacing={1}>
-              <Box sx={{ width: 8, height: 8, bgcolor: '#3b82f6', transform: 'rotate(45deg)' }} />
-              <Typography variant="caption" sx={{ color: '#71717a' }}>
+              <Box
+                sx={{
+                  width: 8,
+                  height: 8,
+                  bgcolor: theme.palette.accent.blue,
+                  transform: 'rotate(45deg)',
+                }}
+              />
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 DC
               </Typography>
             </Stack>
             <Stack direction="row" alignItems="center" spacing={1}>
-              <Box sx={{ width: 8, height: 8, bgcolor: '#22c55e', transform: 'rotate(45deg)' }} />
-              <Typography variant="caption" sx={{ color: '#71717a' }}>
+              <Box
+                sx={{
+                  width: 8,
+                  height: 8,
+                  bgcolor: theme.palette.accent.green,
+                  transform: 'rotate(45deg)',
+                }}
+              />
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 Nashville
               </Typography>
             </Stack>
             {showBurner && (
               <Stack direction="row" alignItems="center" spacing={1}>
-                <Box sx={{ width: 8, height: 8, bgcolor: '#f97316', transform: 'rotate(45deg)' }} />
-                <Typography variant="caption" sx={{ color: '#71717a' }}>
+                <Box
+                  sx={{
+                    width: 8,
+                    height: 8,
+                    bgcolor: theme.palette.accent.orange,
+                    transform: 'rotate(45deg)',
+                  }}
+                />
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                   Baltimore
                 </Typography>
               </Stack>
@@ -590,60 +634,81 @@ const GraphExplorer: React.FC = () => {
       <Box
         sx={{
           width: 300,
-          borderLeft: '1px solid #27272a',
-          bgcolor: '#0f0f0f',
+          borderLeft: 1,
+          borderColor: 'border.main',
+          bgcolor: 'background.paper',
           display: 'flex',
           flexDirection: 'column',
         }}
       >
-        <Box sx={{ p: 2, borderBottom: '1px solid #27272a' }}>
-          <Typography variant="overline" sx={{ color: '#52525b', letterSpacing: 2 }}>
+        <Box sx={{ p: 2, borderBottom: 1, borderColor: 'border.main' }}>
+          <Typography variant="overline" sx={{ color: 'text.secondary', letterSpacing: 2 }}>
             ANALYSIS
           </Typography>
         </Box>
 
         {/* Key Stats */}
-        <Box sx={{ p: 2, borderBottom: '1px solid #27272a' }}>
+        <Box sx={{ p: 2, borderBottom: 1, borderColor: 'border.main' }}>
           <Stack spacing={1.5}>
             <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Typography variant="caption" sx={{ color: '#71717a' }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 Suspects
               </Typography>
               <Chip
                 label={suspects.length || 2}
                 size="small"
-                sx={{ bgcolor: '#dc262620', color: '#ef4444', height: 20, fontSize: '0.7rem' }}
+                sx={{
+                  bgcolor: `${theme.palette.accent.red}20`,
+                  color: theme.palette.accent.red,
+                  height: 20,
+                  fontSize: '0.7rem',
+                }}
               />
             </Stack>
             <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Typography variant="caption" sx={{ color: '#71717a' }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 Co-locations
               </Typography>
               <Chip
                 label="10"
                 size="small"
-                sx={{ bgcolor: '#fbbf2420', color: '#fbbf24', height: 20, fontSize: '0.7rem' }}
+                sx={{
+                  bgcolor: `${theme.palette.accent.yellow}20`,
+                  color: theme.palette.accent.yellow,
+                  height: 20,
+                  fontSize: '0.7rem',
+                }}
               />
             </Stack>
             <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Typography variant="caption" sx={{ color: '#71717a' }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                 Jurisdictions
               </Typography>
               <Chip
                 label="DC → Nashville"
                 size="small"
-                sx={{ bgcolor: '#22c55e20', color: '#22c55e', height: 20, fontSize: '0.7rem' }}
+                sx={{
+                  bgcolor: `${theme.palette.accent.green}20`,
+                  color: theme.palette.accent.green,
+                  height: 20,
+                  fontSize: '0.7rem',
+                }}
               />
             </Stack>
             {showBurner && (
               <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography variant="caption" sx={{ color: '#71717a' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                   Burner switch
                 </Typography>
                 <Chip
                   label="Detected"
                   size="small"
-                  sx={{ bgcolor: '#7c3aed20', color: '#a78bfa', height: 20, fontSize: '0.7rem' }}
+                  sx={{
+                    bgcolor: `${theme.palette.accent.purple}20`,
+                    color: theme.palette.accent.purple,
+                    height: 20,
+                    fontSize: '0.7rem',
+                  }}
                 />
               </Stack>
             )}
@@ -654,7 +719,7 @@ const GraphExplorer: React.FC = () => {
         <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
           <Typography
             variant="overline"
-            sx={{ color: '#52525b', letterSpacing: 2, fontSize: '0.65rem' }}
+            sx={{ color: 'text.secondary', letterSpacing: 2, fontSize: '0.65rem' }}
           >
             SUSPECTS
           </Typography>
@@ -662,18 +727,23 @@ const GraphExplorer: React.FC = () => {
           {suspects.map((s, i) => (
             <Card
               key={s.id}
+              onClick={() => setSelectedSuspect(selectedSuspect === s.id ? null : s.id)}
               sx={{
                 mt: 1.5,
-                bgcolor: '#18181b',
-                border: '1px solid #27272a',
-                '&:hover': { borderColor: '#dc2626' },
+                bgcolor:
+                  selectedSuspect === s.id ? `${theme.palette.accent.red}10` : 'background.default',
+                border: 1,
+                borderColor: selectedSuspect === s.id ? theme.palette.accent.red : 'border.main',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                '&:hover': { borderColor: theme.palette.accent.red },
               }}
             >
               <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
                 <Stack direction="row" alignItems="center" spacing={1.5}>
                   <Avatar
                     sx={{
-                      bgcolor: '#dc2626',
+                      bgcolor: theme.palette.accent.red,
                       width: 32,
                       height: 32,
                       fontSize: 12,
@@ -682,27 +752,65 @@ const GraphExplorer: React.FC = () => {
                   >
                     {i + 1}
                   </Avatar>
-                  <Box>
+                  <Box sx={{ flex: 1 }}>
                     <Typography
                       variant="body2"
-                      sx={{ color: '#fff', fontWeight: 600, fontSize: '0.85rem' }}
+                      sx={{ color: 'text.primary', fontWeight: 600, fontSize: '0.85rem' }}
                     >
                       {s.name}
                     </Typography>
                     {s.alias && (
-                      <Typography variant="caption" sx={{ color: '#f97316' }}>
+                      <Typography variant="caption" sx={{ color: theme.palette.accent.orange }}>
                         "{s.alias}"
                       </Typography>
                     )}
                   </Box>
+                  {s.totalScore && (
+                    <Chip
+                      label={s.totalScore.toFixed(1)}
+                      size="small"
+                      sx={{
+                        height: 18,
+                        fontSize: '0.65rem',
+                        bgcolor:
+                          s.totalScore > 1.5
+                            ? `${theme.palette.accent.red}20`
+                            : `${theme.palette.accent.orange}20`,
+                        color:
+                          s.totalScore > 1.5
+                            ? theme.palette.accent.red
+                            : theme.palette.accent.orange,
+                      }}
+                    />
+                  )}
                 </Stack>
-                <Divider sx={{ my: 1, borderColor: '#27272a' }} />
-                <Typography
-                  variant="caption"
-                  sx={{ color: i === 0 && showBurner ? '#a78bfa' : '#52525b' }}
-                >
-                  📱 {i === 0 && showBurner ? 'Prepaid (E2847) - BURNER' : s.device}
-                </Typography>
+                <Divider sx={{ my: 1, borderColor: 'border.main' }} />
+                <Stack spacing={0.5}>
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      color: i === 0 && showBurner ? theme.palette.accent.purple : 'text.secondary',
+                    }}
+                  >
+                    📱 {i === 0 && showBurner ? 'Prepaid (E2847) - BURNER' : s.device}
+                  </Typography>
+                  {s.linkedCities && s.linkedCities.length > 0 && (
+                    <Typography
+                      variant="caption"
+                      sx={{ color: theme.palette.accent.blue, fontSize: '0.65rem' }}
+                    >
+                      📍 {s.linkedCities.join(', ')}
+                    </Typography>
+                  )}
+                  {s.criminalHistory && (
+                    <Typography
+                      variant="caption"
+                      sx={{ color: 'text.secondary', fontSize: '0.65rem' }}
+                    >
+                      {s.criminalHistory}
+                    </Typography>
+                  )}
+                </Stack>
               </CardContent>
             </Card>
           ))}
@@ -712,12 +820,13 @@ const GraphExplorer: React.FC = () => {
               severity="warning"
               sx={{
                 mt: 2,
-                bgcolor: '#7c3aed15',
-                border: '1px solid #7c3aed40',
-                '& .MuiAlert-icon': { color: '#a78bfa' },
+                bgcolor: `${theme.palette.accent.purple}15`,
+                border: 1,
+                borderColor: `${theme.palette.accent.purple}40`,
+                '& .MuiAlert-icon': { color: theme.palette.accent.purple },
               }}
             >
-              <Typography variant="caption" sx={{ color: '#c4b5fd' }}>
+              <Typography variant="caption" sx={{ color: theme.palette.accent.purple }}>
                 Marcus switched to burner phone after Georgetown incident. New device detected in
                 Baltimore.
               </Typography>
@@ -726,20 +835,20 @@ const GraphExplorer: React.FC = () => {
         </Box>
 
         {/* Action */}
-        <Box sx={{ p: 2, borderTop: '1px solid #27272a' }}>
+        <Box sx={{ p: 2, borderTop: 1, borderColor: 'border.main' }}>
           <Button
             variant="contained"
             fullWidth
             endIcon={<ArrowForward />}
-            onClick={() => navigate('/evidence-card?case_id=CASE_008')}
+            onClick={() => navigate('/evidence-card')}
             sx={{
-              bgcolor: '#f97316',
-              color: '#000',
+              bgcolor: theme.palette.accent.orange,
+              color: theme.palette.mode === 'dark' ? '#000' : '#fff',
               fontWeight: 700,
-              '&:hover': { bgcolor: '#fb923c' },
+              '&:hover': { bgcolor: theme.palette.primary.light },
             }}
           >
-            View Case
+            View Cases
           </Button>
         </Box>
       </Box>

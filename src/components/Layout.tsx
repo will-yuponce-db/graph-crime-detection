@@ -1,12 +1,13 @@
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Box, AppBar, Toolbar, Typography, Button, Stack, Chip } from '@mui/material';
+import { Box, AppBar, Toolbar, Typography, Button, Stack, Chip, useTheme } from '@mui/material';
 import { Map as MapIcon, Hub as GraphIcon, Description as EvidenceIcon } from '@mui/icons-material';
 import ThemeToggle from './ThemeToggle';
 
 const Layout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  const theme = useTheme();
 
   const isActive = (path: string) => {
     if (path === '/') return location.pathname === '/' || location.pathname === '/heatmap';
@@ -20,12 +21,23 @@ const Layout: React.FC = () => {
   ];
 
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', bgcolor: '#0a0a0a' }}>
+    <Box
+      sx={{
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        bgcolor: 'background.default',
+      }}
+    >
       {/* Navigation Bar */}
       <AppBar
         position="static"
         elevation={0}
-        sx={{ bgcolor: '#0d0d15', borderBottom: '1px solid #222' }}
+        sx={{
+          bgcolor: 'background.paper',
+          borderBottom: 1,
+          borderColor: 'border.main',
+        }}
       >
         <Toolbar sx={{ gap: 2, px: 3 }}>
           {/* Logo / Title */}
@@ -33,7 +45,7 @@ const Layout: React.FC = () => {
             variant="h6"
             sx={{
               fontWeight: 700,
-              background: 'linear-gradient(90deg, #ff9800, #ff5722)',
+              background: `linear-gradient(90deg, ${theme.palette.accent.orange}, #ff5722)`,
               backgroundClip: 'text',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
@@ -48,8 +60,8 @@ const Layout: React.FC = () => {
             label="BETA"
             size="small"
             sx={{
-              bgcolor: '#ff980020',
-              color: '#ff9800',
+              bgcolor: `${theme.palette.accent.orange}20`,
+              color: theme.palette.accent.orange,
               fontWeight: 600,
               fontSize: '0.7rem',
             }}
@@ -64,14 +76,26 @@ const Layout: React.FC = () => {
                 startIcon={item.icon}
                 onClick={() => navigate(item.path)}
                 sx={{
-                  bgcolor: isActive(item.path) ? '#ff9800' : 'transparent',
-                  color: isActive(item.path) ? '#000' : '#888',
+                  bgcolor: isActive(item.path) ? theme.palette.accent.orange : 'transparent',
+                  color: isActive(item.path)
+                    ? theme.palette.mode === 'dark'
+                      ? '#000'
+                      : '#fff'
+                    : 'text.secondary',
                   fontWeight: isActive(item.path) ? 700 : 400,
                   fontSize: '0.8rem',
                   px: 2,
                   '&:hover': {
-                    bgcolor: isActive(item.path) ? '#ffb74d' : '#ffffff10',
-                    color: isActive(item.path) ? '#000' : '#fff',
+                    bgcolor: isActive(item.path)
+                      ? theme.palette.primary.light
+                      : theme.palette.mode === 'dark'
+                        ? 'rgba(255, 255, 255, 0.08)'
+                        : 'rgba(0, 0, 0, 0.04)',
+                    color: isActive(item.path)
+                      ? theme.palette.mode === 'dark'
+                        ? '#000'
+                        : '#fff'
+                      : 'text.primary',
                   },
                 }}
               >
@@ -85,7 +109,10 @@ const Layout: React.FC = () => {
       </AppBar>
 
       {/* Main Content */}
-      <Box component="main" sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+      <Box
+        component="main"
+        sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+      >
         <Outlet />
       </Box>
     </Box>
