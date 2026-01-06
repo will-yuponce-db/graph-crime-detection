@@ -29,6 +29,7 @@ import {
   Person,
   Add,
   Visibility,
+  Hub,
   Schedule,
   Gavel,
   Search,
@@ -39,12 +40,14 @@ import {
 } from '@mui/icons-material';
 import {
   fetchCases,
+  createCase,
   updateCaseStatus,
   USE_DATABRICKS,
   fetchAssignees,
   assignCase,
+  fetchCaseDetail,
 } from '../services/api';
-import type { Assignee } from '../services/api';
+import type { Assignee, CaseLinkedEntity } from '../services/api';
 
 type CaseStatus = 'investigating' | 'review' | 'adjudicated';
 
@@ -107,6 +110,9 @@ const CaseView: React.FC = () => {
   const [cases, setCases] = useState<CaseData[]>([]);
   const [selectedCase, setSelectedCase] = useState<CaseData | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [linkedEntitiesLoading, setLinkedEntitiesLoading] = useState(false);
+  const [linkedEntitiesError, setLinkedEntitiesError] = useState<string | null>(null);
+  const [linkedEntities, setLinkedEntities] = useState<CaseLinkedEntity[]>([]);
   const [newCaseOpen, setNewCaseOpen] = useState(false);
   const [draggedCase, setDraggedCase] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<CaseStatus | null>(null);
@@ -154,6 +160,25 @@ const CaseView: React.FC = () => {
       }
     }
   }, [searchParams, cases]);
+
+  // Load richer case detail info when the dialog opens
+  useEffect(() => {
+    const loadDetails = async () => {
+      if (!detailsOpen || !selectedCase?.id) return;
+      setLinkedEntitiesLoading(true);
+      setLinkedEntitiesError(null);
+      try {
+        const detail = await fetchCaseDetail(selectedCase.id);
+        setLinkedEntities(detail.linkedEntities || []);
+      } catch (err) {
+        setLinkedEntities([]);
+        setLinkedEntitiesError(err instanceof Error ? err.message : 'Failed to load case detail');
+      } finally {
+        setLinkedEntitiesLoading(false);
+      }
+    };
+    loadDetails();
+  }, [detailsOpen, selectedCase?.id]);
 
   const handleStatusChange = async (caseId: string, newStatus: CaseStatus) => {
     try {
@@ -214,54 +239,90 @@ const CaseView: React.FC = () => {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
-  const handleCreateCase = async () => {
-    const caseNumber = `CASE_${newCaseData.city
-      .toUpperCase()
-      .replace(/[^A-Z]/g, '')
-      .slice(0, 2)}_${String(cases.length + 1).padStart(3, '0')}`;
-
-    // Find the selected assignee
-    const selectedAssignee = assignees.find((a) => a.id === newCaseData.assigneeId);
-
-    const newCase: CaseData = {
-      id: `case_${Date.now()}`,
-      caseNumber,
-      title: newCaseData.title || `${newCaseData.priority} priority case`,
-      city: newCaseData.city,
-      state: newCaseData.state,
-      neighborhood: newCaseData.neighborhood,
-      status: 'investigating',
-      priority: newCaseData.priority,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      assignedTo: selectedAssignee?.name || 'Analyst Team',
-      assigneeId: selectedAssignee?.id || null,
-      assignee: selectedAssignee || null,
-      estimatedLoss: newCaseData.estimatedLoss ? parseInt(newCaseData.estimatedLoss) : undefined,
-      description: newCaseData.description,
-    };
-
-    // If an assignee was selected, persist the assignment
-    if (selectedAssignee) {
-      try {
-        await assignCase(newCase.id, selectedAssignee.id);
-      } catch (err) {
-        console.error('Failed to assign case:', err);
-      }
+  const renderGeoEvidencePreview = (geoEvidence: unknown) => {
+    if (!geoEvidence) {
+      return (
+        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+          No geo evidence available.
+        </Typography>
+      );
     }
 
-    setCases((prev) => [newCase, ...prev]);
-    setNewCaseOpen(false);
-    setNewCaseData({
-      title: '',
-      neighborhood: '',
-      city: '',
-      state: '',
-      priority: 'Medium',
-      description: '',
-      estimatedLoss: '',
-      assigneeId: '',
-    });
+    if (Array.isArray(geoEvidence)) {
+      const items = geoEvidence.slice(0, 3).map((item) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object' && 'claim' in (item as Record<string, unknown>)) {
+          return String((item as Record<string, unknown>).claim);
+        }
+        try {
+          return JSON.stringify(item);
+        } catch {
+          return String(item);
+        }
+      });
+
+      return (
+        <Stack spacing={0.5}>
+          {items.map((txt, idx) => (
+            <Typography key={idx} variant="caption" sx={{ color: 'text.secondary' }}>
+              - {txt}
+            </Typography>
+          ))}
+        </Stack>
+      );
+    }
+
+    if (typeof geoEvidence === 'string') {
+      return (
+        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+          {geoEvidence}
+        </Typography>
+      );
+    }
+
+    try {
+      return (
+        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+          {JSON.stringify(geoEvidence)}
+        </Typography>
+      );
+    } catch {
+      return (
+        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+          {String(geoEvidence)}
+        </Typography>
+      );
+    }
+  };
+
+  const handleCreateCase = async () => {
+    try {
+      const created = await createCase({
+        title: newCaseData.title,
+        neighborhood: newCaseData.neighborhood,
+        city: newCaseData.city,
+        state: newCaseData.state,
+        priority: newCaseData.priority,
+        description: newCaseData.description,
+        estimatedLoss: newCaseData.estimatedLoss,
+        assigneeId: newCaseData.assigneeId || undefined,
+      });
+
+      setCases((prev) => [created, ...prev]);
+      setNewCaseOpen(false);
+      setNewCaseData({
+        title: '',
+        neighborhood: '',
+        city: '',
+        state: '',
+        priority: 'Medium',
+        description: '',
+        estimatedLoss: '',
+        assigneeId: '',
+      });
+    } catch (err) {
+      console.error('Failed to create case:', err);
+    }
   };
 
   const handleAssigneeChange = async (caseId: string, assigneeId: string) => {
@@ -715,6 +776,135 @@ const CaseView: React.FC = () => {
                   </Box>
                 )}
 
+                {/* Linked entities + geo evidence */}
+                <Box>
+                  <Stack
+                    direction="row"
+                    alignItems="center"
+                    justifyContent="space-between"
+                    sx={{ mb: 1 }}
+                  >
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                      LINKED ENTITIES
+                    </Typography>
+                    {linkedEntitiesLoading && (
+                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                        Loading…
+                      </Typography>
+                    )}
+                  </Stack>
+
+                  {linkedEntitiesError && (
+                    <Typography variant="caption" sx={{ color: theme.palette.accent.red }}>
+                      {linkedEntitiesError}
+                    </Typography>
+                  )}
+
+                  {!linkedEntitiesLoading &&
+                    !linkedEntitiesError &&
+                    linkedEntities.length === 0 && (
+                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                        No linked entities found for this case.
+                      </Typography>
+                    )}
+
+                  <Stack spacing={1.5}>
+                    {linkedEntities.slice(0, 6).map((e) => (
+                      <Paper
+                        key={e.id}
+                        elevation={0}
+                        sx={{
+                          p: 1.5,
+                          bgcolor: 'background.default',
+                          border: 1,
+                          borderColor: 'border.main',
+                        }}
+                      >
+                        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.75 }}>
+                          <Avatar
+                            sx={{ width: 28, height: 28, bgcolor: `${theme.palette.accent.red}20` }}
+                          >
+                            <Person sx={{ fontSize: 16, color: theme.palette.accent.red }} />
+                          </Avatar>
+                          <Box sx={{ flex: 1 }}>
+                            <Typography
+                              variant="body2"
+                              sx={{ color: 'text.primary', fontWeight: 600 }}
+                            >
+                              {e.name}
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                              {e.id}
+                            </Typography>
+                          </Box>
+                          {typeof e.overlapScore === 'number' && (
+                            <Chip
+                              label={`Overlap ${e.overlapScore.toFixed(2)}`}
+                              size="small"
+                              sx={{ height: 18, fontSize: '0.6rem' }}
+                            />
+                          )}
+                          {e.threatLevel && (
+                            <Chip
+                              label={`Threat ${e.threatLevel}`}
+                              size="small"
+                              sx={{
+                                height: 18,
+                                fontSize: '0.6rem',
+                                bgcolor:
+                                  (e.threatLevel || '').toLowerCase() === 'high'
+                                    ? `${theme.palette.accent.red}20`
+                                    : `${theme.palette.accent.orange}20`,
+                                color:
+                                  (e.threatLevel || '').toLowerCase() === 'high'
+                                    ? theme.palette.accent.red
+                                    : theme.palette.accent.orange,
+                              }}
+                            />
+                          )}
+                        </Stack>
+
+                        {Array.isArray(e.linkedCities) && e.linkedCities.length > 0 && (
+                          <Stack
+                            direction="row"
+                            spacing={0.5}
+                            sx={{ mb: 0.75 }}
+                            flexWrap="wrap"
+                            useFlexGap
+                          >
+                            {e.linkedCities.slice(0, 3).map((city) => (
+                              <Chip
+                                key={city}
+                                icon={<LocationOn sx={{ fontSize: 12 }} />}
+                                label={city}
+                                size="small"
+                                sx={{ height: 18, fontSize: '0.6rem' }}
+                              />
+                            ))}
+                            {e.linkedCities.length > 3 && (
+                              <Chip
+                                label={`+${e.linkedCities.length - 3}`}
+                                size="small"
+                                sx={{ height: 18, fontSize: '0.6rem' }}
+                              />
+                            )}
+                          </Stack>
+                        )}
+
+                        <Box sx={{ mt: 0.5 }}>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: 'text.secondary', display: 'block', mb: 0.25 }}
+                          >
+                            WHY LINKED (GEO EVIDENCE)
+                          </Typography>
+                          {renderGeoEvidencePreview(e.geoEvidence)}
+                        </Box>
+                      </Paper>
+                    ))}
+                  </Stack>
+                </Box>
+
                 {/* Stats */}
                 <Stack direction="row" spacing={2}>
                   <Card
@@ -819,15 +1009,33 @@ const CaseView: React.FC = () => {
                 Close
               </Button>
               <Button
-                variant="contained"
+                variant="outlined"
                 startIcon={<Visibility />}
                 onClick={() => navigate(`/?case=${selectedCase.caseNumber}`)}
+                sx={{ borderColor: 'border.main', color: 'text.secondary' }}
+              >
+                View on Map
+              </Button>
+              <Button
+                variant="contained"
+                startIcon={<Hub />}
+                onClick={() => {
+                  const ids =
+                    linkedEntities.length > 0
+                      ? linkedEntities.map((e) => e.id).slice(0, 12)
+                      : (selectedCase.persons || []).map((p) => p.id).slice(0, 12);
+                  const params = new URLSearchParams();
+                  params.set('caseId', selectedCase.id);
+                  if (selectedCase.city) params.set('city', selectedCase.city);
+                  if (ids.length > 0) params.set('entityIds', ids.join(','));
+                  navigate(`/graph-explorer?${params.toString()}`);
+                }}
                 sx={{
                   bgcolor: theme.palette.accent.orange,
                   '&:hover': { bgcolor: theme.palette.primary.light },
                 }}
               >
-                View on Map
+                View in Network
               </Button>
             </DialogActions>
           </>

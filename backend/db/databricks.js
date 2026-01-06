@@ -13,6 +13,10 @@ const SCHEMA = process.env.DATABRICKS_SCHEMA || 'demo';
 let client = null;
 let session = null;
 
+function escapeSqlLiteral(value) {
+  return String(value).replace(/'/g, "''");
+}
+
 /**
  * Initialize Databricks SQL connection
  * Supports multiple auth methods:
@@ -237,10 +241,12 @@ async function updateEntityProperties(tableName, entityIdColumn, entityId, prope
     throw new Error('Databricks not connected');
   }
 
+  const safeId = escapeSqlLiteral(entityId);
+
   // Merge with existing properties if they exist
   const existingQuery = `
     SELECT properties FROM ${getTableName(tableName)} 
-    WHERE ${entityIdColumn} = '${entityId}'
+    WHERE ${entityIdColumn} = '${safeId}'
     LIMIT 1
   `;
   const existing = await executeQuery(existingQuery);
@@ -260,7 +266,7 @@ async function updateEntityProperties(tableName, entityIdColumn, entityId, prope
   const sql = `
     UPDATE ${getTableName(tableName)}
     SET properties = '${propsJson}'
-    WHERE ${entityIdColumn} = '${entityId}'
+    WHERE ${entityIdColumn} = '${safeId}'
   `;
 
   const operation = await sess.executeStatement(sql, {
@@ -291,9 +297,10 @@ async function setEntityName(tableName, entityIdColumn, entityId, displayName) {
  * @param {string} entityId - Entity ID
  */
 async function getEntityWithProperties(tableName, entityIdColumn, entityId) {
+  const safeId = escapeSqlLiteral(entityId);
   const sql = `
     SELECT * FROM ${getTableName(tableName)} 
-    WHERE ${entityIdColumn} = '${entityId}'
+    WHERE ${entityIdColumn} = '${safeId}'
     LIMIT 1
   `;
   const results = await executeQuery(sql);

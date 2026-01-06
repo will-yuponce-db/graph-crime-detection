@@ -56,6 +56,7 @@ import {
   Groups,
   Gavel,
   Phone,
+  Hub,
 } from '@mui/icons-material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -193,13 +194,17 @@ const HeatmapDashboard: React.FC = () => {
   // UI state
   const [selectedCase, setSelectedCase] = useState<KeyFrame | null>(null);
   const [caseMenuAnchor, setCaseMenuAnchor] = useState<null | HTMLElement>(null);
-  const [selectedHotspotIdx, setSelectedHotspotIdx] = useState<number | null>(null);
+  const [selectedHotspotKey, setSelectedHotspotKey] = useState<string | null>(null);
   const [selectedDevice, setSelectedDevice] = useState<DevicePosition | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [sidebarTab, setSidebarTab] = useState(0); // 0=Overview, 1=Cases, 2=Suspects, 3=Devices
 
-  // Derived selected hotspot
-  const selectedHotspot = selectedHotspotIdx !== null ? hotspots[selectedHotspotIdx] : null;
+  const getHotspotKey = useCallback((hs: Hotspot) => `${hs.towerId}|${hs.city}`, []);
+
+  // Derived selected hotspot (stable even when list is filtered/sorted)
+  const selectedHotspot = selectedHotspotKey
+    ? hotspots.find((hs) => getHotspotKey(hs) === selectedHotspotKey) || null
+    : null;
 
   // Filtered data based on search query
   const filteredHotspots = hotspots.filter(
@@ -270,8 +275,10 @@ const HeatmapDashboard: React.FC = () => {
   const stats = {
     totalCases: cases.length,
     activeCases: cases.filter((c) => c.status === 'investigating').length,
-    totalSuspects: suspects.filter((s) => s.isSuspect || s.threatLevel).length,
-    highThreatSuspects: suspects.filter((s) => s.threatLevel?.toLowerCase() === 'high').length,
+    // Backend endpoint already filters when calling /persons?suspects=true; treat returned entities as "suspects"
+    totalSuspects: suspects.length,
+    highThreatSuspects: suspects.filter((s) => (s.threatLevel || '').toLowerCase() === 'high')
+      .length,
     totalDevices: positions.length,
     suspectDevices: positions.filter((p) => p.isSuspect).length,
     totalEstimatedLoss: cases.reduce((sum, c) => sum + (c.estimatedLoss || 0), 0),
@@ -397,6 +404,36 @@ const HeatmapDashboard: React.FC = () => {
     setIsPlaying(false);
   }, []);
 
+  const buildNetworkDeepLink = useCallback(() => {
+    const params = new URLSearchParams();
+    params.set('hour', String(currentHour));
+    if (selectedHotspot?.city) params.set('city', selectedHotspot.city);
+    if (selectedHotspot?.towerId) params.set('hotspot', selectedHotspot.towerId);
+
+    // If a key frame case is selected, pass the case and its top linked entity IDs (if available)
+    if (selectedCase?.caseNumber) {
+      const caseRow =
+        cases.find(
+          (c) => c.caseNumber === selectedCase.caseNumber || c.id === selectedCase.caseNumber
+        ) || null;
+      if (caseRow?.id) params.set('caseId', caseRow.id);
+
+      const ids = (caseRow?.persons || [])
+        .map((p) => p.id)
+        .filter(Boolean)
+        .slice(0, 12);
+      if (ids.length > 0) params.set('entityIds', ids.join(','));
+    }
+
+    return `/graph-explorer?${params.toString()}`;
+  }, [
+    cases,
+    currentHour,
+    selectedCase?.caseNumber,
+    selectedHotspot?.city,
+    selectedHotspot?.towerId,
+  ]);
+
   // Handle deep link from case view - store pending case on mount
   useEffect(() => {
     const caseParam = searchParams.get('case');
@@ -487,8 +524,8 @@ const HeatmapDashboard: React.FC = () => {
           ))}
 
           {/* Hotspots - subtle ring indicators */}
-          {hotspots.map((hs) => (
-            <React.Fragment key={hs.towerId}>
+          {hotspots.map((hs, idx) => (
+            <React.Fragment key={`${hs.towerId}-${hs.city}-${idx}`}>
               {/* Outer pulse ring for high activity */}
               {hs.suspectCount > 0 && (
                 <CircleMarker
@@ -1349,7 +1386,7 @@ const HeatmapDashboard: React.FC = () => {
                         {selectedHotspot.towerName}
                       </Typography>
                     </Stack>
-                    <IconButton size="small" onClick={() => setSelectedHotspotIdx(null)}>
+                    <IconButton size="small" onClick={() => setSelectedHotspotKey(null)}>
                       <Clear sx={{ fontSize: 14 }} />
                     </IconButton>
                   </Stack>
@@ -1383,6 +1420,22 @@ const HeatmapDashboard: React.FC = () => {
                       </Typography>
                     </Box>
                   </Stack>
+                  <Button
+                    variant="contained"
+                    fullWidth
+                    startIcon={<Hub />}
+                    endIcon={<ArrowForward />}
+                    onClick={() => navigate(buildNetworkDeepLink())}
+                    sx={{
+                      mt: 2,
+                      bgcolor: theme.palette.accent.orange,
+                      color: theme.palette.mode === 'dark' ? '#000' : '#fff',
+                      fontWeight: 700,
+                      '&:hover': { bgcolor: theme.palette.primary.light },
+                    }}
+                  >
+                    Continue Investigation
+                  </Button>
                   {selectedHotspot.suspectCount > 0 && (
                     <Chip
                       icon={<Warning sx={{ fontSize: 12 }} />}
@@ -1428,12 +1481,12 @@ const HeatmapDashboard: React.FC = () => {
                       key={`${hs.towerId}-${idx}`}
                       sx={{
                         bgcolor:
-                          selectedHotspotIdx === idx
+                          selectedHotspotKey === getHotspotKey(hs)
                             ? `${theme.palette.accent.orange}15`
                             : 'background.default',
                         border: 1,
                         borderColor:
-                          selectedHotspotIdx === idx
+                          selectedHotspotKey === getHotspotKey(hs)
                             ? theme.palette.accent.orange
                             : hs.suspectCount > 0
                               ? `${theme.palette.accent.red}30`
@@ -1445,7 +1498,7 @@ const HeatmapDashboard: React.FC = () => {
                         onClick={() => {
                           setMapCenter([hs.lat, hs.lng]);
                           setMapZoom(15);
-                          setSelectedHotspotIdx(idx);
+                          setSelectedHotspotKey(getHotspotKey(hs));
                         }}
                       >
                         <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
@@ -2157,7 +2210,7 @@ const HeatmapDashboard: React.FC = () => {
             variant="contained"
             fullWidth
             endIcon={<ArrowForward />}
-            onClick={() => navigate('/graph-explorer')}
+            onClick={() => navigate(buildNetworkDeepLink())}
             sx={{
               bgcolor: theme.palette.accent.orange,
               color: theme.palette.mode === 'dark' ? '#000' : '#fff',

@@ -72,6 +72,71 @@ export interface Suspect {
   properties?: Record<string, unknown>;
 }
 
+// ============== Normalizers (backend may return snake_case) ==============
+
+type AnyRecord = Record<string, unknown>;
+
+function asStringOrNull(v: unknown): string | null {
+  return typeof v === 'string' ? v : v == null ? null : String(v);
+}
+
+function normalizePerson(raw: AnyRecord): Suspect {
+  const id = asStringOrNull(raw.id) || asStringOrNull(raw.entity_id) || '';
+  const name =
+    asStringOrNull(raw.name) ||
+    asStringOrNull(raw.entity_name) ||
+    (id ? `Entity ${id}` : 'Unknown');
+
+  const originalName =
+    asStringOrNull(raw.originalName) || asStringOrNull(raw.original_name) || name;
+
+  const threatLevel =
+    asStringOrNull(raw.threatLevel) ||
+    asStringOrNull(raw.threat_level) ||
+    asStringOrNull(raw.threat) ||
+    'Unknown';
+
+  const criminalHistory =
+    asStringOrNull(raw.criminalHistory) || asStringOrNull(raw.criminal_history) || null;
+
+  const isSuspect =
+    typeof raw.isSuspect === 'boolean'
+      ? raw.isSuspect
+      : typeof raw.is_suspect === 'number'
+        ? raw.is_suspect > 0
+        : typeof raw.is_suspect === 'boolean'
+          ? raw.is_suspect
+          : undefined;
+
+  return {
+    id,
+    name,
+    originalName,
+    customTitle: asStringOrNull(raw.customTitle) || asStringOrNull(raw.custom_title) || null,
+    customNotes: asStringOrNull(raw.customNotes) || asStringOrNull(raw.custom_notes) || null,
+    hasCustomTitle: Boolean(raw.hasCustomTitle ?? raw.has_custom_title),
+    alias: asStringOrNull(raw.alias),
+    threatLevel,
+    criminalHistory,
+    isSuspect,
+    rank: typeof raw.rank === 'number' ? raw.rank : undefined,
+    totalScore: typeof raw.totalScore === 'number' ? raw.totalScore : undefined,
+    linkedCases: Array.isArray(raw.linkedCases)
+      ? (raw.linkedCases as string[])
+      : Array.isArray(raw.linked_cases)
+        ? (raw.linked_cases as string[])
+        : undefined,
+    linkedCities: Array.isArray(raw.linkedCities)
+      ? (raw.linkedCities as string[])
+      : Array.isArray(raw.linked_cities)
+        ? (raw.linked_cities as string[])
+        : undefined,
+    properties: (typeof raw.properties === 'object' && raw.properties !== null
+      ? (raw.properties as Record<string, unknown>)
+      : undefined) as Record<string, unknown> | undefined,
+  };
+}
+
 export interface Assignee {
   id: string;
   name: string;
@@ -101,6 +166,39 @@ export interface CaseData {
   persons?: { id: string; name: string; alias?: string }[];
   devices?: { id: string; name: string }[];
   properties?: Record<string, unknown>;
+}
+
+export async function createCase(input: {
+  title?: string;
+  neighborhood: string;
+  city: string;
+  state?: string;
+  priority?: string;
+  description?: string;
+  estimatedLoss?: number | string;
+  assigneeId?: string;
+}): Promise<CaseData> {
+  const res = await fetch(`${API_BASE}/cases`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return data.case;
+}
+
+export interface CaseLinkedEntity {
+  id: string;
+  name: string;
+  originalName?: string;
+  alias?: string | null;
+  overlapScore?: number;
+  timeBucket?: string | number | null;
+  threatLevel?: string;
+  totalScore?: number;
+  linkedCities?: string[] | null;
+  geoEvidence?: unknown;
 }
 
 export interface GraphNode {
@@ -210,13 +308,26 @@ export async function fetchCases(): Promise<CaseData[]> {
 }
 
 /**
+ * Fetch a richer case detail payload (linked entities + geo evidence).
+ */
+export async function fetchCaseDetail(
+  caseId: string
+): Promise<{ case: CaseData; linkedEntities: CaseLinkedEntity[] }> {
+  const res = await fetch(`${API_BASE}/cases/${encodeURIComponent(caseId)}/detail`);
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return { case: data.case, linkedEntities: data.linkedEntities || [] };
+}
+
+/**
  * Fetch suspects/persons
  */
 export async function fetchSuspects(): Promise<Suspect[]> {
   const res = await fetch(`${API_BASE}/persons?suspects=true`);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
-  return data.persons;
+  const persons = Array.isArray(data.persons) ? data.persons : [];
+  return persons.map((p: AnyRecord) => normalizePerson(p));
 }
 
 /**
@@ -263,8 +374,13 @@ export async function fetchEvidenceCard(caseId: string): Promise<EvidenceCard> {
  * Update case status
  */
 export async function updateCaseStatus(caseId: string, status: string): Promise<void> {
-  // Case status updates are not persisted in Databricks yet
-  console.log(`Would update case ${caseId} to ${status}`);
+  const res = await fetch(`${API_BASE}/cases/${caseId}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
 }
 
 export interface MergeCasesResult {

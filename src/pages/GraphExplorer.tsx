@@ -40,7 +40,7 @@ import {
   Check,
   Undo,
 } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import ForceGraph2D from 'react-force-graph-2d';
 import {
   fetchGraphData,
@@ -57,6 +57,7 @@ interface GraphNode {
   type: 'person' | 'location';
   isSuspect?: boolean;
   city?: string;
+  linkedCities?: string[];
   color: string;
   size: number;
   fx?: number;
@@ -92,6 +93,7 @@ interface Suspect {
 
 const GraphExplorer: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<{ refresh?: () => void } | null>(null);
   const clickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -109,6 +111,8 @@ const GraphExplorer: React.FC = () => {
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileSuspect, setProfileSuspect] = useState<Suspect | null>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const [cityFilter, setCityFilter] = useState<string | null>(null);
+  const [focusedEntityIds, setFocusedEntityIds] = useState<Set<string>>(new Set());
 
   // Entity title editing state
   const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
@@ -120,10 +124,52 @@ const GraphExplorer: React.FC = () => {
   // Node visibility toggles
   const [visibleNodes, setVisibleNodes] = useState<string[]>(['suspects', 'locations']);
 
+  // Deep-link params (from Hotspot Explorer / Case View)
+  useEffect(() => {
+    const city = searchParams.get('city');
+    const entityIdsParam = searchParams.get('entityIds');
+    setCityFilter(city || null);
+
+    if (entityIdsParam) {
+      const ids = entityIdsParam
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      setFocusedEntityIds(new Set(ids));
+    } else {
+      setFocusedEntityIds(new Set());
+    }
+  }, [searchParams]);
+
+  // Auto-select first focused entity once suspects are loaded
+  useEffect(() => {
+    if (focusedEntityIds.size === 0) return;
+    if (suspects.length === 0) return;
+    if (selectedSuspect) return;
+    const ids = Array.from(focusedEntityIds);
+    const first = ids.find((id) => suspects.some((s) => s.id === id)) || ids[0];
+    setSelectedSuspect(first);
+  }, [focusedEntityIds, suspects, selectedSuspect]);
+
   // Filtered graph data based on node and edge visibility
   const filteredGraphData = useMemo(() => {
-    // Filter nodes based on visibility
-    const filteredNodes = graphData.nodes.filter((node) => {
+    // Start with optional city filter
+    const cityFilteredNodes = cityFilter
+      ? graphData.nodes.filter((node) => {
+          if (node.type === 'person') {
+            // Keep explicitly focused entities even if city metadata is missing
+            if (focusedEntityIds.has(node.id)) return true;
+            return (node.linkedCities || []).includes(cityFilter);
+          }
+          if (node.type === 'location') {
+            return node.city === cityFilter;
+          }
+          return true;
+        })
+      : graphData.nodes;
+
+    // Filter nodes based on visibility toggles
+    const filteredNodes = cityFilteredNodes.filter((node) => {
       if (node.type === 'person' && node.isSuspect) {
         return visibleNodes.includes('suspects');
       }
@@ -156,7 +202,7 @@ const GraphExplorer: React.FC = () => {
       nodes: filteredNodes,
       links: filteredLinks,
     };
-  }, [graphData, visibleEdges, visibleNodes]);
+  }, [graphData, visibleEdges, visibleNodes, cityFilter, focusedEntityIds]);
 
   // Handle edge toggle
   const handleEdgeToggle = (_event: React.MouseEvent<HTMLElement>, newEdges: string[]) => {
@@ -399,6 +445,7 @@ const GraphExplorer: React.FC = () => {
           color: '#dc2626',
           size,
           isSuspect: true,
+          linkedCities: suspect.linkedCities,
           fx: cx + Math.cos(angle) * radius,
           fy: cy + Math.sin(angle) * radius,
         });
@@ -414,6 +461,7 @@ const GraphExplorer: React.FC = () => {
           color: '#dc2626',
           size: 12,
           isSuspect: true,
+          linkedCities: ['DC'],
           fx: cx - 80,
           fy: cy,
         },
@@ -425,6 +473,7 @@ const GraphExplorer: React.FC = () => {
           color: '#dc2626',
           size: 12,
           isSuspect: true,
+          linkedCities: ['DC'],
           fx: cx + 80,
           fy: cy,
         }
@@ -705,7 +754,8 @@ const GraphExplorer: React.FC = () => {
             const n = node as GraphNode;
             const baseR = n.size;
             const isHovered = hoveredNode === n.id;
-            const isSelected = selectedSuspect === n.id;
+            const isFocused = focusedEntityIds.has(n.id);
+            const isSelected = selectedSuspect === n.id || isFocused;
             const r = isHovered ? baseR * 1.2 : baseR;
 
             if (
@@ -1050,6 +1100,30 @@ const GraphExplorer: React.FC = () => {
                   <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                     Suspect relationships across jurisdictions
                   </Typography>
+                  {cityFilter && (
+                    <Chip
+                      label={`City: ${cityFilter}`}
+                      size="small"
+                      sx={{
+                        height: 18,
+                        fontSize: '0.6rem',
+                        bgcolor: `${theme.palette.accent.blue}20`,
+                        color: theme.palette.accent.blue,
+                      }}
+                    />
+                  )}
+                  {focusedEntityIds.size > 0 && (
+                    <Chip
+                      label={`Focused: ${focusedEntityIds.size}`}
+                      size="small"
+                      sx={{
+                        height: 18,
+                        fontSize: '0.6rem',
+                        bgcolor: `${theme.palette.accent.purple}20`,
+                        color: theme.palette.accent.purple,
+                      }}
+                    />
+                  )}
                   {USE_DATABRICKS && (
                     <Chip
                       icon={<Cloud sx={{ fontSize: 12 }} />}
@@ -1437,7 +1511,10 @@ const GraphExplorer: React.FC = () => {
             SUSPECTS
           </Typography>
 
-          {suspects.map((s, i) => (
+          {(cityFilter
+            ? suspects.filter((s) => (s.linkedCities || []).includes(cityFilter))
+            : suspects
+          ).map((s, i) => (
             <Card
               key={s.id}
               onClick={() => editingEntityId !== s.id && handleCardClick(s.id)}
