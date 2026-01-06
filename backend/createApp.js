@@ -10,6 +10,8 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+const { buildSystemPrompt, ALLOWED_PATHS, ALLOWED_QUERY_KEYS } = require('./agent/prompt');
+const { invokeAgentModel } = require('./agent/databricksModelClient');
 
 function ensureDirExists(dirPath) {
   try {
@@ -57,6 +59,206 @@ function isValidHourParam(hour) {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function safeParseSearchParams(search) {
+  try {
+    const raw = typeof search === 'string' ? search : '';
+    const s = raw.startsWith('?') ? raw.slice(1) : raw;
+    const sp = new URLSearchParams(s);
+    const out = {};
+    for (const [k, v] of sp.entries()) out[k] = v;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function parseEntityIds(entityIdsRaw) {
+  if (typeof entityIdsRaw !== 'string' || !entityIdsRaw.trim()) return [];
+  return entityIdsRaw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 50);
+}
+
+function parseHour(hourRaw) {
+  if (typeof hourRaw !== 'string' || !hourRaw.trim()) return null;
+  const m = hourRaw.match(/-?\d+/);
+  if (!m) return null;
+  const n = parseInt(m[0], 10);
+  if (!Number.isFinite(n)) return null;
+  const normalized = ((Math.round(n) % 72) + 72) % 72;
+  return normalized;
+}
+
+async function buildAgentDataContext({ databricks, cache, logger, uiContext }) {
+  const path = typeof uiContext?.path === 'string' ? uiContext.path : '';
+  const searchObj = safeParseSearchParams(uiContext?.search);
+
+  const city = typeof searchObj.city === 'string' ? searchObj.city : null;
+  const hour = parseHour(searchObj.hour);
+  const caseId =
+    typeof searchObj.case_id === 'string'
+      ? searchObj.case_id
+      : typeof searchObj.caseId === 'string'
+        ? searchObj.caseId
+        : typeof searchObj.case === 'string'
+          ? searchObj.case
+          : null;
+  const entityIds = parseEntityIds(searchObj.entityIds);
+
+  const ctx = {
+    ui: {
+      path,
+      searchParams: searchObj,
+      derived: { city, hour, caseId, entityIds },
+    },
+    data: {},
+  };
+
+  // Compact, cached summaries to help the agent make sensible suggestions.
+  // Keep these small to avoid ballooning token usage.
+  try {
+    const suspectsCacheKey = `agentctx-suspects-top`;
+    let suspectsTop = cache.get(suspectsCacheKey);
+    if (!suspectsTop) {
+      const rankings = await databricks.getSuspectRankings(30);
+      suspectsTop = (rankings || []).slice(0, 12).map((r) => ({
+        id: r.entity_id,
+        name: r.entity_name || `Entity ${r.entity_id}`,
+        alias: r.alias || null,
+        totalScore: r.total_score,
+        threatLevel: r.total_score > 1.5 ? 'High' : r.total_score > 1 ? 'Medium' : 'Low',
+        linkedCities: r.linked_cities || null,
+        linkedCases: r.linked_cases || null,
+      }));
+      cache.set(suspectsCacheKey, suspectsTop, 2 * 60 * 1000);
+    }
+    ctx.data.suspectsTop = suspectsTop;
+  } catch (e) {
+    logger.warn({ type: 'agent_context', section: 'suspectsTop', error: e.message });
+  }
+
+  try {
+    const casesCacheKey = `agentctx-cases-top-${city || 'all'}`;
+    let casesTop = cache.get(casesCacheKey);
+    if (!casesTop) {
+      const cases = await databricks.getCases(80);
+      const filtered = city
+        ? (cases || []).filter((c) =>
+            String(c.city || '')
+              .toLowerCase()
+              .includes(city.toLowerCase())
+          )
+        : cases || [];
+      casesTop = filtered.slice(0, 12).map((c) => ({
+        id: c.case_id,
+        city: c.city,
+        priority: c.priority,
+        status: c.status,
+        caseType: c.case_type,
+        address: c.address,
+      }));
+      cache.set(casesCacheKey, casesTop, 2 * 60 * 1000);
+    }
+    ctx.data.casesTop = casesTop;
+  } catch (e) {
+    logger.warn({ type: 'agent_context', section: 'casesTop', error: e.message });
+  }
+
+  return ctx;
+}
+
+function safeJsonParse(maybeJson) {
+  if (typeof maybeJson !== 'string') return null;
+  const s = maybeJson.trim();
+  if (!s) return null;
+  try {
+    return JSON.parse(s);
+  } catch {
+    // Try to recover from extra text by extracting the first JSON object block
+    const first = s.indexOf('{');
+    const last = s.lastIndexOf('}');
+    if (first >= 0 && last > first) {
+      const slice = s.slice(first, last + 1);
+      try {
+        return JSON.parse(slice);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+function isPlainObject(v) {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function validateAndSanitizeActions(actions, { maxActions }) {
+  if (!Array.isArray(actions)) return [];
+  const out = [];
+
+  for (const a of actions) {
+    if (out.length >= maxActions) break;
+    if (!isPlainObject(a)) continue;
+    const type = a.type;
+    if (type === 'navigate') {
+      const path = a.path;
+      if (typeof path !== 'string' || !ALLOWED_PATHS.includes(path)) continue;
+      const searchParams = isPlainObject(a.searchParams) ? a.searchParams : undefined;
+      const cleanParams = {};
+      if (searchParams) {
+        for (const [k, v] of Object.entries(searchParams)) {
+          if (!ALLOWED_QUERY_KEYS.includes(k)) continue;
+          if (typeof v !== 'string') continue;
+          cleanParams[k] = v;
+        }
+      }
+      out.push(
+        Object.keys(cleanParams).length ? { type, path, searchParams: cleanParams } : { type, path }
+      );
+      continue;
+    }
+
+    if (type === 'setSearchParams') {
+      const sp = a.searchParams;
+      if (!isPlainObject(sp)) continue;
+      const clean = {};
+      for (const [k, v] of Object.entries(sp)) {
+        if (!ALLOWED_QUERY_KEYS.includes(k)) continue;
+        if (typeof v === 'string' || v === null) clean[k] = v;
+      }
+      out.push({ type, searchParams: clean });
+      continue;
+    }
+
+    if (type === 'selectEntities') {
+      const ids = a.entityIds;
+      if (!Array.isArray(ids)) continue;
+      const cleanIds = ids.filter((x) => typeof x === 'string' && x.trim()).slice(0, 50);
+      out.push({ type, entityIds: cleanIds });
+      continue;
+    }
+
+    if (type === 'generateEvidenceCard') {
+      const ids = a.personIds;
+      if (!Array.isArray(ids)) continue;
+      const cleanIds = ids.filter((x) => typeof x === 'string' && x.trim()).slice(0, 50);
+      const navigateToEvidenceCard =
+        typeof a.navigateToEvidenceCard === 'boolean' ? a.navigateToEvidenceCard : undefined;
+      out.push(
+        navigateToEvidenceCard !== undefined
+          ? { type, personIds: cleanIds, navigateToEvidenceCard }
+          : { type, personIds: cleanIds }
+      );
+      continue;
+    }
+  }
+
+  return out;
 }
 
 function createApp(options = {}) {
@@ -260,6 +462,87 @@ function createApp(options = {}) {
   }
 
   // ============== DEMO DATA ENDPOINTS (Databricks-backed + local overrides) ==============
+
+  /**
+   * POST /api/demo/agent/step
+   * LLM-driven UI agent step.
+   *
+   * Request:
+   *  { sessionId, history, uiContext, answer }
+   *
+   * Response:
+   *  { success: true, assistantMessage, actions }
+   */
+  app.post('/api/demo/agent/step', async (req, res) => {
+    try {
+      const { sessionId, history, uiContext, answer } = req.body || {};
+
+      if (typeof answer !== 'string' || !answer.trim()) {
+        return res.status(400).json({ success: false, error: 'answer (string) is required' });
+      }
+
+      const maxActionsRaw = process.env.DATABRICKS_AGENT_MAX_ACTIONS;
+      const maxActions =
+        typeof maxActionsRaw === 'string' && maxActionsRaw.trim()
+          ? Math.max(0, Math.min(10, parseInt(maxActionsRaw, 10) || 5))
+          : 5;
+
+      const agentDataContext = await buildAgentDataContext({
+        databricks,
+        cache,
+        logger,
+        uiContext,
+      });
+
+      const systemPrompt = buildSystemPrompt({ maxActions });
+      const messages = [
+        { role: 'system', content: systemPrompt },
+        {
+          role: 'system',
+          content: `APP_CONTEXT_JSON (use it, do not echo verbatim): ${JSON.stringify({
+            sessionId: typeof sessionId === 'string' ? sessionId : null,
+            uiContext: uiContext || null,
+            history: Array.isArray(history) ? history.slice(-20) : null,
+            agentDataContext,
+          })}`,
+        },
+        { role: 'user', content: answer.trim() },
+      ];
+
+      const { text, raw } = await invokeAgentModel({
+        host: process.env.DATABRICKS_HOST,
+        token: process.env.DATABRICKS_TOKEN,
+        // Default to an existing endpoint name commonly present in Databricks environments,
+        // so the UI can work with minimal configuration.
+        endpointName: process.env.DATABRICKS_AGENT_ENDPOINT || 'databricks-gpt-5-2',
+        messages,
+        temperature: 0.2,
+        maxTokens: 700,
+      });
+
+      const parsed = safeJsonParse(text);
+      const assistantMessage =
+        typeof parsed?.assistantMessage === 'string' && parsed.assistantMessage.trim()
+          ? parsed.assistantMessage.trim()
+          : typeof text === 'string' && text.trim()
+            ? text.trim().slice(0, 500)
+            : 'I could not generate a response.';
+
+      const actions = validateAndSanitizeActions(parsed?.actions, { maxActions });
+
+      // Helpful audit log (no secrets)
+      logger.info({
+        type: 'agent_step',
+        sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+        actionsCount: actions.length,
+        uiPath: uiContext?.path,
+      });
+
+      res.json({ success: true, assistantMessage, actions, rawModelResponse: raw });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
 
   app.get('/api/demo/config', async (req, res) => {
     try {

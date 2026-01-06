@@ -280,8 +280,11 @@ export async function fetchConfig(): Promise<{
 /**
  * Fetch device positions at a specific hour
  */
-export async function fetchPositions(hour: number): Promise<DevicePosition[]> {
-  const res = await fetch(`${API_BASE}/positions/${hour}`);
+export async function fetchPositions(
+  hour: number,
+  options?: { signal?: AbortSignal }
+): Promise<DevicePosition[]> {
+  const res = await fetch(`${API_BASE}/positions/${hour}`, { signal: options?.signal });
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.positions;
@@ -290,8 +293,11 @@ export async function fetchPositions(hour: number): Promise<DevicePosition[]> {
 /**
  * Fetch hotspots at a specific hour
  */
-export async function fetchHotspots(hour: number): Promise<Hotspot[]> {
-  const res = await fetch(`${API_BASE}/hotspots/${hour}`);
+export async function fetchHotspots(
+  hour: number,
+  options?: { signal?: AbortSignal }
+): Promise<Hotspot[]> {
+  const res = await fetch(`${API_BASE}/hotspots/${hour}`, { signal: options?.signal });
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.hotspots;
@@ -356,13 +362,16 @@ export async function fetchRelationships(): Promise<Relationship[]> {
 /**
  * Fetch evidence card for a case
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export async function fetchEvidenceCard(caseId: string): Promise<EvidenceCard> {
-  // TODO: Use caseId to fetch specific case evidence
+
+export async function fetchEvidenceCard(input: {
+  caseId?: string;
+  personIds: string[];
+}): Promise<EvidenceCard> {
+  // Backend currently supports personIds. caseId is reserved for future use.
   const res = await fetch(`${API_BASE}/evidence-card`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ personIds: [] }),
+    body: JSON.stringify({ personIds: input.personIds || [] }),
   });
 
   const data = await res.json();

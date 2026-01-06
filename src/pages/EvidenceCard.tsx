@@ -46,8 +46,13 @@ import {
   fetchAssignees,
   assignCase,
   fetchCaseDetail,
+  fetchEvidenceCard,
 } from '../services/api';
-import type { Assignee, CaseLinkedEntity } from '../services/api';
+import type {
+  Assignee,
+  CaseLinkedEntity,
+  EvidenceCard as EvidenceCardPayload,
+} from '../services/api';
 
 type CaseStatus = 'investigating' | 'review' | 'adjudicated';
 
@@ -104,7 +109,7 @@ const PRIORITY_COLORS: Record<string, string> = {
 
 const CaseView: React.FC = () => {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const theme = useTheme();
   const [loading, setLoading] = useState(true);
   const [cases, setCases] = useState<CaseData[]>([]);
@@ -127,6 +132,11 @@ const CaseView: React.FC = () => {
     assigneeId: '',
   });
   const [assignees, setAssignees] = useState<Assignee[]>([]);
+
+  // Generated evidence summary (from agent deep-link)
+  const [generatedEvidenceLoading, setGeneratedEvidenceLoading] = useState(false);
+  const [generatedEvidenceError, setGeneratedEvidenceError] = useState<string | null>(null);
+  const [generatedEvidence, setGeneratedEvidence] = useState<EvidenceCardPayload | null>(null);
 
   // Fetch cases and assignees from API
   useEffect(() => {
@@ -160,6 +170,53 @@ const CaseView: React.FC = () => {
       }
     }
   }, [searchParams, cases]);
+
+  // Agent deep-link: if entityIds is present, generate an evidence card summary for those entities.
+  useEffect(() => {
+    const entityIdsRaw = searchParams.get('entityIds');
+    if (!entityIdsRaw) {
+      setGeneratedEvidence(null);
+      setGeneratedEvidenceError(null);
+      setGeneratedEvidenceLoading(false);
+      return;
+    }
+
+    const ids = entityIdsRaw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 50);
+
+    if (ids.length === 0) return;
+
+    let cancelled = false;
+    setGeneratedEvidenceLoading(true);
+    setGeneratedEvidenceError(null);
+
+    (async () => {
+      try {
+        const card = await fetchEvidenceCard({ personIds: ids });
+        if (!cancelled) {
+          setGeneratedEvidence(card);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setGeneratedEvidence(null);
+          setGeneratedEvidenceError(
+            e instanceof Error ? e.message : 'Failed to generate evidence summary'
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setGeneratedEvidenceLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams]);
 
   // Load richer case detail info when the dialog opens
   useEffect(() => {
@@ -626,6 +683,70 @@ const CaseView: React.FC = () => {
           </Stack>
         </Stack>
       </Paper>
+
+      {(generatedEvidenceLoading || generatedEvidenceError || generatedEvidence) && (
+        <Paper
+          elevation={0}
+          sx={{
+            p: 2,
+            borderRadius: 0,
+            bgcolor: 'background.paper',
+            borderBottom: 1,
+            borderColor: 'border.main',
+          }}
+        >
+          <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2}>
+            <Box sx={{ flex: 1 }}>
+              <Typography variant="overline" sx={{ color: 'text.secondary', letterSpacing: 2 }}>
+                GENERATED EVIDENCE SUMMARY
+              </Typography>
+
+              {generatedEvidenceLoading && (
+                <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
+                  <CircularProgress size={16} sx={{ color: theme.palette.accent.orange }} />
+                  <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                    Generating…
+                  </Typography>
+                </Stack>
+              )}
+
+              {generatedEvidenceError && (
+                <Typography variant="body2" sx={{ mt: 0.5, color: theme.palette.accent.red }}>
+                  {generatedEvidenceError}
+                </Typography>
+              )}
+
+              {generatedEvidence && (
+                <Stack spacing={0.75} sx={{ mt: 0.5 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                    {generatedEvidence.title}
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    sx={{ color: 'text.secondary', whiteSpace: 'pre-wrap' }}
+                  >
+                    {generatedEvidence.summary}
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: theme.palette.accent.orange }}>
+                    Recommended: {generatedEvidence.recommendedAction}
+                  </Typography>
+                </Stack>
+              )}
+            </Box>
+
+            <IconButton
+              onClick={() => {
+                const next = new URLSearchParams(searchParams.toString());
+                next.delete('entityIds');
+                setSearchParams(next);
+              }}
+              sx={{ mt: 0.25 }}
+            >
+              <Close />
+            </IconButton>
+          </Stack>
+        </Paper>
+      )}
 
       {/* Kanban Board */}
       <Box sx={{ flex: 1, p: 3, display: 'flex', gap: 3, overflow: 'auto' }}>

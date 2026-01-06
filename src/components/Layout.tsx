@@ -1,13 +1,20 @@
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Box, AppBar, Toolbar, Typography, Button, Stack, Chip, useTheme } from '@mui/material';
-import { Map as MapIcon, Hub as GraphIcon, Description as EvidenceIcon } from '@mui/icons-material';
+import {
+  Map as MapIcon,
+  Hub as GraphIcon,
+  Description as EvidenceIcon,
+  SmartToy as SmartToyIcon,
+} from '@mui/icons-material';
 import ThemeToggle from './ThemeToggle';
+import AgentPanel from './AgentPanel';
 
 const Layout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const theme = useTheme();
+  const [agentOpen, setAgentOpen] = React.useState(false);
 
   const isActive = (path: string) => {
     if (path === '/') return location.pathname === '/' || location.pathname === '/heatmap';
@@ -104,6 +111,24 @@ const Layout: React.FC = () => {
             ))}
           </Stack>
 
+          <Button
+            variant="outlined"
+            startIcon={<SmartToyIcon />}
+            onClick={() => setAgentOpen(true)}
+            sx={{
+              borderColor: 'border.main',
+              color: 'text.secondary',
+              fontSize: '0.8rem',
+              px: 2,
+              '&:hover': {
+                borderColor: theme.palette.accent.purple,
+                color: theme.palette.accent.purple,
+              },
+            }}
+          >
+            Copilot
+          </Button>
+
           <ThemeToggle />
         </Toolbar>
       </AppBar>
@@ -115,6 +140,8 @@ const Layout: React.FC = () => {
       >
         <Outlet />
       </Box>
+
+      <AgentPanel open={agentOpen} onClose={() => setAgentOpen(false)} />
     </Box>
   );
 };

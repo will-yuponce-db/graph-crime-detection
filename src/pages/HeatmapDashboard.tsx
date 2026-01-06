@@ -175,12 +175,15 @@ const HeatmapDashboard: React.FC = () => {
 
   const [loading, setLoading] = useState(true);
   const [currentHour, setCurrentHour] = useState(25);
+  const [scrubHour, setScrubHour] = useState<number | null>(null);
   const [pendingCaseJump, setPendingCaseJump] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1); // 0.5x, 1x, 2x, 5x
   const [showDevices, setShowDevices] = useState(true);
   const [mapCenter, setMapCenter] = useState<[number, number]>([38.9076, -77.0723]);
   const [mapZoom, setMapZoom] = useState(13);
+  const [cityFilterParam, setCityFilterParam] = useState<string | null>(null);
+  const lastAppliedCityRef = useRef<string | null>(null);
 
   // Data from API
   const [towers, setTowers] = useState<CellTower[]>([]);
@@ -199,6 +202,18 @@ const HeatmapDashboard: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [sidebarTab, setSidebarTab] = useState(0); // 0=Overview, 1=Cases, 2=Suspects, 3=Devices
 
+  const parseHourParam = useCallback((raw: string | null): number | null => {
+    if (!raw) return null;
+    // Supports "18", "18-02", "hour18", etc — take the first integer.
+    const m = raw.match(/-?\d+/);
+    if (!m) return null;
+    const n = parseInt(m[0], 10);
+    if (!Number.isFinite(n)) return null;
+    // Keep within the 0-71 demo window
+    const normalized = ((Math.round(n) % 72) + 72) % 72;
+    return normalized;
+  }, []);
+
   const getHotspotKey = useCallback((hs: Hotspot) => `${hs.towerId}|${hs.city}`, []);
 
   // Derived selected hotspot (stable even when list is filtered/sorted)
@@ -206,13 +221,17 @@ const HeatmapDashboard: React.FC = () => {
     ? hotspots.find((hs) => getHotspotKey(hs) === selectedHotspotKey) || null
     : null;
 
-  // Filtered data based on search query
-  const filteredHotspots = hotspots.filter(
-    (hs) =>
-      searchQuery === '' ||
-      hs.towerName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      hs.city.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Filtered data based on URL city filter + search query
+  const filteredHotspots = hotspots.filter((hs) => {
+    const cityOk = cityFilterParam
+      ? hs.city.toLowerCase().includes(cityFilterParam.toLowerCase())
+      : true;
+    if (!cityOk) return false;
+
+    if (searchQuery === '') return true;
+    const q = searchQuery.toLowerCase();
+    return hs.towerName.toLowerCase().includes(q) || hs.city.toLowerCase().includes(q);
+  });
 
   const filteredPositions = positions.filter(
     (d) =>
@@ -222,13 +241,20 @@ const HeatmapDashboard: React.FC = () => {
       (d.ownerAlias && d.ownerAlias.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  const filteredCases = cases.filter(
-    (c) =>
-      searchQuery === '' ||
-      c.caseNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.city.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredCases = cases.filter((c) => {
+    const cityOk = cityFilterParam
+      ? c.city.toLowerCase().includes(cityFilterParam.toLowerCase())
+      : true;
+    if (!cityOk) return false;
+
+    if (searchQuery === '') return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      c.caseNumber.toLowerCase().includes(q) ||
+      c.title.toLowerCase().includes(q) ||
+      c.city.toLowerCase().includes(q)
+    );
+  });
 
   const filteredSuspects = suspects.filter(
     (s) =>
@@ -286,6 +312,8 @@ const HeatmapDashboard: React.FC = () => {
   };
 
   const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const hourFetchAbortRef = useRef<AbortController | null>(null);
+  const isScrubbingRef = useRef(false);
 
   // Map navigation functions
   const PAN_AMOUNT = 0.02; // Degrees to pan
@@ -351,18 +379,35 @@ const HeatmapDashboard: React.FC = () => {
   // Fetch positions and hotspots when hour changes
   useEffect(() => {
     const loadData = async () => {
+      // Cancel any in-flight hour fetch so stale responses can't "win"
+      if (hourFetchAbortRef.current) {
+        hourFetchAbortRef.current.abort();
+      }
+      const controller = new AbortController();
+      hourFetchAbortRef.current = controller;
+
       try {
         const [positionsData, hotspotsData] = await Promise.all([
-          fetchPositions(currentHour),
-          fetchHotspots(currentHour),
+          fetchPositions(currentHour, { signal: controller.signal }),
+          fetchHotspots(currentHour, { signal: controller.signal }),
         ]);
+        if (controller.signal.aborted) return;
         setPositions(positionsData || []);
         setHotspots(hotspotsData || []);
       } catch (err) {
+        // Ignore aborts (user scrubbed quickly)
+        if (err instanceof DOMException && err.name === 'AbortError') return;
         console.error('Failed to fetch positions:', err);
       }
     };
     loadData();
+
+    return () => {
+      // Abort when hour changes/unmounts
+      if (hourFetchAbortRef.current) {
+        hourFetchAbortRef.current.abort();
+      }
+    };
   }, [currentHour]);
 
   // Get cases at current hour
@@ -441,6 +486,42 @@ const HeatmapDashboard: React.FC = () => {
       setPendingCaseJump(caseParam);
     }
   }, [searchParams]);
+
+  // Deep-link params (hour/city) from URL
+  useEffect(() => {
+    const city = searchParams.get('city');
+    setCityFilterParam(city || null);
+
+    const hourParam = searchParams.get('hour');
+    const parsed = parseHourParam(hourParam);
+    if (parsed != null) {
+      setIsPlaying(false);
+      setScrubHour(null);
+      setCurrentHour(parsed);
+    }
+  }, [searchParams, parseHourParam]);
+
+  // If a city filter is provided, recenter the map to a tower in that city (best effort).
+  useEffect(() => {
+    if (!cityFilterParam) return;
+    if (towers.length === 0) return;
+    if (lastAppliedCityRef.current === cityFilterParam) return;
+
+    const cityLower = cityFilterParam.toLowerCase();
+    const match =
+      towers.find((t) => t.city && t.city.toLowerCase().includes(cityLower)) ||
+      hotspots.find((h) => h.city && h.city.toLowerCase().includes(cityLower));
+
+    if (match && 'latitude' in match && 'longitude' in match) {
+      setMapCenter([match.latitude, match.longitude]);
+      setMapZoom(12);
+      lastAppliedCityRef.current = cityFilterParam;
+    } else if (match && 'lat' in match && 'lng' in match) {
+      setMapCenter([match.lat, match.lng]);
+      setMapZoom(12);
+      lastAppliedCityRef.current = cityFilterParam;
+    }
+  }, [cityFilterParam, towers, hotspots]);
 
   // Jump to case once keyFrames are loaded
   useEffect(() => {
@@ -892,7 +973,12 @@ const HeatmapDashboard: React.FC = () => {
         >
           <Stack direction="row" alignItems="center" spacing={2}>
             <IconButton
-              onClick={() => setCurrentHour((h) => Math.max(0, h - 1))}
+              onClick={() => {
+                setScrubHour(null);
+                isScrubbingRef.current = false;
+                setIsPlaying(false);
+                setCurrentHour((h) => Math.max(0, h - 1));
+              }}
               sx={{ color: 'text.secondary' }}
             >
               <SkipPrevious />
@@ -904,7 +990,12 @@ const HeatmapDashboard: React.FC = () => {
               {isPlaying ? <Pause /> : <PlayArrow />}
             </IconButton>
             <IconButton
-              onClick={() => setCurrentHour((h) => Math.min(71, h + 1))}
+              onClick={() => {
+                setScrubHour(null);
+                isScrubbingRef.current = false;
+                setIsPlaying(false);
+                setCurrentHour((h) => Math.min(71, h + 1));
+              }}
               sx={{ color: 'text.secondary' }}
             >
               <SkipNext />
@@ -912,8 +1003,20 @@ const HeatmapDashboard: React.FC = () => {
 
             <Box sx={{ flex: 1, px: 2 }}>
               <Slider
-                value={currentHour}
-                onChange={(_, v) => setCurrentHour(v as number)}
+                value={scrubHour ?? currentHour}
+                onChange={(_, v) => {
+                  if (!isScrubbingRef.current) {
+                    isScrubbingRef.current = true;
+                    setIsPlaying(false);
+                  }
+                  setScrubHour(v as number);
+                }}
+                onChangeCommitted={(_, v) => {
+                  isScrubbingRef.current = false;
+                  setIsPlaying(false);
+                  setScrubHour(null);
+                  setCurrentHour(v as number);
+                }}
                 min={0}
                 max={71}
                 marks={keyFrames.map((kf) => ({ value: kf.hour, label: '' }))}
@@ -940,7 +1043,7 @@ const HeatmapDashboard: React.FC = () => {
                 fontWeight: isKeyFrame ? 700 : 400,
               }}
             >
-              {formatHour(currentHour)}
+              {formatHour(scrubHour ?? currentHour)}
             </Typography>
 
             {/* Speed Controls */}
