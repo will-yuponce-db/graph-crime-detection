@@ -374,19 +374,30 @@ const GraphExplorer: React.FC = () => {
     const suspectNodes = apiData.nodes?.filter((n) => n.type === 'person' && n.isSuspect) || [];
     const locationNodes = apiData.nodes?.filter((n) => n.type === 'location') || [];
 
-    // Add suspects with positions
-    if (suspectNodes.length >= 2) {
-      // Position top suspects in center
-      suspectNodes.slice(0, 4).forEach((suspect, i) => {
-        const angle = (i / Math.min(suspectNodes.length, 4)) * Math.PI * 2 - Math.PI / 2;
-        const radius = 60;
+    // Add ALL suspects with positions in expanding rings
+    if (suspectNodes.length >= 1) {
+      // Position all suspects in concentric rings
+      const suspectsPerRing = 12; // suspects per ring
+      suspectNodes.forEach((suspect, i) => {
+        const ringIndex = Math.floor(i / suspectsPerRing);
+        const posInRing = i % suspectsPerRing;
+        const ringCount = Math.min(
+          suspectsPerRing,
+          suspectNodes.length - ringIndex * suspectsPerRing
+        );
+        const angle = (posInRing / ringCount) * Math.PI * 2 - Math.PI / 2;
+        const radius = 80 + ringIndex * 60; // Expanding rings
+
+        // Size based on score/rank (top suspects are bigger)
+        const size = Math.max(6, 12 - Math.floor(i / 10));
+
         nodes.push({
           id: suspect.id,
           name: suspect.name,
           alias: suspect.alias || suspect.id.slice(-4),
           type: 'person',
           color: '#dc2626',
-          size: 12 - i * 2,
+          size,
           isSuspect: true,
           fx: cx + Math.cos(angle) * radius,
           fy: cy + Math.sin(angle) * radius,
@@ -422,10 +433,19 @@ const GraphExplorer: React.FC = () => {
 
     // Use API location nodes or fallback to defaults
     if (locationNodes.length > 0) {
-      // Position location nodes in a circle around suspects
-      locationNodes.slice(0, 6).forEach((loc, i) => {
-        const angle = (i / Math.min(locationNodes.length, 6)) * Math.PI * 2;
-        const radius = 180;
+      // Position ALL location nodes in outer rings around suspects
+      const locsPerRing = 16;
+      const suspectRings = Math.ceil(suspectNodes.length / 12);
+      const baseRadius = 80 + suspectRings * 60 + 80; // Start outside suspect rings
+
+      locationNodes.forEach((loc, i) => {
+        const ringIndex = Math.floor(i / locsPerRing);
+        const posInRing = i % locsPerRing;
+        const ringCount = Math.min(locsPerRing, locationNodes.length - ringIndex * locsPerRing);
+        const angle = (posInRing / ringCount) * Math.PI * 2;
+        const radius = baseRadius + ringIndex * 50;
+
+        // Color by city
         const cityColor =
           loc.city?.includes('DC') || loc.city?.includes('Washington')
             ? '#3b82f6'
@@ -438,7 +458,7 @@ const GraphExplorer: React.FC = () => {
           type: 'location',
           city: loc.city,
           color: cityColor,
-          size: 8,
+          size: 6,
           fx: cx + Math.cos(angle) * radius,
           fy: cy + Math.sin(angle) * radius,
         });

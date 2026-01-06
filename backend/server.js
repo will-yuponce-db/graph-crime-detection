@@ -130,6 +130,121 @@ function saveEntityTitles(titles) {
 
 let entityTitlesStore = loadEntityTitles();
 
+// ============== IN-MEMORY CACHE ==============
+// Simple cache with TTL for expensive Databricks queries
+const cache = {
+  store: new Map(),
+
+  // Default TTL: 5 minutes (300000ms)
+  DEFAULT_TTL: 5 * 60 * 1000,
+
+  /**
+   * Get cached value if not expired
+   * @param {string} key - Cache key
+   * @returns {any|null} - Cached value or null if expired/missing
+   */
+  get(key) {
+    const entry = this.store.get(key);
+    if (!entry) return null;
+
+    if (Date.now() > entry.expiresAt) {
+      this.store.delete(key);
+      logger.info({ type: 'cache_expired', key });
+      return null;
+    }
+
+    logger.info({
+      type: 'cache_hit',
+      key,
+      age: Math.round((Date.now() - entry.createdAt) / 1000) + 's',
+    });
+    return entry.value;
+  },
+
+  /**
+   * Set cache value with TTL
+   * @param {string} key - Cache key
+   * @param {any} value - Value to cache
+   * @param {number} ttl - Time to live in ms (default: 5 minutes)
+   */
+  set(key, value, ttl = this.DEFAULT_TTL) {
+    const now = Date.now();
+    this.store.set(key, {
+      value,
+      createdAt: now,
+      expiresAt: now + ttl,
+    });
+    logger.info({ type: 'cache_set', key, ttl: Math.round(ttl / 1000) + 's' });
+  },
+
+  /**
+   * Invalidate a specific cache key
+   * @param {string} key - Cache key to invalidate
+   */
+  invalidate(key) {
+    if (this.store.has(key)) {
+      this.store.delete(key);
+      logger.info({ type: 'cache_invalidate', key });
+    }
+  },
+
+  /**
+   * Invalidate all cache keys matching a prefix
+   * @param {string} prefix - Key prefix to match
+   */
+  invalidatePrefix(prefix) {
+    let count = 0;
+    for (const key of this.store.keys()) {
+      if (key.startsWith(prefix)) {
+        this.store.delete(key);
+        count++;
+      }
+    }
+    if (count > 0) {
+      logger.info({ type: 'cache_invalidate_prefix', prefix, count });
+    }
+  },
+
+  /**
+   * Clear entire cache
+   */
+  clear() {
+    const size = this.store.size;
+    this.store.clear();
+    logger.info({ type: 'cache_clear', entriesCleared: size });
+  },
+
+  /**
+   * Get cache statistics
+   */
+  stats() {
+    const now = Date.now();
+    let validCount = 0;
+    let expiredCount = 0;
+
+    for (const entry of this.store.values()) {
+      if (now > entry.expiresAt) {
+        expiredCount++;
+      } else {
+        validCount++;
+      }
+    }
+
+    return { total: this.store.size, valid: validCount, expired: expiredCount };
+  },
+};
+
+// Cache TTL settings (in milliseconds)
+const CACHE_TTL = {
+  GRAPH_DATA: 5 * 60 * 1000, // 5 minutes - complex query
+  PERSONS: 5 * 60 * 1000, // 5 minutes
+  CASES: 2 * 60 * 1000, // 2 minutes - may change more often
+  CONFIG: 10 * 60 * 1000, // 10 minutes - rarely changes
+  RELATIONSHIPS: 5 * 60 * 1000, // 5 minutes
+  HOTSPOTS: 1 * 60 * 1000, // 1 minute - time-sensitive
+  POSITIONS: 30 * 1000, // 30 seconds - frequently changing
+};
+
 // Helper to get entity title (returns custom title or null)
 function getEntityTitle(entityType, entityId) {
   return entityTitlesStore[entityType]?.[entityId] || null;
@@ -329,7 +444,15 @@ app.get('/api/demo/towers', async (req, res) => {
 app.get('/api/demo/persons', async (req, res) => {
   try {
     const suspectsOnly = req.query.suspects === 'true';
-    const rankings = await databricks.getSuspectRankings(100);
+    const cacheKey = `persons-${suspectsOnly ? 'suspects' : 'all'}`;
+
+    // Check cache first
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return res.json({ success: true, persons: cached, fromCache: true });
+    }
+
+    const rankings = await databricks.getSuspectRankings(500); // Get all
 
     const persons = rankings
       .filter((r) => !suspectsOnly || r.total_score > 0.5)
@@ -355,7 +478,10 @@ app.get('/api/demo/persons', async (req, res) => {
         };
       });
 
-    res.json({ success: true, persons });
+    // Cache the result
+    cache.set(cacheKey, persons, CACHE_TTL.PERSONS);
+
+    res.json({ success: true, persons, fromCache: false });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -541,6 +667,14 @@ app.get('/api/demo/hotspots/:hour', async (req, res) => {
  */
 app.get('/api/demo/cases', async (req, res) => {
   try {
+    const cacheKey = 'cases';
+
+    // Check cache first
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return res.json({ success: true, cases: cached, fromCache: true });
+    }
+
     const cases = await databricks.getCases(100);
 
     const formattedCases = cases.map((c) => {
@@ -584,7 +718,10 @@ app.get('/api/demo/cases', async (req, res) => {
       };
     });
 
-    res.json({ success: true, cases: formattedCases });
+    // Cache the result
+    cache.set(cacheKey, formattedCases, CACHE_TTL.CASES);
+
+    res.json({ success: true, cases: formattedCases, fromCache: false });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -675,9 +812,17 @@ app.get('/api/demo/cases/at-hour/:hour', async (req, res) => {
  */
 app.get('/api/demo/relationships', async (req, res) => {
   try {
+    const cacheKey = 'relationships';
+
+    // Check cache first
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return res.json({ success: true, relationships: cached, fromCache: true });
+    }
+
     const [coPresence, socialEdges] = await Promise.all([
-      databricks.getCoPresenceEdges(100),
-      databricks.getSocialEdges(100),
+      databricks.getCoPresenceEdges(500),
+      databricks.getSocialEdges(500),
     ]);
 
     const relationships = [
@@ -707,7 +852,10 @@ app.get('/api/demo/relationships', async (req, res) => {
       })),
     ];
 
-    res.json({ success: true, relationships });
+    // Cache the result
+    cache.set(cacheKey, relationships, CACHE_TTL.RELATIONSHIPS);
+
+    res.json({ success: true, relationships, fromCache: false });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -756,10 +904,19 @@ app.get('/api/demo/relationships/:personId', async (req, res) => {
  */
 app.get('/api/demo/graph-data', async (req, res) => {
   try {
+    const cacheKey = 'graph-data';
+
+    // Check cache first
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return res.json({ success: true, ...cached, fromCache: true });
+    }
+
+    // Fetch all suspects (199) and more edges for complete visualization
     const [rankings, coPresence, socialEdges] = await Promise.all([
-      databricks.getSuspectRankings(20),
-      databricks.getCoPresenceEdges(100),
-      databricks.getSocialEdges(100),
+      databricks.getSuspectRankings(500), // Get all suspects
+      databricks.getCoPresenceEdges(2000), // More co-presence edges
+      databricks.getSocialEdges(500), // More social edges
     ]);
 
     // Build nodes from suspect rankings with custom titles
@@ -847,7 +1004,11 @@ app.get('/api/demo/graph-data', async (req, res) => {
       });
     });
 
-    res.json({ success: true, nodes, links });
+    // Cache the result
+    const result = { nodes, links };
+    cache.set(cacheKey, result, CACHE_TTL.GRAPH_DATA);
+
+    res.json({ success: true, ...result, fromCache: false });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -1204,6 +1365,10 @@ app.put('/api/demo/entity-titles/:type/:id', (req, res) => {
 
     saveEntityTitles(entityTitlesStore);
 
+    // Invalidate related caches since entity titles affect display
+    cache.invalidate('graph-data');
+    cache.invalidatePrefix('persons');
+
     logger.info({ type: 'entity_title_set', entityType: type, entityId: id, title: title.trim() });
     res.json({
       success: true,
@@ -1280,6 +1445,10 @@ app.delete('/api/demo/entity-titles/:type/:id', (req, res) => {
 
     delete entityTitlesStore[type][id];
     saveEntityTitles(entityTitlesStore);
+
+    // Invalidate related caches since entity titles affect display
+    cache.invalidate('graph-data');
+    cache.invalidatePrefix('persons');
 
     logger.info({ type: 'entity_title_deleted', entityType: type, entityId: id });
     res.json({ success: true, message: 'Custom title removed', entityId: id, entityType: type });
@@ -1662,6 +1831,61 @@ app.post('/api/databricks/query', async (req, res) => {
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
+});
+
+// ============== CACHE MANAGEMENT ENDPOINTS ==============
+
+/**
+ * GET /api/cache/stats
+ * Get cache statistics
+ */
+app.get('/api/cache/stats', (req, res) => {
+  const stats = cache.stats();
+  const entries = [];
+
+  for (const [key, entry] of cache.store.entries()) {
+    const now = Date.now();
+    entries.push({
+      key,
+      age: Math.round((now - entry.createdAt) / 1000) + 's',
+      ttl: Math.max(0, Math.round((entry.expiresAt - now) / 1000)) + 's',
+      expired: now > entry.expiresAt,
+    });
+  }
+
+  res.json({
+    success: true,
+    stats,
+    entries,
+    ttlSettings: {
+      GRAPH_DATA: CACHE_TTL.GRAPH_DATA / 1000 + 's',
+      PERSONS: CACHE_TTL.PERSONS / 1000 + 's',
+      CASES: CACHE_TTL.CASES / 1000 + 's',
+      CONFIG: CACHE_TTL.CONFIG / 1000 + 's',
+      RELATIONSHIPS: CACHE_TTL.RELATIONSHIPS / 1000 + 's',
+      HOTSPOTS: CACHE_TTL.HOTSPOTS / 1000 + 's',
+      POSITIONS: CACHE_TTL.POSITIONS / 1000 + 's',
+    },
+  });
+});
+
+/**
+ * DELETE /api/cache
+ * Clear entire cache
+ */
+app.delete('/api/cache', (req, res) => {
+  cache.clear();
+  res.json({ success: true, message: 'Cache cleared' });
+});
+
+/**
+ * DELETE /api/cache/:key
+ * Invalidate specific cache key
+ */
+app.delete('/api/cache/:key', (req, res) => {
+  const { key } = req.params;
+  cache.invalidate(key);
+  res.json({ success: true, message: `Cache key '${key}' invalidated` });
 });
 
 // ============== HEALTH CHECK ==============

@@ -23,6 +23,10 @@ import {
   TextField,
   InputAdornment,
   useTheme,
+  Divider,
+  Tabs,
+  Tab,
+  Tooltip as MuiTooltip,
 } from '@mui/material';
 import {
   PlayArrow,
@@ -45,6 +49,13 @@ import {
   Cloud,
   Search,
   Clear,
+  AttachMoney,
+  Security,
+  LocationOn,
+  Timeline,
+  Groups,
+  Gavel,
+  Phone,
 } from '@mui/icons-material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -58,7 +69,18 @@ import {
 } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { fetchConfig, fetchPositions, fetchHotspots, USE_DATABRICKS } from '../services/api';
+import {
+  fetchConfig,
+  fetchPositions,
+  fetchHotspots,
+  fetchCases,
+  fetchSuspects,
+  fetchRelationships,
+  USE_DATABRICKS,
+  type CaseData,
+  type Suspect,
+  type Relationship,
+} from '../services/api';
 
 // Types
 interface CellTower {
@@ -164,6 +186,9 @@ const HeatmapDashboard: React.FC = () => {
   const [keyFrames, setKeyFrames] = useState<KeyFrame[]>([]);
   const [positions, setPositions] = useState<DevicePosition[]>([]);
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
+  const [cases, setCases] = useState<CaseData[]>([]);
+  const [suspects, setSuspects] = useState<Suspect[]>([]);
+  const [relationships, setRelationships] = useState<Relationship[]>([]);
 
   // UI state
   const [selectedCase, setSelectedCase] = useState<KeyFrame | null>(null);
@@ -171,6 +196,7 @@ const HeatmapDashboard: React.FC = () => {
   const [selectedHotspotIdx, setSelectedHotspotIdx] = useState<number | null>(null);
   const [selectedDevice, setSelectedDevice] = useState<DevicePosition | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [sidebarTab, setSidebarTab] = useState(0); // 0=Overview, 1=Cases, 2=Suspects, 3=Devices
 
   // Derived selected hotspot
   const selectedHotspot = selectedHotspotIdx !== null ? hotspots[selectedHotspotIdx] : null;
@@ -190,6 +216,67 @@ const HeatmapDashboard: React.FC = () => {
       (d.ownerName && d.ownerName.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (d.ownerAlias && d.ownerAlias.toLowerCase().includes(searchQuery.toLowerCase()))
   );
+
+  const filteredCases = cases.filter(
+    (c) =>
+      searchQuery === '' ||
+      c.caseNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      c.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      c.city.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const filteredSuspects = suspects.filter(
+    (s) =>
+      searchQuery === '' ||
+      s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (s.alias && s.alias.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
+  // Helper: Get suspect by owner ID from position
+  const getSuspectFromPosition = (position: DevicePosition): Suspect | undefined => {
+    return suspects.find((s) => s.id === position.ownerId);
+  };
+
+  // Helper: Get relationships for a suspect
+  const getRelationshipsForSuspect = (suspectId: string): Relationship[] => {
+    return relationships.filter((r) => r.person1Id === suspectId || r.person2Id === suspectId);
+  };
+
+  // Helper: Format currency
+  const formatCurrency = (amount: number | undefined): string => {
+    if (!amount) return 'N/A';
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 0,
+    }).format(amount);
+  };
+
+  // Helper: Get threat level color
+  const getThreatLevelColor = (level: string): string => {
+    switch (level?.toLowerCase()) {
+      case 'high':
+        return theme.palette.accent.red;
+      case 'medium':
+        return theme.palette.accent.orange;
+      case 'low':
+        return theme.palette.accent.green;
+      default:
+        return theme.palette.text.secondary;
+    }
+  };
+
+  // Summary statistics
+  const stats = {
+    totalCases: cases.length,
+    activeCases: cases.filter((c) => c.status === 'investigating').length,
+    totalSuspects: suspects.filter((s) => s.isSuspect || s.threatLevel).length,
+    highThreatSuspects: suspects.filter((s) => s.threatLevel?.toLowerCase() === 'high').length,
+    totalDevices: positions.length,
+    suspectDevices: positions.filter((p) => p.isSuspect).length,
+    totalEstimatedLoss: cases.reduce((sum, c) => sum + (c.estimatedLoss || 0), 0),
+    activeHotspots: hotspots.filter((h) => h.suspectCount > 0).length,
+  };
 
   const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -230,20 +317,28 @@ const HeatmapDashboard: React.FC = () => {
       ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
       : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
 
-  // Fetch initial config
+  // Fetch initial config and all related data
   useEffect(() => {
-    const loadConfig = async () => {
+    const loadAllData = async () => {
       try {
-        const config = await fetchConfig();
+        const [config, casesData, suspectsData, relationshipsData] = await Promise.all([
+          fetchConfig(),
+          fetchCases(),
+          fetchSuspects(),
+          fetchRelationships(),
+        ]);
         setTowers(config.towers || []);
         setKeyFrames(config.keyFrames || []);
+        setCases(casesData || []);
+        setSuspects(suspectsData || []);
+        setRelationships(relationshipsData || []);
       } catch (err) {
-        console.error('Failed to fetch config:', err);
+        console.error('Failed to fetch data:', err);
       } finally {
         setLoading(false);
       }
     };
-    loadConfig();
+    loadAllData();
   }, []);
 
   // Fetch positions and hotspots when hour changes
@@ -938,7 +1033,7 @@ const HeatmapDashboard: React.FC = () => {
       {/* Sidebar */}
       <Box
         sx={{
-          width: 320,
+          width: 380,
           borderLeft: 1,
           borderColor: 'border.main',
           bgcolor: 'background.paper',
@@ -950,7 +1045,7 @@ const HeatmapDashboard: React.FC = () => {
         <Box sx={{ p: 1.5, borderBottom: 1, borderColor: 'border.main' }}>
           <TextField
             size="small"
-            placeholder="Search hotspots, devices..."
+            placeholder="Search cases, suspects, devices..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             fullWidth
@@ -980,368 +1075,1080 @@ const HeatmapDashboard: React.FC = () => {
           />
         </Box>
 
-        {/* Selected Case Info */}
-        {isKeyFrame && selectedCase ? (
-          <Paper
-            elevation={0}
-            sx={{
-              p: 2,
-              borderRadius: 0,
-              bgcolor: `${PRIORITY_COLORS[selectedCase.priority]}10`,
-              borderBottom: `2px solid ${PRIORITY_COLORS[selectedCase.priority]}`,
-            }}
-          >
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-              <Folder sx={{ color: PRIORITY_COLORS[selectedCase.priority], fontSize: 18 }} />
-              <Typography variant="subtitle2" sx={{ color: 'text.primary', fontWeight: 700 }}>
-                {selectedCase.caseNumber}
-              </Typography>
-              <Chip
-                label={selectedCase.priority.toUpperCase()}
-                size="small"
-                sx={{
-                  ml: 'auto',
-                  height: 18,
-                  fontSize: '0.6rem',
-                  bgcolor: `${PRIORITY_COLORS[selectedCase.priority]}20`,
-                  color: PRIORITY_COLORS[selectedCase.priority],
-                }}
-              />
-            </Stack>
-            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-              {selectedCase.neighborhood}, {selectedCase.city}
-            </Typography>
-            <Typography
-              variant="caption"
-              sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}
-            >
-              {selectedCase.description}
-            </Typography>
-          </Paper>
-        ) : (
-          <Paper
-            elevation={0}
-            sx={{
-              p: 2,
-              borderRadius: 0,
-              bgcolor: 'background.paper',
-              borderBottom: 1,
-              borderColor: 'border.main',
-            }}
-          >
-            <Typography variant="subtitle2" sx={{ color: 'text.secondary' }}>
-              No case at this time
-            </Typography>
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-              Navigate to a key frame to view case details
-            </Typography>
-          </Paper>
-        )}
-
-        {/* Selected Hotspot Detail */}
-        {selectedHotspot && (
-          <Paper
-            elevation={0}
-            sx={{
-              p: 2,
-              borderRadius: 0,
-              bgcolor: `${theme.palette.accent.orange}10`,
-              borderBottom: `2px solid ${theme.palette.accent.orange}`,
-            }}
-          >
-            <Stack
-              direction="row"
-              alignItems="center"
-              justifyContent="space-between"
-              sx={{ mb: 1 }}
-            >
-              <Stack direction="row" alignItems="center" spacing={1}>
-                <CellTower sx={{ color: theme.palette.accent.orange, fontSize: 18 }} />
-                <Typography variant="subtitle2" sx={{ color: 'text.primary', fontWeight: 700 }}>
-                  {selectedHotspot.towerName}
-                </Typography>
-              </Stack>
-              <Chip
-                label="×"
-                size="small"
-                onClick={() => setSelectedHotspotIdx(null)}
-                sx={{
-                  cursor: 'pointer',
-                  bgcolor: 'transparent',
-                  color: 'text.secondary',
-                  '&:hover': { bgcolor: 'action.hover' },
-                }}
-              />
-            </Stack>
-            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1 }}>
-              {selectedHotspot.city}
-            </Typography>
-            <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
-              <Box sx={{ textAlign: 'center' }}>
-                <Typography variant="h6" sx={{ color: theme.palette.accent.blue, fontWeight: 700 }}>
-                  {selectedHotspot.deviceCount}
-                </Typography>
-                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                  Devices
-                </Typography>
-              </Box>
-              <Box sx={{ textAlign: 'center' }}>
-                <Typography variant="h6" sx={{ color: theme.palette.accent.red, fontWeight: 700 }}>
-                  {selectedHotspot.suspectCount}
-                </Typography>
-                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                  Suspects
-                </Typography>
-              </Box>
-            </Stack>
-            {selectedHotspot.suspectCount > 0 && (
-              <Chip
-                label="⚠️ High Activity"
-                size="small"
-                sx={{
-                  mt: 1.5,
-                  bgcolor: `${theme.palette.accent.red}20`,
-                  color: theme.palette.accent.red,
-                  fontSize: '0.65rem',
-                }}
-              />
-            )}
-          </Paper>
-        )}
-
-        {/* Hotspots */}
-        <Paper
-          elevation={0}
+        {/* Tabs */}
+        <Tabs
+          value={sidebarTab}
+          onChange={(_, v) => setSidebarTab(v)}
+          variant="fullWidth"
           sx={{
-            p: 2,
-            borderRadius: 0,
-            bgcolor: 'background.paper',
             borderBottom: 1,
             borderColor: 'border.main',
+            minHeight: 36,
+            '& .MuiTab-root': {
+              minHeight: 36,
+              fontSize: '0.7rem',
+              fontWeight: 600,
+              textTransform: 'none',
+            },
+            '& .Mui-selected': { color: theme.palette.accent.orange },
+            '& .MuiTabs-indicator': { bgcolor: theme.palette.accent.orange },
           }}
         >
-          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-            <Typography variant="subtitle2" sx={{ color: 'text.primary', fontWeight: 700 }}>
-              Active Hotspots
-            </Typography>
-            <Chip
-              label={
-                searchQuery ? `${filteredHotspots.length}/${hotspots.length}` : hotspots.length
-              }
-              size="small"
-              sx={{
-                bgcolor: `${theme.palette.accent.orange}20`,
-                color: theme.palette.accent.orange,
-                height: 20,
-                fontSize: '0.7rem',
-              }}
-            />
-          </Stack>
+          <Tab icon={<Timeline sx={{ fontSize: 14 }} />} iconPosition="start" label="Overview" />
+          <Tab icon={<Folder sx={{ fontSize: 14 }} />} iconPosition="start" label="Cases" />
+          <Tab icon={<Person sx={{ fontSize: 14 }} />} iconPosition="start" label="Suspects" />
+          <Tab icon={<Devices sx={{ fontSize: 14 }} />} iconPosition="start" label="Devices" />
+        </Tabs>
 
-          {filteredHotspots.length === 0 ? (
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-              {searchQuery ? 'No matching hotspots' : 'No hotspots active'}
-            </Typography>
-          ) : (
-            <Stack spacing={1}>
-              {filteredHotspots.slice(0, 4).map((hs, idx) => (
-                <Card
-                  key={`${hs.towerId}-${idx}`}
+        {/* Tab Content */}
+        <Box sx={{ flex: 1, overflow: 'auto' }}>
+          {/* Overview Tab */}
+          {sidebarTab === 0 && (
+            <Box>
+              {/* Summary Statistics */}
+              <Paper
+                elevation={0}
+                sx={{
+                  p: 2,
+                  borderRadius: 0,
+                  bgcolor: theme.palette.mode === 'dark' ? '#1a1a1e' : '#f8fafc',
+                  borderBottom: 1,
+                  borderColor: 'border.main',
+                }}
+              >
+                <Typography variant="overline" sx={{ color: 'text.secondary', fontSize: '0.6rem' }}>
+                  Intelligence Summary
+                </Typography>
+                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5, mt: 1.5 }}>
+                  <Box
+                    sx={{
+                      p: 1.5,
+                      borderRadius: 1,
+                      bgcolor: `${theme.palette.accent.orange}10`,
+                      border: `1px solid ${theme.palette.accent.orange}30`,
+                    }}
+                  >
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <Folder sx={{ color: theme.palette.accent.orange, fontSize: 16 }} />
+                      <Typography
+                        variant="h6"
+                        sx={{ color: theme.palette.accent.orange, fontWeight: 700 }}
+                      >
+                        {stats.totalCases}
+                      </Typography>
+                    </Stack>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                      Total Cases
+                    </Typography>
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        color: theme.palette.accent.green,
+                        display: 'block',
+                        fontSize: '0.6rem',
+                      }}
+                    >
+                      {stats.activeCases} active
+                    </Typography>
+                  </Box>
+                  <Box
+                    sx={{
+                      p: 1.5,
+                      borderRadius: 1,
+                      bgcolor: `${theme.palette.accent.red}10`,
+                      border: `1px solid ${theme.palette.accent.red}30`,
+                    }}
+                  >
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <Security sx={{ color: theme.palette.accent.red, fontSize: 16 }} />
+                      <Typography
+                        variant="h6"
+                        sx={{ color: theme.palette.accent.red, fontWeight: 700 }}
+                      >
+                        {stats.totalSuspects}
+                      </Typography>
+                    </Stack>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                      Suspects
+                    </Typography>
+                    <Typography
+                      variant="caption"
+                      sx={{ color: theme.palette.accent.red, display: 'block', fontSize: '0.6rem' }}
+                    >
+                      {stats.highThreatSuspects} high threat
+                    </Typography>
+                  </Box>
+                  <Box
+                    sx={{
+                      p: 1.5,
+                      borderRadius: 1,
+                      bgcolor: `${theme.palette.accent.blue}10`,
+                      border: `1px solid ${theme.palette.accent.blue}30`,
+                    }}
+                  >
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <Devices sx={{ color: theme.palette.accent.blue, fontSize: 16 }} />
+                      <Typography
+                        variant="h6"
+                        sx={{ color: theme.palette.accent.blue, fontWeight: 700 }}
+                      >
+                        {stats.totalDevices}
+                      </Typography>
+                    </Stack>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                      Devices Tracked
+                    </Typography>
+                    <Typography
+                      variant="caption"
+                      sx={{ color: theme.palette.accent.red, display: 'block', fontSize: '0.6rem' }}
+                    >
+                      {stats.suspectDevices} suspect devices
+                    </Typography>
+                  </Box>
+                  <Box
+                    sx={{
+                      p: 1.5,
+                      borderRadius: 1,
+                      bgcolor: `${theme.palette.accent.yellow}10`,
+                      border: `1px solid ${theme.palette.accent.yellow}30`,
+                    }}
+                  >
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <AttachMoney sx={{ color: theme.palette.accent.yellow, fontSize: 16 }} />
+                      <Typography
+                        variant="body2"
+                        sx={{ color: theme.palette.accent.yellow, fontWeight: 700 }}
+                      >
+                        {formatCurrency(stats.totalEstimatedLoss)}
+                      </Typography>
+                    </Stack>
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                      Est. Total Loss
+                    </Typography>
+                  </Box>
+                </Box>
+              </Paper>
+
+              {/* Selected Case Info */}
+              {isKeyFrame && selectedCase && (
+                <Paper
+                  elevation={0}
                   sx={{
-                    bgcolor:
-                      selectedHotspotIdx === idx
-                        ? `${theme.palette.accent.orange}15`
-                        : 'background.default',
-                    border: 1,
-                    borderColor:
-                      selectedHotspotIdx === idx
-                        ? theme.palette.accent.orange
-                        : hs.suspectCount > 0
-                          ? `${theme.palette.accent.red}30`
-                          : 'border.main',
-                    '&:hover': { borderColor: theme.palette.accent.orange },
+                    p: 2,
+                    borderRadius: 0,
+                    bgcolor: `${PRIORITY_COLORS[selectedCase.priority]}10`,
+                    borderBottom: `2px solid ${PRIORITY_COLORS[selectedCase.priority]}`,
                   }}
                 >
-                  <CardActionArea
-                    onClick={() => {
-                      setMapCenter([hs.lat, hs.lng]);
-                      setMapZoom(15);
-                      setSelectedHotspotIdx(idx);
+                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                    <Folder sx={{ color: PRIORITY_COLORS[selectedCase.priority], fontSize: 18 }} />
+                    <Typography variant="subtitle2" sx={{ color: 'text.primary', fontWeight: 700 }}>
+                      {selectedCase.caseNumber}
+                    </Typography>
+                    <Chip
+                      label={selectedCase.priority.toUpperCase()}
+                      size="small"
+                      sx={{
+                        ml: 'auto',
+                        height: 18,
+                        fontSize: '0.6rem',
+                        bgcolor: `${PRIORITY_COLORS[selectedCase.priority]}20`,
+                        color: PRIORITY_COLORS[selectedCase.priority],
+                      }}
+                    />
+                  </Stack>
+                  <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                    {selectedCase.neighborhood}, {selectedCase.city}
+                  </Typography>
+                  <Typography
+                    variant="caption"
+                    sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}
+                  >
+                    {selectedCase.description}
+                  </Typography>
+                  {/* Find matching case data for more details */}
+                  {cases.find(
+                    (c) => c.caseNumber === selectedCase.caseNumber || c.id === selectedCase.id
+                  ) && (
+                    <Box
+                      sx={{
+                        mt: 1.5,
+                        pt: 1.5,
+                        borderTop: `1px solid ${PRIORITY_COLORS[selectedCase.priority]}30`,
+                      }}
+                    >
+                      <Stack direction="row" spacing={2}>
+                        {cases.find((c) => c.caseNumber === selectedCase.caseNumber)
+                          ?.estimatedLoss && (
+                          <Box>
+                            <Typography
+                              variant="caption"
+                              sx={{ color: 'text.secondary', display: 'block' }}
+                            >
+                              Est. Loss
+                            </Typography>
+                            <Typography
+                              variant="body2"
+                              sx={{ color: theme.palette.accent.yellow, fontWeight: 600 }}
+                            >
+                              {formatCurrency(
+                                cases.find((c) => c.caseNumber === selectedCase.caseNumber)
+                                  ?.estimatedLoss
+                              )}
+                            </Typography>
+                          </Box>
+                        )}
+                        <Box>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: 'text.secondary', display: 'block' }}
+                          >
+                            Status
+                          </Typography>
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              color: 'text.primary',
+                              fontWeight: 600,
+                              textTransform: 'capitalize',
+                            }}
+                          >
+                            {cases.find((c) => c.caseNumber === selectedCase.caseNumber)?.status ||
+                              'Investigating'}
+                          </Typography>
+                        </Box>
+                      </Stack>
+                    </Box>
+                  )}
+                </Paper>
+              )}
+
+              {/* Selected Hotspot Detail */}
+              {selectedHotspot && (
+                <Paper
+                  elevation={0}
+                  sx={{
+                    p: 2,
+                    borderRadius: 0,
+                    bgcolor: `${theme.palette.accent.orange}10`,
+                    borderBottom: `2px solid ${theme.palette.accent.orange}`,
+                  }}
+                >
+                  <Stack
+                    direction="row"
+                    alignItems="center"
+                    justifyContent="space-between"
+                    sx={{ mb: 1 }}
+                  >
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <CellTower sx={{ color: theme.palette.accent.orange, fontSize: 18 }} />
+                      <Typography
+                        variant="subtitle2"
+                        sx={{ color: 'text.primary', fontWeight: 700 }}
+                      >
+                        {selectedHotspot.towerName}
+                      </Typography>
+                    </Stack>
+                    <IconButton size="small" onClick={() => setSelectedHotspotIdx(null)}>
+                      <Clear sx={{ fontSize: 14 }} />
+                    </IconButton>
+                  </Stack>
+                  <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: 1 }}>
+                    <LocationOn sx={{ fontSize: 12, color: 'text.secondary' }} />
+                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                      {selectedHotspot.city}
+                    </Typography>
+                  </Stack>
+                  <Stack direction="row" spacing={3} sx={{ mt: 1 }}>
+                    <Box sx={{ textAlign: 'center' }}>
+                      <Typography
+                        variant="h5"
+                        sx={{ color: theme.palette.accent.blue, fontWeight: 700 }}
+                      >
+                        {selectedHotspot.deviceCount}
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                        Devices
+                      </Typography>
+                    </Box>
+                    <Box sx={{ textAlign: 'center' }}>
+                      <Typography
+                        variant="h5"
+                        sx={{ color: theme.palette.accent.red, fontWeight: 700 }}
+                      >
+                        {selectedHotspot.suspectCount}
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                        Suspects
+                      </Typography>
+                    </Box>
+                  </Stack>
+                  {selectedHotspot.suspectCount > 0 && (
+                    <Chip
+                      icon={<Warning sx={{ fontSize: 12 }} />}
+                      label="High Activity Zone"
+                      size="small"
+                      sx={{
+                        mt: 1.5,
+                        bgcolor: `${theme.palette.accent.red}20`,
+                        color: theme.palette.accent.red,
+                        fontSize: '0.65rem',
+                        '& .MuiChip-icon': { color: theme.palette.accent.red },
+                      }}
+                    />
+                  )}
+                </Paper>
+              )}
+
+              {/* Active Hotspots List */}
+              <Box sx={{ p: 2 }}>
+                <Stack
+                  direction="row"
+                  alignItems="center"
+                  justifyContent="space-between"
+                  sx={{ mb: 1 }}
+                >
+                  <Typography variant="subtitle2" sx={{ color: 'text.primary', fontWeight: 700 }}>
+                    Active Hotspots
+                  </Typography>
+                  <Chip
+                    label={`${stats.activeHotspots}/${hotspots.length}`}
+                    size="small"
+                    sx={{
+                      bgcolor: `${theme.palette.accent.orange}20`,
+                      color: theme.palette.accent.orange,
+                      height: 20,
+                      fontSize: '0.7rem',
+                    }}
+                  />
+                </Stack>
+                <Stack spacing={1}>
+                  {filteredHotspots.slice(0, 5).map((hs, idx) => (
+                    <Card
+                      key={`${hs.towerId}-${idx}`}
+                      sx={{
+                        bgcolor:
+                          selectedHotspotIdx === idx
+                            ? `${theme.palette.accent.orange}15`
+                            : 'background.default',
+                        border: 1,
+                        borderColor:
+                          selectedHotspotIdx === idx
+                            ? theme.palette.accent.orange
+                            : hs.suspectCount > 0
+                              ? `${theme.palette.accent.red}30`
+                              : 'border.main',
+                        '&:hover': { borderColor: theme.palette.accent.orange },
+                      }}
+                    >
+                      <CardActionArea
+                        onClick={() => {
+                          setMapCenter([hs.lat, hs.lng]);
+                          setMapZoom(15);
+                          setSelectedHotspotIdx(idx);
+                        }}
+                      >
+                        <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
+                          <Stack direction="row" justifyContent="space-between" alignItems="center">
+                            <Box>
+                              <Typography
+                                variant="body2"
+                                sx={{ color: 'text.primary', fontWeight: 500 }}
+                              >
+                                📡 {hs.towerName}
+                              </Typography>
+                              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                                {hs.city}
+                              </Typography>
+                            </Box>
+                            <Stack direction="row" spacing={1}>
+                              <Badge
+                                badgeContent={hs.deviceCount}
+                                sx={{
+                                  '& .MuiBadge-badge': {
+                                    bgcolor: theme.palette.accent.blue,
+                                    color: '#fff',
+                                    fontSize: '0.6rem',
+                                    minWidth: 16,
+                                    height: 16,
+                                  },
+                                }}
+                              >
+                                <Devices sx={{ color: 'text.secondary', fontSize: 16 }} />
+                              </Badge>
+                              {hs.suspectCount > 0 && (
+                                <Badge
+                                  badgeContent={hs.suspectCount}
+                                  sx={{
+                                    '& .MuiBadge-badge': {
+                                      bgcolor: theme.palette.accent.red,
+                                      color: '#fff',
+                                      fontSize: '0.6rem',
+                                      minWidth: 16,
+                                      height: 16,
+                                    },
+                                  }}
+                                >
+                                  <Person sx={{ color: 'text.secondary', fontSize: 16 }} />
+                                </Badge>
+                              )}
+                            </Stack>
+                          </Stack>
+                        </CardContent>
+                      </CardActionArea>
+                    </Card>
+                  ))}
+                </Stack>
+              </Box>
+            </Box>
+          )}
+
+          {/* Cases Tab */}
+          {sidebarTab === 1 && (
+            <Box sx={{ p: 2 }}>
+              <Stack
+                direction="row"
+                alignItems="center"
+                justifyContent="space-between"
+                sx={{ mb: 2 }}
+              >
+                <Typography variant="subtitle2" sx={{ color: 'text.primary', fontWeight: 700 }}>
+                  All Cases
+                </Typography>
+                <Chip
+                  label={searchQuery ? `${filteredCases.length}/${cases.length}` : cases.length}
+                  size="small"
+                  sx={{
+                    bgcolor: `${theme.palette.accent.orange}20`,
+                    color: theme.palette.accent.orange,
+                    height: 20,
+                    fontSize: '0.7rem',
+                  }}
+                />
+              </Stack>
+              <Stack spacing={1.5}>
+                {filteredCases.map((c) => (
+                  <Card
+                    key={c.id}
+                    sx={{
+                      bgcolor: 'background.default',
+                      border: 1,
+                      borderColor: 'border.main',
+                      '&:hover': { borderColor: theme.palette.accent.orange },
                     }}
                   >
                     <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
-                      <Stack direction="row" justifyContent="space-between" alignItems="center">
-                        <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 500 }}>
-                          📡 {hs.towerName}
-                        </Typography>
-                        <Stack direction="row" spacing={1}>
-                          <Badge
-                            badgeContent={hs.deviceCount}
-                            sx={{
-                              '& .MuiBadge-badge': {
-                                bgcolor: theme.palette.accent.blue,
-                                fontSize: '0.65rem',
-                                minWidth: 16,
-                                height: 16,
-                              },
-                            }}
-                          >
-                            <Devices sx={{ color: 'text.secondary', fontSize: 16 }} />
-                          </Badge>
-                          {hs.suspectCount > 0 && (
-                            <Badge
-                              badgeContent={hs.suspectCount}
+                      <Stack direction="row" alignItems="flex-start" justifyContent="space-between">
+                        <Box sx={{ flex: 1 }}>
+                          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                            <Folder
                               sx={{
-                                '& .MuiBadge-badge': {
-                                  bgcolor: theme.palette.accent.red,
-                                  fontSize: '0.65rem',
-                                  minWidth: 16,
-                                  height: 16,
-                                },
+                                fontSize: 14,
+                                color: PRIORITY_COLORS[c.priority?.toLowerCase() || 'medium'],
                               }}
+                            />
+                            <Typography
+                              variant="body2"
+                              sx={{ color: 'text.primary', fontWeight: 600 }}
                             >
-                              <Person sx={{ color: 'text.secondary', fontSize: 16 }} />
-                            </Badge>
+                              {c.caseNumber}
+                            </Typography>
+                            <Chip
+                              label={c.priority || 'Medium'}
+                              size="small"
+                              sx={{
+                                height: 16,
+                                fontSize: '0.55rem',
+                                bgcolor: `${PRIORITY_COLORS[c.priority?.toLowerCase() || 'medium']}20`,
+                                color: PRIORITY_COLORS[c.priority?.toLowerCase() || 'medium'],
+                              }}
+                            />
+                          </Stack>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: 'text.primary', display: 'block', mb: 0.5 }}
+                          >
+                            {c.title}
+                          </Typography>
+                          <Stack direction="row" alignItems="center" spacing={0.5}>
+                            <LocationOn sx={{ fontSize: 10, color: 'text.secondary' }} />
+                            <Typography
+                              variant="caption"
+                              sx={{ color: 'text.secondary', fontSize: '0.65rem' }}
+                            >
+                              {c.city}, {c.state}
+                            </Typography>
+                          </Stack>
+                        </Box>
+                        <Box sx={{ textAlign: 'right', ml: 1 }}>
+                          {c.estimatedLoss && (
+                            <Typography
+                              variant="body2"
+                              sx={{ color: theme.palette.accent.yellow, fontWeight: 700 }}
+                            >
+                              {formatCurrency(c.estimatedLoss)}
+                            </Typography>
                           )}
-                        </Stack>
+                          <Chip
+                            label={c.status || 'investigating'}
+                            size="small"
+                            sx={{
+                              height: 16,
+                              fontSize: '0.55rem',
+                              mt: 0.5,
+                              bgcolor:
+                                c.status === 'investigating'
+                                  ? `${theme.palette.accent.blue}20`
+                                  : `${theme.palette.accent.green}20`,
+                              color:
+                                c.status === 'investigating'
+                                  ? theme.palette.accent.blue
+                                  : theme.palette.accent.green,
+                              textTransform: 'capitalize',
+                            }}
+                          />
+                        </Box>
                       </Stack>
-                    </CardContent>
-                  </CardActionArea>
-                </Card>
-              ))}
-            </Stack>
-          )}
-        </Paper>
-
-        {/* Devices */}
-        <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
-          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-            <Typography variant="overline" sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>
-              Devices
-            </Typography>
-            <ToggleButtonGroup
-              value={showDevices}
-              exclusive
-              onChange={(_, v) => v !== null && setShowDevices(v)}
-              size="small"
-            >
-              <ToggleButton
-                value={true}
-                sx={{
-                  p: 0.5,
-                  color: 'text.secondary',
-                  '&.Mui-selected': {
-                    color: theme.palette.accent.orange,
-                    bgcolor: `${theme.palette.accent.orange}20`,
-                  },
-                }}
-              >
-                <Devices sx={{ fontSize: 14 }} />
-              </ToggleButton>
-            </ToggleButtonGroup>
-          </Stack>
-
-          <Stack spacing={0.5}>
-            {filteredPositions
-              .filter((d) => d.isSuspect)
-              .map((d) => (
-                <Card
-                  key={d.deviceId}
-                  sx={{
-                    bgcolor:
-                      selectedDevice?.deviceId === d.deviceId
-                        ? `${theme.palette.accent.red}15`
-                        : 'background.paper',
-                    border: 1,
-                    borderColor:
-                      selectedDevice?.deviceId === d.deviceId
-                        ? theme.palette.accent.red
-                        : `${theme.palette.accent.red}30`,
-                    cursor: 'pointer',
-                    '&:hover': { borderColor: theme.palette.accent.red },
-                  }}
-                  onClick={() => {
-                    setSelectedDevice(d);
-                    setMapCenter([d.lat, d.lng]);
-                    setMapZoom(16);
-                  }}
-                >
-                  <CardContent sx={{ p: 1, '&:last-child': { pb: 1 } }}>
-                    <Stack direction="row" alignItems="center" spacing={1}>
-                      <Box
-                        sx={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: '50%',
-                          bgcolor: theme.palette.accent.red,
-                        }}
-                      />
-                      <Box>
+                      {c.description && (
                         <Typography
                           variant="caption"
                           sx={{
-                            color: 'text.primary',
-                            fontWeight: 600,
-                            display: 'block',
-                            lineHeight: 1.2,
+                            color: 'text.secondary',
+                            mt: 1,
+                            fontSize: '0.65rem',
+                            lineHeight: 1.4,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
                           }}
                         >
-                          {d.ownerAlias ? `"${d.ownerAlias}"` : d.ownerName || 'Unknown'}
+                          {c.description}
                         </Typography>
-                        <Typography
-                          variant="caption"
-                          sx={{ color: 'text.secondary', fontSize: '0.65rem' }}
-                        >
-                          {d.deviceName}
-                        </Typography>
-                      </Box>
-                    </Stack>
-                  </CardContent>
-                </Card>
-              ))}
-            {filteredPositions
-              .filter((d) => !d.isSuspect)
-              .slice(0, 3)
-              .map((d) => (
-                <Card
-                  key={d.deviceId}
+                      )}
+                      <Divider sx={{ my: 1 }} />
+                      <Stack direction="row" spacing={2}>
+                        <Box>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: 'text.secondary', fontSize: '0.6rem' }}
+                          >
+                            Assigned To
+                          </Typography>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: 'text.primary', display: 'block', fontWeight: 500 }}
+                          >
+                            {c.assignedTo || 'Analyst Team'}
+                          </Typography>
+                        </Box>
+                        <Box>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: 'text.secondary', fontSize: '0.6rem' }}
+                          >
+                            Neighborhood
+                          </Typography>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: 'text.primary', display: 'block', fontWeight: 500 }}
+                          >
+                            {c.neighborhood || 'N/A'}
+                          </Typography>
+                        </Box>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                ))}
+              </Stack>
+            </Box>
+          )}
+
+          {/* Suspects Tab */}
+          {sidebarTab === 2 && (
+            <Box sx={{ p: 2 }}>
+              <Stack
+                direction="row"
+                alignItems="center"
+                justifyContent="space-between"
+                sx={{ mb: 2 }}
+              >
+                <Typography variant="subtitle2" sx={{ color: 'text.primary', fontWeight: 700 }}>
+                  Suspect Intelligence
+                </Typography>
+                <Chip
+                  label={
+                    searchQuery ? `${filteredSuspects.length}/${suspects.length}` : suspects.length
+                  }
+                  size="small"
                   sx={{
-                    bgcolor:
-                      selectedDevice?.deviceId === d.deviceId
-                        ? `${theme.palette.accent.blue}15`
-                        : 'background.paper',
-                    border: 1,
-                    borderColor:
-                      selectedDevice?.deviceId === d.deviceId
-                        ? theme.palette.accent.blue
-                        : 'border.main',
-                    cursor: 'pointer',
-                    '&:hover': { borderColor: theme.palette.accent.blue },
+                    bgcolor: `${theme.palette.accent.red}20`,
+                    color: theme.palette.accent.red,
+                    height: 20,
+                    fontSize: '0.7rem',
                   }}
-                  onClick={() => {
-                    setSelectedDevice(d);
-                    setMapCenter([d.lat, d.lng]);
-                    setMapZoom(16);
-                  }}
+                />
+              </Stack>
+              <Stack spacing={1.5}>
+                {filteredSuspects.map((s) => {
+                  const suspectRelationships = getRelationshipsForSuspect(s.id);
+                  return (
+                    <Card
+                      key={s.id}
+                      sx={{
+                        bgcolor: 'background.default',
+                        border: 1,
+                        borderColor: `${getThreatLevelColor(s.threatLevel || '')}40`,
+                        '&:hover': { borderColor: getThreatLevelColor(s.threatLevel || '') },
+                      }}
+                    >
+                      <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
+                        <Stack
+                          direction="row"
+                          alignItems="flex-start"
+                          justifyContent="space-between"
+                        >
+                          <Box sx={{ flex: 1 }}>
+                            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                              <Avatar
+                                sx={{
+                                  width: 28,
+                                  height: 28,
+                                  bgcolor: `${getThreatLevelColor(s.threatLevel || '')}30`,
+                                  color: getThreatLevelColor(s.threatLevel || ''),
+                                }}
+                              >
+                                <Person sx={{ fontSize: 16 }} />
+                              </Avatar>
+                              <Box>
+                                <Typography
+                                  variant="body2"
+                                  sx={{ color: 'text.primary', fontWeight: 600 }}
+                                >
+                                  {s.name}
+                                </Typography>
+                                {s.alias && (
+                                  <Typography
+                                    variant="caption"
+                                    sx={{ color: 'text.secondary', fontSize: '0.65rem' }}
+                                  >
+                                    aka "{s.alias}"
+                                  </Typography>
+                                )}
+                              </Box>
+                            </Stack>
+                          </Box>
+                          <Stack alignItems="flex-end" spacing={0.5}>
+                            <Chip
+                              label={s.threatLevel || 'Unknown'}
+                              size="small"
+                              sx={{
+                                height: 18,
+                                fontSize: '0.6rem',
+                                fontWeight: 700,
+                                bgcolor: `${getThreatLevelColor(s.threatLevel || '')}20`,
+                                color: getThreatLevelColor(s.threatLevel || ''),
+                              }}
+                            />
+                            {s.totalScore && (
+                              <Typography
+                                variant="caption"
+                                sx={{ color: 'text.secondary', fontSize: '0.6rem' }}
+                              >
+                                Score: {s.totalScore.toFixed(2)}
+                              </Typography>
+                            )}
+                          </Stack>
+                        </Stack>
+
+                        {/* Criminal History */}
+                        {s.criminalHistory && (
+                          <Box
+                            sx={{
+                              mt: 1,
+                              p: 1,
+                              bgcolor: theme.palette.mode === 'dark' ? '#1a1a1e' : '#f8fafc',
+                              borderRadius: 1,
+                            }}
+                          >
+                            <Stack
+                              direction="row"
+                              alignItems="center"
+                              spacing={0.5}
+                              sx={{ mb: 0.5 }}
+                            >
+                              <Gavel sx={{ fontSize: 12, color: 'text.secondary' }} />
+                              <Typography
+                                variant="caption"
+                                sx={{
+                                  color: 'text.secondary',
+                                  fontWeight: 600,
+                                  fontSize: '0.6rem',
+                                }}
+                              >
+                                Criminal History
+                              </Typography>
+                            </Stack>
+                            <Typography
+                              variant="caption"
+                              sx={{ color: 'text.primary', fontSize: '0.65rem' }}
+                            >
+                              {s.criminalHistory}
+                            </Typography>
+                          </Box>
+                        )}
+
+                        {/* Linked Cases & Cities */}
+                        <Stack direction="row" spacing={2} sx={{ mt: 1.5 }}>
+                          {s.linkedCases && s.linkedCases.length > 0 && (
+                            <Box>
+                              <Typography
+                                variant="caption"
+                                sx={{
+                                  color: 'text.secondary',
+                                  fontSize: '0.6rem',
+                                  display: 'block',
+                                }}
+                              >
+                                Linked Cases
+                              </Typography>
+                              <Stack
+                                direction="row"
+                                spacing={0.5}
+                                sx={{ flexWrap: 'wrap', gap: 0.5 }}
+                              >
+                                {s.linkedCases.slice(0, 3).map((caseId, idx) => (
+                                  <Chip
+                                    key={idx}
+                                    label={caseId}
+                                    size="small"
+                                    sx={{
+                                      height: 16,
+                                      fontSize: '0.55rem',
+                                      bgcolor: `${theme.palette.accent.orange}15`,
+                                      color: theme.palette.accent.orange,
+                                    }}
+                                  />
+                                ))}
+                                {s.linkedCases.length > 3 && (
+                                  <Chip
+                                    label={`+${s.linkedCases.length - 3}`}
+                                    size="small"
+                                    sx={{ height: 16, fontSize: '0.55rem' }}
+                                  />
+                                )}
+                              </Stack>
+                            </Box>
+                          )}
+                          {s.linkedCities && s.linkedCities.length > 0 && (
+                            <Box>
+                              <Typography
+                                variant="caption"
+                                sx={{
+                                  color: 'text.secondary',
+                                  fontSize: '0.6rem',
+                                  display: 'block',
+                                }}
+                              >
+                                Active In
+                              </Typography>
+                              <Stack
+                                direction="row"
+                                spacing={0.5}
+                                sx={{ flexWrap: 'wrap', gap: 0.5 }}
+                              >
+                                {s.linkedCities.slice(0, 2).map((city, idx) => (
+                                  <Chip
+                                    key={idx}
+                                    icon={<LocationOn sx={{ fontSize: 10 }} />}
+                                    label={city}
+                                    size="small"
+                                    sx={{
+                                      height: 16,
+                                      fontSize: '0.55rem',
+                                      '& .MuiChip-icon': { ml: 0.5 },
+                                    }}
+                                  />
+                                ))}
+                              </Stack>
+                            </Box>
+                          )}
+                        </Stack>
+
+                        {/* Relationships */}
+                        {suspectRelationships.length > 0 && (
+                          <Box sx={{ mt: 1.5, pt: 1, borderTop: 1, borderColor: 'border.main' }}>
+                            <Stack
+                              direction="row"
+                              alignItems="center"
+                              spacing={0.5}
+                              sx={{ mb: 0.5 }}
+                            >
+                              <Groups sx={{ fontSize: 12, color: 'text.secondary' }} />
+                              <Typography
+                                variant="caption"
+                                sx={{
+                                  color: 'text.secondary',
+                                  fontWeight: 600,
+                                  fontSize: '0.6rem',
+                                }}
+                              >
+                                Network Connections ({suspectRelationships.length})
+                              </Typography>
+                            </Stack>
+                            <Stack
+                              direction="row"
+                              spacing={0.5}
+                              sx={{ flexWrap: 'wrap', gap: 0.5 }}
+                            >
+                              {suspectRelationships.slice(0, 3).map((rel, idx) => (
+                                <Chip
+                                  key={idx}
+                                  icon={
+                                    rel.type === 'CO_LOCATED' ? (
+                                      <LocationOn sx={{ fontSize: 10 }} />
+                                    ) : (
+                                      <Phone sx={{ fontSize: 10 }} />
+                                    )
+                                  }
+                                  label={`${rel.person1Id === s.id ? rel.person2Name : rel.person1Name} (${rel.type})`}
+                                  size="small"
+                                  sx={{
+                                    height: 18,
+                                    fontSize: '0.55rem',
+                                    bgcolor:
+                                      rel.type === 'CO_LOCATED'
+                                        ? `${theme.palette.accent.blue}15`
+                                        : `${theme.palette.accent.purple || '#9333ea'}15`,
+                                    '& .MuiChip-icon': {
+                                      ml: 0.5,
+                                      color:
+                                        rel.type === 'CO_LOCATED'
+                                          ? theme.palette.accent.blue
+                                          : theme.palette.accent.purple || '#9333ea',
+                                    },
+                                  }}
+                                />
+                              ))}
+                            </Stack>
+                          </Box>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </Stack>
+            </Box>
+          )}
+
+          {/* Devices Tab */}
+          {sidebarTab === 3 && (
+            <Box sx={{ p: 2 }}>
+              <Stack
+                direction="row"
+                alignItems="center"
+                justifyContent="space-between"
+                sx={{ mb: 2 }}
+              >
+                <Typography variant="subtitle2" sx={{ color: 'text.primary', fontWeight: 700 }}>
+                  Tracked Devices
+                </Typography>
+                <ToggleButtonGroup
+                  value={showDevices}
+                  exclusive
+                  onChange={(_, v) => v !== null && setShowDevices(v)}
+                  size="small"
                 >
-                  <CardContent sx={{ p: 1, '&:last-child': { pb: 1 } }}>
-                    <Stack direction="row" alignItems="center" spacing={1}>
-                      <Box
+                  <ToggleButton
+                    value={true}
+                    sx={{
+                      p: 0.5,
+                      color: 'text.secondary',
+                      '&.Mui-selected': {
+                        color: theme.palette.accent.orange,
+                        bgcolor: `${theme.palette.accent.orange}20`,
+                      },
+                    }}
+                  >
+                    <Devices sx={{ fontSize: 14 }} />
+                  </ToggleButton>
+                </ToggleButtonGroup>
+              </Stack>
+
+              {/* Suspect Devices */}
+              <Typography
+                variant="overline"
+                sx={{
+                  color: theme.palette.accent.red,
+                  fontSize: '0.6rem',
+                  mb: 1,
+                  display: 'block',
+                }}
+              >
+                Suspect Devices ({filteredPositions.filter((d) => d.isSuspect).length})
+              </Typography>
+              <Stack spacing={1} sx={{ mb: 2 }}>
+                {filteredPositions
+                  .filter((d) => d.isSuspect)
+                  .map((d) => {
+                    const suspect = getSuspectFromPosition(d);
+                    return (
+                      <Card
+                        key={d.deviceId}
                         sx={{
-                          width: 5,
-                          height: 5,
-                          borderRadius: '50%',
-                          bgcolor: theme.palette.accent.blue,
+                          bgcolor:
+                            selectedDevice?.deviceId === d.deviceId
+                              ? `${theme.palette.accent.red}15`
+                              : 'background.default',
+                          border: 1,
+                          borderColor:
+                            selectedDevice?.deviceId === d.deviceId
+                              ? theme.palette.accent.red
+                              : `${theme.palette.accent.red}30`,
+                          cursor: 'pointer',
+                          '&:hover': { borderColor: theme.palette.accent.red },
                         }}
-                      />
-                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                        {d.ownerName || 'Unknown'}
-                      </Typography>
-                    </Stack>
-                  </CardContent>
-                </Card>
-              ))}
-          </Stack>
+                        onClick={() => {
+                          setSelectedDevice(d);
+                          setMapCenter([d.lat, d.lng]);
+                          setMapZoom(16);
+                        }}
+                      >
+                        <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
+                          <Stack direction="row" alignItems="flex-start" spacing={1}>
+                            <Box
+                              sx={{
+                                width: 8,
+                                height: 8,
+                                borderRadius: '50%',
+                                bgcolor: theme.palette.accent.red,
+                                mt: 0.5,
+                              }}
+                            />
+                            <Box sx={{ flex: 1 }}>
+                              <Typography
+                                variant="body2"
+                                sx={{ color: 'text.primary', fontWeight: 600 }}
+                              >
+                                {d.ownerAlias ? `"${d.ownerAlias}"` : d.ownerName || 'Unknown'}
+                              </Typography>
+                              <Typography
+                                variant="caption"
+                                sx={{ color: 'text.secondary', display: 'block' }}
+                              >
+                                {d.deviceName}
+                              </Typography>
+                              {d.towerName && (
+                                <Stack
+                                  direction="row"
+                                  alignItems="center"
+                                  spacing={0.5}
+                                  sx={{ mt: 0.5 }}
+                                >
+                                  <CellTower sx={{ fontSize: 10, color: 'text.secondary' }} />
+                                  <Typography
+                                    variant="caption"
+                                    sx={{ color: 'text.secondary', fontSize: '0.6rem' }}
+                                  >
+                                    {d.towerName}
+                                  </Typography>
+                                </Stack>
+                              )}
+                              {suspect && (
+                                <Chip
+                                  label={suspect.threatLevel || 'Unknown'}
+                                  size="small"
+                                  sx={{
+                                    mt: 0.5,
+                                    height: 16,
+                                    fontSize: '0.55rem',
+                                    bgcolor: `${getThreatLevelColor(suspect.threatLevel || '')}20`,
+                                    color: getThreatLevelColor(suspect.threatLevel || ''),
+                                  }}
+                                />
+                              )}
+                            </Box>
+                            <MuiTooltip title="View on map">
+                              <IconButton size="small">
+                                <LocationOn
+                                  sx={{ fontSize: 14, color: theme.palette.accent.red }}
+                                />
+                              </IconButton>
+                            </MuiTooltip>
+                          </Stack>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+              </Stack>
+
+              {/* Other Devices */}
+              <Typography
+                variant="overline"
+                sx={{
+                  color: theme.palette.accent.blue,
+                  fontSize: '0.6rem',
+                  mb: 1,
+                  display: 'block',
+                }}
+              >
+                Other Devices ({filteredPositions.filter((d) => !d.isSuspect).length})
+              </Typography>
+              <Stack spacing={0.5}>
+                {filteredPositions
+                  .filter((d) => !d.isSuspect)
+                  .slice(0, 10)
+                  .map((d) => (
+                    <Card
+                      key={d.deviceId}
+                      sx={{
+                        bgcolor:
+                          selectedDevice?.deviceId === d.deviceId
+                            ? `${theme.palette.accent.blue}15`
+                            : 'background.default',
+                        border: 1,
+                        borderColor:
+                          selectedDevice?.deviceId === d.deviceId
+                            ? theme.palette.accent.blue
+                            : 'border.main',
+                        cursor: 'pointer',
+                        '&:hover': { borderColor: theme.palette.accent.blue },
+                      }}
+                      onClick={() => {
+                        setSelectedDevice(d);
+                        setMapCenter([d.lat, d.lng]);
+                        setMapZoom(16);
+                      }}
+                    >
+                      <CardContent sx={{ p: 1, '&:last-child': { pb: 1 } }}>
+                        <Stack direction="row" alignItems="center" spacing={1}>
+                          <Box
+                            sx={{
+                              width: 6,
+                              height: 6,
+                              borderRadius: '50%',
+                              bgcolor: theme.palette.accent.blue,
+                            }}
+                          />
+                          <Box sx={{ flex: 1 }}>
+                            <Typography variant="caption" sx={{ color: 'text.primary' }}>
+                              {d.ownerName || 'Unknown'}
+                            </Typography>
+                          </Box>
+                          <Typography
+                            variant="caption"
+                            sx={{ color: 'text.secondary', fontSize: '0.6rem' }}
+                          >
+                            {d.deviceName}
+                          </Typography>
+                        </Stack>
+                      </CardContent>
+                    </Card>
+                  ))}
+              </Stack>
+            </Box>
+          )}
         </Box>
 
         {/* Action */}
