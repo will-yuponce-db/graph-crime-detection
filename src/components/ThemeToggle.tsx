@@ -8,7 +8,12 @@ const ThemeToggle: React.FC = () => {
 
   return (
     <Tooltip title={mode === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}>
-      <IconButton onClick={toggleTheme} color="inherit">
+      <IconButton
+        onClick={toggleTheme}
+        sx={{
+          color: 'text.primary',
+        }}
+      >
         {mode === 'light' ? <Brightness4 /> : <Brightness7 />}
       </IconButton>
     </Tooltip>

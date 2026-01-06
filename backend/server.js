@@ -10,6 +10,145 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
+// ============== IN-MEMORY ASSIGNEE STORE ==============
+// Stores assignees locally (persisted to JSON file)
+const ASSIGNEES_FILE = path.join(__dirname, 'db', 'assignees.json');
+
+// Default assignees
+const DEFAULT_ASSIGNEES = [
+  {
+    id: 'user_001',
+    name: 'Sarah Chen',
+    role: 'Lead Analyst',
+    email: 'sarah.chen@agency.gov',
+    active: true,
+  },
+  {
+    id: 'user_002',
+    name: 'Marcus Johnson',
+    role: 'Senior Analyst',
+    email: 'marcus.johnson@agency.gov',
+    active: true,
+  },
+  {
+    id: 'user_003',
+    name: 'Elena Rodriguez',
+    role: 'Analyst',
+    email: 'elena.rodriguez@agency.gov',
+    active: true,
+  },
+  {
+    id: 'user_004',
+    name: 'James Wilson',
+    role: 'Junior Analyst',
+    email: 'james.wilson@agency.gov',
+    active: true,
+  },
+  { id: 'user_005', name: 'Analyst Team', role: 'Team', email: 'team@agency.gov', active: true },
+];
+
+// Load assignees from file or use defaults
+function loadAssignees() {
+  try {
+    if (fs.existsSync(ASSIGNEES_FILE)) {
+      const data = fs.readFileSync(ASSIGNEES_FILE, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    logger.warn({ type: 'assignees_load', status: 'failed', error: error.message });
+  }
+  return [...DEFAULT_ASSIGNEES];
+}
+
+// Save assignees to file
+function saveAssignees(assignees) {
+  try {
+    fs.writeFileSync(ASSIGNEES_FILE, JSON.stringify(assignees, null, 2));
+    return true;
+  } catch (error) {
+    logger.error({ type: 'assignees_save', status: 'failed', error: error.message });
+    return false;
+  }
+}
+
+// In-memory assignees store
+let assigneesStore = loadAssignees();
+
+// Case-to-assignee mapping (in-memory, could be persisted)
+const CASE_ASSIGNMENTS_FILE = path.join(__dirname, 'db', 'case_assignments.json');
+
+function loadCaseAssignments() {
+  try {
+    if (fs.existsSync(CASE_ASSIGNMENTS_FILE)) {
+      const data = fs.readFileSync(CASE_ASSIGNMENTS_FILE, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    logger.warn({ type: 'case_assignments_load', status: 'failed', error: error.message });
+  }
+  return {};
+}
+
+function saveCaseAssignments(assignments) {
+  try {
+    fs.writeFileSync(CASE_ASSIGNMENTS_FILE, JSON.stringify(assignments, null, 2));
+    return true;
+  } catch (error) {
+    logger.error({ type: 'case_assignments_save', status: 'failed', error: error.message });
+    return false;
+  }
+}
+
+let caseAssignmentsStore = loadCaseAssignments();
+
+// ============== ENTITY TITLES STORE ==============
+// Stores custom display titles for entities without modifying their IDs
+// Structure: { entityType: { entityId: { title, notes, updatedAt } } }
+const ENTITY_TITLES_FILE = path.join(__dirname, 'db', 'entity_titles.json');
+
+function loadEntityTitles() {
+  try {
+    if (fs.existsSync(ENTITY_TITLES_FILE)) {
+      const data = fs.readFileSync(ENTITY_TITLES_FILE, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    logger.warn({ type: 'entity_titles_load', status: 'failed', error: error.message });
+  }
+  return { persons: {}, cases: {}, devices: {}, hotspots: {}, locations: {} };
+}
+
+function saveEntityTitles(titles) {
+  try {
+    fs.writeFileSync(ENTITY_TITLES_FILE, JSON.stringify(titles, null, 2));
+    return true;
+  } catch (error) {
+    logger.error({ type: 'entity_titles_save', status: 'failed', error: error.message });
+    return false;
+  }
+}
+
+let entityTitlesStore = loadEntityTitles();
+
+// Helper to get entity title (returns custom title or null)
+function getEntityTitle(entityType, entityId) {
+  return entityTitlesStore[entityType]?.[entityId] || null;
+}
+
+// Helper to apply custom titles to an entity object
+function applyEntityTitle(entity, entityType, idField = 'id') {
+  const customTitle = getEntityTitle(entityType, entity[idField]);
+  if (customTitle) {
+    return {
+      ...entity,
+      customTitle: customTitle.title,
+      customNotes: customTitle.notes,
+      hasCustomTitle: true,
+    };
+  }
+  return { ...entity, hasCustomTitle: false };
+}
+
 // Databricks connector - primary data source
 const databricks = require('./db/databricks');
 
@@ -194,19 +333,27 @@ app.get('/api/demo/persons', async (req, res) => {
 
     const persons = rankings
       .filter((r) => !suspectsOnly || r.total_score > 0.5)
-      .map((r) => ({
-        id: r.entity_id,
-        name: r.entity_name || `Entity ${r.entity_id}`,
-        alias: r.alias || null,
-        is_suspect: r.total_score > 0.5 ? 1 : 0,
-        threat_level: r.total_score > 1.5 ? 'High' : r.total_score > 1 ? 'Medium' : 'Low',
-        criminal_history: `${r.case_count || 0} linked cases across ${r.states_count || 1} states`,
-        notes: null,
-        properties: r.properties ? JSON.parse(r.properties) : {},
-        totalScore: r.total_score,
-        linkedCases: r.linked_cases,
-        linkedCities: r.linked_cities,
-      }));
+      .map((r) => {
+        const customTitle = getEntityTitle('persons', r.entity_id);
+        const originalName = r.entity_name || `Entity ${r.entity_id}`;
+        return {
+          id: r.entity_id,
+          name: customTitle?.title || originalName,
+          originalName,
+          customTitle: customTitle?.title || null,
+          customNotes: customTitle?.notes || null,
+          hasCustomTitle: !!customTitle,
+          alias: r.alias || null,
+          is_suspect: r.total_score > 0.5 ? 1 : 0,
+          threat_level: r.total_score > 1.5 ? 'High' : r.total_score > 1 ? 'Medium' : 'Low',
+          criminal_history: `${r.case_count || 0} linked cases across ${r.states_count || 1} states`,
+          notes: customTitle?.notes || null,
+          properties: r.properties ? JSON.parse(r.properties) : {},
+          totalScore: r.total_score,
+          linkedCases: r.linked_cases,
+          linkedCities: r.linked_cities,
+        };
+      });
 
     res.json({ success: true, persons });
   } catch (error) {
@@ -328,8 +475,18 @@ app.get('/api/demo/positions/:hour', async (req, res) => {
 
     const locationEvents = await databricks.getLocationEvents(200);
 
+    // Deduplicate by entity_id - only keep the first (most recent) position per entity
+    const seenEntities = new Set();
+    const uniqueEvents = locationEvents.filter((event) => {
+      if (!event.entity_id || seenEntities.has(event.entity_id)) {
+        return false;
+      }
+      seenEntities.add(event.entity_id);
+      return true;
+    });
+
     // Simulate positions based on location events
-    const positions = locationEvents.slice(0, 30).map((event, i) => ({
+    const positions = uniqueEvents.slice(0, 30).map((event, i) => ({
       deviceId: `device_${event.entity_id || i}`,
       deviceName: `Device ${event.entity_id || i}`,
       lat: event.latitude + (Math.random() - 0.5) * 0.01,
@@ -386,30 +543,46 @@ app.get('/api/demo/cases', async (req, res) => {
   try {
     const cases = await databricks.getCases(100);
 
-    const formattedCases = cases.map((c) => ({
-      id: c.case_id,
-      caseNumber: c.case_id,
-      title: `${c.case_type} - ${c.city}`,
-      description: c.narrative,
-      city: c.city,
-      state: c.state,
-      neighborhood: c.address?.split(',')[0] || 'Unknown',
-      lat: c.latitude,
-      lng: c.longitude,
-      hour: 25,
-      status: c.status === 'open' ? 'investigating' : c.status || 'investigating',
-      priority: c.priority?.charAt(0).toUpperCase() + c.priority?.slice(1) || 'Medium',
-      assignedTo: 'Analyst Team',
-      estimatedLoss: c.estimated_loss,
-      methodOfEntry: c.method_of_entry,
-      stolenItems: c.target_items,
-      properties: c.properties ? JSON.parse(c.properties) : {},
-      persons: [],
-      devices: [],
-      hotspot: null,
-      createdAt: c.incident_start_ts || new Date().toISOString(),
-      updatedAt: c.ingestion_timestamp || new Date().toISOString(),
-    }));
+    const formattedCases = cases.map((c) => {
+      // Get assigned user for this case
+      const assigneeId = caseAssignmentsStore[c.case_id];
+      let assignee = null;
+      let assignedTo = 'Analyst Team';
+
+      if (assigneeId) {
+        assignee = assigneesStore.find((a) => a.id === assigneeId);
+        if (assignee) {
+          assignedTo = assignee.name;
+        }
+      }
+
+      return {
+        id: c.case_id,
+        caseNumber: c.case_id,
+        title: `${c.case_type} - ${c.city}`,
+        description: c.narrative,
+        city: c.city,
+        state: c.state,
+        neighborhood: c.address?.split(',')[0] || 'Unknown',
+        lat: c.latitude,
+        lng: c.longitude,
+        hour: 25,
+        status: c.status === 'open' ? 'investigating' : c.status || 'investigating',
+        priority: c.priority?.charAt(0).toUpperCase() + c.priority?.slice(1) || 'Medium',
+        assignedTo,
+        assigneeId: assigneeId || null,
+        assignee: assignee || null,
+        estimatedLoss: c.estimated_loss,
+        methodOfEntry: c.method_of_entry,
+        stolenItems: c.target_items,
+        properties: c.properties ? JSON.parse(c.properties) : {},
+        persons: [],
+        devices: [],
+        hotspot: null,
+        createdAt: c.incident_start_ts || new Date().toISOString(),
+        updatedAt: c.ingestion_timestamp || new Date().toISOString(),
+      };
+    });
 
     res.json({ success: true, cases: formattedCases });
   } catch (error) {
@@ -435,6 +608,19 @@ app.get('/api/demo/cases/:id', async (req, res) => {
     }
 
     const c = cases[0];
+
+    // Get assigned user for this case
+    const assigneeId = caseAssignmentsStore[caseId];
+    let assignee = null;
+    let assignedTo = 'Analyst Team';
+
+    if (assigneeId) {
+      assignee = assigneesStore.find((a) => a.id === assigneeId);
+      if (assignee) {
+        assignedTo = assignee.name;
+      }
+    }
+
     const caseData = {
       id: c.case_id,
       caseNumber: c.case_id,
@@ -448,7 +634,9 @@ app.get('/api/demo/cases/:id', async (req, res) => {
       hour: 25,
       status: c.status === 'open' ? 'investigating' : c.status || 'investigating',
       priority: c.priority?.charAt(0).toUpperCase() + c.priority?.slice(1) || 'Medium',
-      assignedTo: 'Analyst Team',
+      assignedTo,
+      assigneeId: assigneeId || null,
+      assignee: assignee || null,
       estimatedLoss: c.estimated_loss,
       methodOfEntry: c.method_of_entry,
       stolenItems: c.target_items,
@@ -574,29 +762,42 @@ app.get('/api/demo/graph-data', async (req, res) => {
       databricks.getSocialEdges(100),
     ]);
 
-    // Build nodes from suspect rankings
-    const nodes = rankings.map((r) => ({
-      id: r.entity_id,
-      name: r.entity_name || `Entity ${r.entity_id}`,
-      alias: r.alias || (r.entity_id.includes('SUSPECT') ? r.entity_id.split('_')[1] : null),
-      type: 'person',
-      isSuspect: true,
-      threatLevel: r.total_score > 1.5 ? 'High' : 'Medium',
-      totalScore: r.total_score,
-      linkedCities: r.linked_cities,
-      properties: r.properties ? JSON.parse(r.properties) : {},
-    }));
+    // Build nodes from suspect rankings with custom titles
+    const nodes = rankings.map((r) => {
+      const customTitle = getEntityTitle('persons', r.entity_id);
+      const originalName = r.entity_name || `Entity ${r.entity_id}`;
+      return {
+        id: r.entity_id,
+        name: customTitle?.title || originalName,
+        originalName,
+        customTitle: customTitle?.title || null,
+        customNotes: customTitle?.notes || null,
+        hasCustomTitle: !!customTitle,
+        alias: r.alias || (r.entity_id.includes('SUSPECT') ? r.entity_id.split('_')[1] : null),
+        type: 'person',
+        isSuspect: true,
+        threatLevel: r.total_score > 1.5 ? 'High' : 'Medium',
+        totalScore: r.total_score,
+        linkedCities: r.linked_cities,
+        properties: r.properties ? JSON.parse(r.properties) : {},
+      };
+    });
 
-    // Add location nodes from linked cities
+    // Add location nodes from linked cities with custom titles
     const citySet = new Set();
     rankings.forEach((r) => {
       (r.linked_cities || []).forEach((city) => citySet.add(city));
     });
 
     citySet.forEach((city) => {
+      const locId = `loc_${city.toLowerCase().replace(/[^a-z]/g, '_')}`;
+      const customTitle = getEntityTitle('locations', locId);
       nodes.push({
-        id: `loc_${city.toLowerCase().replace(/[^a-z]/g, '_')}`,
-        name: city,
+        id: locId,
+        name: customTitle?.title || city,
+        originalName: city,
+        customTitle: customTitle?.title || null,
+        hasCustomTitle: !!customTitle,
         type: 'location',
         city: city,
       });
@@ -719,6 +920,418 @@ app.post('/api/demo/evidence-card', async (req, res) => {
     };
 
     res.json({ success: true, evidenceCard });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============== ASSIGNEES CRUD ENDPOINTS ==============
+
+/**
+ * GET /api/demo/assignees
+ * Get all assignees
+ */
+app.get('/api/demo/assignees', (req, res) => {
+  try {
+    const activeOnly = req.query.active === 'true';
+    const assignees = activeOnly ? assigneesStore.filter((a) => a.active) : assigneesStore;
+    res.json({ success: true, assignees });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/demo/assignees/:id
+ * Get a single assignee by ID
+ */
+app.get('/api/demo/assignees/:id', (req, res) => {
+  try {
+    const assignee = assigneesStore.find((a) => a.id === req.params.id);
+    if (!assignee) {
+      return res.status(404).json({ success: false, error: 'Assignee not found' });
+    }
+    res.json({ success: true, assignee });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /api/demo/assignees
+ * Create a new assignee
+ * Body: { name: string, role?: string, email?: string }
+ */
+app.post('/api/demo/assignees', (req, res) => {
+  try {
+    const { name, role, email } = req.body;
+
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+      return res.status(400).json({ success: false, error: 'Name is required' });
+    }
+
+    const newAssignee = {
+      id: `user_${Date.now()}`,
+      name: name.trim(),
+      role: role?.trim() || 'Analyst',
+      email: email?.trim() || null,
+      active: true,
+      createdAt: new Date().toISOString(),
+    };
+
+    assigneesStore.push(newAssignee);
+    saveAssignees(assigneesStore);
+
+    logger.info({ type: 'assignee_created', assigneeId: newAssignee.id, name: newAssignee.name });
+    res.status(201).json({ success: true, assignee: newAssignee });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * PATCH /api/demo/assignees/:id
+ * Update an assignee
+ * Body: { name?: string, role?: string, email?: string, active?: boolean }
+ */
+app.patch('/api/demo/assignees/:id', (req, res) => {
+  try {
+    const { name, role, email, active } = req.body;
+    const assigneeIdx = assigneesStore.findIndex((a) => a.id === req.params.id);
+
+    if (assigneeIdx === -1) {
+      return res.status(404).json({ success: false, error: 'Assignee not found' });
+    }
+
+    const assignee = assigneesStore[assigneeIdx];
+
+    if (name !== undefined) assignee.name = name.trim();
+    if (role !== undefined) assignee.role = role.trim();
+    if (email !== undefined) assignee.email = email?.trim() || null;
+    if (active !== undefined) assignee.active = Boolean(active);
+    assignee.updatedAt = new Date().toISOString();
+
+    assigneesStore[assigneeIdx] = assignee;
+    saveAssignees(assigneesStore);
+
+    logger.info({ type: 'assignee_updated', assigneeId: assignee.id });
+    res.json({ success: true, assignee });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * DELETE /api/demo/assignees/:id
+ * Delete an assignee (soft delete - sets active to false)
+ */
+app.delete('/api/demo/assignees/:id', (req, res) => {
+  try {
+    const assigneeIdx = assigneesStore.findIndex((a) => a.id === req.params.id);
+
+    if (assigneeIdx === -1) {
+      return res.status(404).json({ success: false, error: 'Assignee not found' });
+    }
+
+    // Soft delete - just mark as inactive
+    assigneesStore[assigneeIdx].active = false;
+    assigneesStore[assigneeIdx].deletedAt = new Date().toISOString();
+    saveAssignees(assigneesStore);
+
+    logger.info({ type: 'assignee_deleted', assigneeId: req.params.id });
+    res.json({ success: true, message: 'Assignee deactivated' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============== CASE ASSIGNMENT ENDPOINTS ==============
+
+/**
+ * GET /api/demo/cases/:id/assignee
+ * Get the assignee for a specific case
+ */
+app.get('/api/demo/cases/:id/assignee', (req, res) => {
+  try {
+    const caseId = req.params.id;
+    const assigneeId = caseAssignmentsStore[caseId];
+
+    if (!assigneeId) {
+      // Return default "Analyst Team" if no assignment
+      const defaultAssignee =
+        assigneesStore.find((a) => a.name === 'Analyst Team') || assigneesStore[0];
+      return res.json({ success: true, assignee: defaultAssignee, isDefault: true });
+    }
+
+    const assignee = assigneesStore.find((a) => a.id === assigneeId);
+    if (!assignee) {
+      return res.status(404).json({ success: false, error: 'Assigned user not found' });
+    }
+
+    res.json({ success: true, assignee, isDefault: false });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * PUT /api/demo/cases/:id/assignee
+ * Assign a case to an assignee
+ * Body: { assigneeId: string }
+ */
+app.put('/api/demo/cases/:id/assignee', (req, res) => {
+  try {
+    const caseId = req.params.id;
+    const { assigneeId } = req.body;
+
+    if (!assigneeId) {
+      return res.status(400).json({ success: false, error: 'assigneeId is required' });
+    }
+
+    const assignee = assigneesStore.find((a) => a.id === assigneeId);
+    if (!assignee) {
+      return res.status(404).json({ success: false, error: 'Assignee not found' });
+    }
+
+    if (!assignee.active) {
+      return res.status(400).json({ success: false, error: 'Cannot assign to inactive user' });
+    }
+
+    caseAssignmentsStore[caseId] = assigneeId;
+    saveCaseAssignments(caseAssignmentsStore);
+
+    logger.info({ type: 'case_assigned', caseId, assigneeId, assigneeName: assignee.name });
+    res.json({ success: true, caseId, assignee });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * DELETE /api/demo/cases/:id/assignee
+ * Unassign a case (reverts to default)
+ */
+app.delete('/api/demo/cases/:id/assignee', (req, res) => {
+  try {
+    const caseId = req.params.id;
+    delete caseAssignmentsStore[caseId];
+    saveCaseAssignments(caseAssignmentsStore);
+
+    logger.info({ type: 'case_unassigned', caseId });
+    res.json({ success: true, message: 'Case unassigned' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============== ENTITY TITLES CRUD ENDPOINTS ==============
+
+/**
+ * GET /api/demo/entity-titles
+ * Get all custom entity titles, optionally filtered by type
+ * Query: ?type=persons|cases|devices|hotspots|locations
+ */
+app.get('/api/demo/entity-titles', (req, res) => {
+  try {
+    const { type } = req.query;
+    if (type && entityTitlesStore[type]) {
+      res.json({ success: true, entityType: type, titles: entityTitlesStore[type] });
+    } else if (type) {
+      res.status(400).json({ success: false, error: `Invalid entity type: ${type}` });
+    } else {
+      res.json({ success: true, titles: entityTitlesStore });
+    }
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/demo/entity-titles/:type/:id
+ * Get the custom title for a specific entity
+ */
+app.get('/api/demo/entity-titles/:type/:id', (req, res) => {
+  try {
+    const { type, id } = req.params;
+
+    if (!entityTitlesStore[type]) {
+      return res.status(400).json({ success: false, error: `Invalid entity type: ${type}` });
+    }
+
+    const titleInfo = entityTitlesStore[type][id];
+    if (!titleInfo) {
+      return res.json({
+        success: true,
+        entityId: id,
+        entityType: type,
+        title: null,
+        hasCustomTitle: false,
+      });
+    }
+
+    res.json({ success: true, entityId: id, entityType: type, ...titleInfo, hasCustomTitle: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * PUT /api/demo/entity-titles/:type/:id
+ * Set or update a custom title for an entity (Create/Update)
+ * Body: { title: string, notes?: string }
+ */
+app.put('/api/demo/entity-titles/:type/:id', (req, res) => {
+  try {
+    const { type, id } = req.params;
+    const { title, notes } = req.body;
+
+    if (!entityTitlesStore[type]) {
+      return res.status(400).json({ success: false, error: `Invalid entity type: ${type}` });
+    }
+
+    if (!title || typeof title !== 'string' || title.trim().length === 0) {
+      return res.status(400).json({ success: false, error: 'Title is required' });
+    }
+
+    const isNew = !entityTitlesStore[type][id];
+
+    entityTitlesStore[type][id] = {
+      title: title.trim(),
+      notes: notes?.trim() || null,
+      createdAt: isNew ? new Date().toISOString() : entityTitlesStore[type][id].createdAt,
+      updatedAt: new Date().toISOString(),
+    };
+
+    saveEntityTitles(entityTitlesStore);
+
+    logger.info({ type: 'entity_title_set', entityType: type, entityId: id, title: title.trim() });
+    res.json({
+      success: true,
+      entityId: id,
+      entityType: type,
+      ...entityTitlesStore[type][id],
+      isNew,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * PATCH /api/demo/entity-titles/:type/:id
+ * Partially update a custom title for an entity
+ * Body: { title?: string, notes?: string }
+ */
+app.patch('/api/demo/entity-titles/:type/:id', (req, res) => {
+  try {
+    const { type, id } = req.params;
+    const { title, notes } = req.body;
+
+    if (!entityTitlesStore[type]) {
+      return res.status(400).json({ success: false, error: `Invalid entity type: ${type}` });
+    }
+
+    if (!entityTitlesStore[type][id]) {
+      return res.status(404).json({ success: false, error: 'Entity title not found' });
+    }
+
+    if (title !== undefined) {
+      if (typeof title !== 'string' || title.trim().length === 0) {
+        return res.status(400).json({ success: false, error: 'Title cannot be empty' });
+      }
+      entityTitlesStore[type][id].title = title.trim();
+    }
+
+    if (notes !== undefined) {
+      entityTitlesStore[type][id].notes = notes?.trim() || null;
+    }
+
+    entityTitlesStore[type][id].updatedAt = new Date().toISOString();
+
+    saveEntityTitles(entityTitlesStore);
+
+    logger.info({ type: 'entity_title_updated', entityType: type, entityId: id });
+    res.json({
+      success: true,
+      entityId: id,
+      entityType: type,
+      ...entityTitlesStore[type][id],
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * DELETE /api/demo/entity-titles/:type/:id
+ * Remove a custom title for an entity (reverts to original name)
+ */
+app.delete('/api/demo/entity-titles/:type/:id', (req, res) => {
+  try {
+    const { type, id } = req.params;
+
+    if (!entityTitlesStore[type]) {
+      return res.status(400).json({ success: false, error: `Invalid entity type: ${type}` });
+    }
+
+    if (!entityTitlesStore[type][id]) {
+      return res.status(404).json({ success: false, error: 'Entity title not found' });
+    }
+
+    delete entityTitlesStore[type][id];
+    saveEntityTitles(entityTitlesStore);
+
+    logger.info({ type: 'entity_title_deleted', entityType: type, entityId: id });
+    res.json({ success: true, message: 'Custom title removed', entityId: id, entityType: type });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * POST /api/demo/entity-titles/bulk
+ * Set multiple entity titles at once
+ * Body: { titles: [{ type: string, id: string, title: string, notes?: string }] }
+ */
+app.post('/api/demo/entity-titles/bulk', (req, res) => {
+  try {
+    const { titles } = req.body;
+
+    if (!Array.isArray(titles) || titles.length === 0) {
+      return res.status(400).json({ success: false, error: 'titles array is required' });
+    }
+
+    const results = [];
+    const errors = [];
+
+    for (const item of titles) {
+      const { type, id, title, notes } = item;
+
+      if (!entityTitlesStore[type]) {
+        errors.push({ id, type, error: `Invalid entity type: ${type}` });
+        continue;
+      }
+
+      if (!title || typeof title !== 'string' || title.trim().length === 0) {
+        errors.push({ id, type, error: 'Title is required' });
+        continue;
+      }
+
+      const isNew = !entityTitlesStore[type][id];
+      entityTitlesStore[type][id] = {
+        title: title.trim(),
+        notes: notes?.trim() || null,
+        createdAt: isNew ? new Date().toISOString() : entityTitlesStore[type][id].createdAt,
+        updatedAt: new Date().toISOString(),
+      };
+
+      results.push({ type, id, title: title.trim(), isNew });
+    }
+
+    saveEntityTitles(entityTitlesStore);
+
+    logger.info({ type: 'entity_titles_bulk', count: results.length, errors: errors.length });
+    res.json({ success: true, updated: results, errors: errors.length > 0 ? errors : undefined });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

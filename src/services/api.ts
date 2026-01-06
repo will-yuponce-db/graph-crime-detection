@@ -57,6 +57,10 @@ export interface Hotspot {
 export interface Suspect {
   id: string;
   name: string;
+  originalName?: string;
+  customTitle?: string | null;
+  customNotes?: string | null;
+  hasCustomTitle?: boolean;
   alias: string | null;
   threatLevel: string;
   criminalHistory: string | null;
@@ -66,6 +70,16 @@ export interface Suspect {
   linkedCases?: string[];
   linkedCities?: string[];
   properties?: Record<string, unknown>;
+}
+
+export interface Assignee {
+  id: string;
+  name: string;
+  role: string;
+  email: string | null;
+  active: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface CaseData {
@@ -80,6 +94,8 @@ export interface CaseData {
   createdAt: string;
   updatedAt: string;
   assignedTo: string;
+  assigneeId?: string | null;
+  assignee?: Assignee | null;
   estimatedLoss?: number;
   description?: string;
   persons?: { id: string; name: string; alias?: string }[];
@@ -90,6 +106,10 @@ export interface CaseData {
 export interface GraphNode {
   id: string;
   name: string;
+  originalName?: string;
+  customTitle?: string | null;
+  customNotes?: string | null;
+  hasCustomTitle?: boolean;
   alias?: string;
   type: 'person' | 'location';
   isSuspect?: boolean;
@@ -317,6 +337,231 @@ export async function updateEntityProperties(
   });
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
+}
+
+// ============== ASSIGNEE API FUNCTIONS ==============
+
+/**
+ * Fetch all assignees
+ */
+export async function fetchAssignees(activeOnly = true): Promise<Assignee[]> {
+  const res = await fetch(`${API_BASE}/assignees${activeOnly ? '?active=true' : ''}`);
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return data.assignees;
+}
+
+/**
+ * Fetch a single assignee by ID
+ */
+export async function fetchAssignee(assigneeId: string): Promise<Assignee> {
+  const res = await fetch(`${API_BASE}/assignees/${assigneeId}`);
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return data.assignee;
+}
+
+/**
+ * Create a new assignee
+ */
+export async function createAssignee(
+  name: string,
+  role?: string,
+  email?: string
+): Promise<Assignee> {
+  const res = await fetch(`${API_BASE}/assignees`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, role, email }),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return data.assignee;
+}
+
+/**
+ * Update an assignee
+ */
+export async function updateAssignee(
+  assigneeId: string,
+  updates: { name?: string; role?: string; email?: string; active?: boolean }
+): Promise<Assignee> {
+  const res = await fetch(`${API_BASE}/assignees/${assigneeId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return data.assignee;
+}
+
+/**
+ * Delete (deactivate) an assignee
+ */
+export async function deleteAssignee(assigneeId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/assignees/${assigneeId}`, {
+    method: 'DELETE',
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+}
+
+/**
+ * Assign a case to an assignee
+ */
+export async function assignCase(
+  caseId: string,
+  assigneeId: string
+): Promise<{ caseId: string; assignee: Assignee }> {
+  const res = await fetch(`${API_BASE}/cases/${caseId}/assignee`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assigneeId }),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return { caseId: data.caseId, assignee: data.assignee };
+}
+
+/**
+ * Get the assignee for a case
+ */
+export async function getCaseAssignee(
+  caseId: string
+): Promise<{ assignee: Assignee; isDefault: boolean }> {
+  const res = await fetch(`${API_BASE}/cases/${caseId}/assignee`);
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return { assignee: data.assignee, isDefault: data.isDefault };
+}
+
+/**
+ * Unassign a case (revert to default)
+ */
+export async function unassignCase(caseId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/cases/${caseId}/assignee`, {
+    method: 'DELETE',
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+}
+
+// ============== ENTITY TITLES API FUNCTIONS ==============
+
+export type EntityType = 'persons' | 'cases' | 'devices' | 'hotspots' | 'locations';
+
+export interface EntityTitle {
+  title: string;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EntityTitleResponse {
+  entityId: string;
+  entityType: EntityType;
+  title: string | null;
+  notes: string | null;
+  hasCustomTitle: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  isNew?: boolean;
+}
+
+/**
+ * Fetch all entity titles, optionally filtered by type
+ */
+export async function fetchEntityTitles(
+  entityType?: EntityType
+): Promise<Record<string, EntityTitle> | Record<EntityType, Record<string, EntityTitle>>> {
+  const url = entityType
+    ? `${API_BASE}/entity-titles?type=${entityType}`
+    : `${API_BASE}/entity-titles`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return data.titles;
+}
+
+/**
+ * Fetch the custom title for a specific entity
+ */
+export async function fetchEntityTitle(
+  entityType: EntityType,
+  entityId: string
+): Promise<EntityTitleResponse> {
+  const res = await fetch(`${API_BASE}/entity-titles/${entityType}/${entityId}`);
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return data;
+}
+
+/**
+ * Set or update a custom title for an entity
+ */
+export async function setEntityTitle(
+  entityType: EntityType,
+  entityId: string,
+  title: string,
+  notes?: string
+): Promise<EntityTitleResponse> {
+  const res = await fetch(`${API_BASE}/entity-titles/${entityType}/${entityId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, notes }),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return data;
+}
+
+/**
+ * Partially update a custom title for an entity
+ */
+export async function updateEntityTitle(
+  entityType: EntityType,
+  entityId: string,
+  updates: { title?: string; notes?: string }
+): Promise<EntityTitleResponse> {
+  const res = await fetch(`${API_BASE}/entity-titles/${entityType}/${entityId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return data;
+}
+
+/**
+ * Remove a custom title for an entity (reverts to original name)
+ */
+export async function deleteEntityTitle(entityType: EntityType, entityId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/entity-titles/${entityType}/${entityId}`, {
+    method: 'DELETE',
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+}
+
+/**
+ * Set multiple entity titles at once
+ */
+export async function setEntityTitlesBulk(
+  titles: Array<{ type: EntityType; id: string; title: string; notes?: string }>
+): Promise<{
+  updated: Array<{ type: EntityType; id: string; title: string; isNew: boolean }>;
+  errors?: Array<{ id: string; type: EntityType; error: string }>;
+}> {
+  const res = await fetch(`${API_BASE}/entity-titles/bulk`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ titles }),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return { updated: data.updated, errors: data.errors };
 }
 
 // Export data source indicator

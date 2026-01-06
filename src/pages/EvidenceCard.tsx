@@ -37,7 +37,14 @@ import {
   Close,
   Download,
 } from '@mui/icons-material';
-import { fetchCases, updateCaseStatus, USE_DATABRICKS } from '../services/api';
+import {
+  fetchCases,
+  updateCaseStatus,
+  USE_DATABRICKS,
+  fetchAssignees,
+  assignCase,
+} from '../services/api';
+import type { Assignee } from '../services/api';
 
 type CaseStatus = 'investigating' | 'review' | 'adjudicated';
 
@@ -53,6 +60,8 @@ interface CaseData {
   createdAt: string;
   updatedAt: string;
   assignedTo: string;
+  assigneeId?: string | null;
+  assignee?: Assignee | null;
   estimatedLoss?: number;
   description?: string;
   persons?: { id: string; name: string; alias?: string }[];
@@ -109,26 +118,29 @@ const CaseView: React.FC = () => {
     priority: 'Medium',
     description: '',
     estimatedLoss: '',
+    assigneeId: '',
   });
+  const [assignees, setAssignees] = useState<Assignee[]>([]);
 
-  // Fetch cases from API
+  // Fetch cases and assignees from API
   useEffect(() => {
-    const loadCases = async () => {
+    const loadData = async () => {
       try {
-        const casesData = await fetchCases();
+        const [casesData, assigneesData] = await Promise.all([fetchCases(), fetchAssignees(true)]);
         setCases(
           casesData.map((c: CaseData) => ({
             ...c,
             status: (c.status || 'investigating') as CaseStatus,
           }))
         );
+        setAssignees(assigneesData);
       } catch (err) {
-        console.error('Failed to fetch cases:', err);
+        console.error('Failed to fetch data:', err);
       } finally {
         setLoading(false);
       }
     };
-    loadCases();
+    loadData();
   }, []);
 
   // Handle URL param for opening specific case
@@ -202,11 +214,15 @@ const CaseView: React.FC = () => {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
-  const handleCreateCase = () => {
+  const handleCreateCase = async () => {
     const caseNumber = `CASE_${newCaseData.city
       .toUpperCase()
       .replace(/[^A-Z]/g, '')
       .slice(0, 2)}_${String(cases.length + 1).padStart(3, '0')}`;
+
+    // Find the selected assignee
+    const selectedAssignee = assignees.find((a) => a.id === newCaseData.assigneeId);
+
     const newCase: CaseData = {
       id: `case_${Date.now()}`,
       caseNumber,
@@ -218,10 +234,22 @@ const CaseView: React.FC = () => {
       priority: newCaseData.priority,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      assignedTo: 'Analyst Team',
+      assignedTo: selectedAssignee?.name || 'Analyst Team',
+      assigneeId: selectedAssignee?.id || null,
+      assignee: selectedAssignee || null,
       estimatedLoss: newCaseData.estimatedLoss ? parseInt(newCaseData.estimatedLoss) : undefined,
       description: newCaseData.description,
     };
+
+    // If an assignee was selected, persist the assignment
+    if (selectedAssignee) {
+      try {
+        await assignCase(newCase.id, selectedAssignee.id);
+      } catch (err) {
+        console.error('Failed to assign case:', err);
+      }
+    }
+
     setCases((prev) => [newCase, ...prev]);
     setNewCaseOpen(false);
     setNewCaseData({
@@ -232,7 +260,42 @@ const CaseView: React.FC = () => {
       priority: 'Medium',
       description: '',
       estimatedLoss: '',
+      assigneeId: '',
     });
+  };
+
+  const handleAssigneeChange = async (caseId: string, assigneeId: string) => {
+    try {
+      const result = await assignCase(caseId, assigneeId);
+      setCases((prev) =>
+        prev.map((c) =>
+          c.id === caseId
+            ? {
+                ...c,
+                assignedTo: result.assignee.name,
+                assigneeId: result.assignee.id,
+                assignee: result.assignee,
+                updatedAt: new Date().toISOString(),
+              }
+            : c
+        )
+      );
+      // Update selected case if it's currently open
+      if (selectedCase?.id === caseId) {
+        setSelectedCase((prev) =>
+          prev
+            ? {
+                ...prev,
+                assignedTo: result.assignee.name,
+                assigneeId: result.assignee.id,
+                assignee: result.assignee,
+              }
+            : null
+        );
+      }
+    } catch (err) {
+      console.error('Failed to change assignee:', err);
+    }
   };
 
   const CaseCard: React.FC<{ caseData: CaseData }> = ({ caseData }) => (
@@ -561,7 +624,7 @@ const CaseView: React.FC = () => {
             <DialogContent sx={{ mt: 2 }}>
               <Stack spacing={3}>
                 {/* Location & Details */}
-                <Stack direction="row" spacing={4}>
+                <Stack direction="row" spacing={4} flexWrap="wrap" useFlexGap>
                   <Box>
                     <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                       LOCATION
@@ -570,13 +633,55 @@ const CaseView: React.FC = () => {
                       {selectedCase.neighborhood}, {selectedCase.city}, {selectedCase.state}
                     </Typography>
                   </Box>
-                  <Box>
-                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                  <Box sx={{ minWidth: 180 }}>
+                    <Typography
+                      variant="caption"
+                      sx={{ color: 'text.secondary', display: 'block', mb: 0.5 }}
+                    >
                       ASSIGNED TO
                     </Typography>
-                    <Typography variant="body1" sx={{ color: 'text.primary' }}>
-                      {selectedCase.assignedTo || 'Unassigned'}
-                    </Typography>
+                    {assignees.length > 0 ? (
+                      <TextField
+                        select
+                        size="small"
+                        value={
+                          selectedCase.assigneeId ||
+                          assignees.find((a) => a.name === 'Analyst Team')?.id ||
+                          assignees[0]?.id ||
+                          ''
+                        }
+                        onChange={(e) => handleAssigneeChange(selectedCase.id, e.target.value)}
+                        fullWidth
+                        sx={{
+                          '& .MuiSelect-select': {
+                            py: 0.75,
+                            fontSize: '0.875rem',
+                          },
+                        }}
+                      >
+                        {assignees.map((assignee) => (
+                          <MenuItem key={assignee.id} value={assignee.id}>
+                            <Stack direction="row" alignItems="center" spacing={1}>
+                              <Avatar
+                                sx={{
+                                  width: 20,
+                                  height: 20,
+                                  fontSize: '0.7rem',
+                                  bgcolor: theme.palette.accent.blue,
+                                }}
+                              >
+                                {assignee.name.charAt(0)}
+                              </Avatar>
+                              <Typography variant="body2">{assignee.name}</Typography>
+                            </Stack>
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                    ) : (
+                      <Typography variant="body1" sx={{ color: 'text.primary' }}>
+                        {selectedCase.assignedTo || 'Unassigned'}
+                      </Typography>
+                    )}
                   </Box>
                   <Box>
                     <Typography variant="caption" sx={{ color: 'text.secondary' }}>
@@ -815,15 +920,51 @@ const CaseView: React.FC = () => {
                 <MenuItem value="Critical">Critical</MenuItem>
               </TextField>
             </Stack>
-            <TextField
-              label="Estimated Loss ($)"
-              fullWidth
-              value={newCaseData.estimatedLoss}
-              onChange={(e) => setNewCaseData({ ...newCaseData, estimatedLoss: e.target.value })}
-              placeholder="e.g., 15000"
-              size="small"
-              type="number"
-            />
+            <Stack direction="row" spacing={2}>
+              <TextField
+                label="Estimated Loss ($)"
+                fullWidth
+                value={newCaseData.estimatedLoss}
+                onChange={(e) => setNewCaseData({ ...newCaseData, estimatedLoss: e.target.value })}
+                placeholder="e.g., 15000"
+                size="small"
+                type="number"
+              />
+              <TextField
+                select
+                label="Assign To"
+                fullWidth
+                value={newCaseData.assigneeId}
+                onChange={(e) => setNewCaseData({ ...newCaseData, assigneeId: e.target.value })}
+                size="small"
+              >
+                <MenuItem value="">
+                  <em>Analyst Team (Default)</em>
+                </MenuItem>
+                {assignees.map((assignee) => (
+                  <MenuItem key={assignee.id} value={assignee.id}>
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                      <Avatar
+                        sx={{
+                          width: 20,
+                          height: 20,
+                          fontSize: '0.7rem',
+                          bgcolor: theme.palette.accent.blue,
+                        }}
+                      >
+                        {assignee.name.charAt(0)}
+                      </Avatar>
+                      <Box>
+                        <Typography variant="body2">{assignee.name}</Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                          {assignee.role}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Stack>
             <TextField
               label="Description"
               fullWidth

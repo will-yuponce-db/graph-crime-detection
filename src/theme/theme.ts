@@ -52,15 +52,15 @@ const getDesignTokens = (mode: PaletteMode): ThemeOptions => ({
       ? {
           // Light mode palette - Clean, professional aesthetic
           primary: {
-            main: '#f97316',
-            light: '#fb923c',
-            dark: '#ea580c',
-            contrastText: '#ffffff',
-          },
-          secondary: {
             main: '#3b82f6',
             light: '#60a5fa',
             dark: '#2563eb',
+            contrastText: '#ffffff',
+          },
+          secondary: {
+            main: '#f97316',
+            light: '#fb923c',
+            dark: '#ea580c',
           },
           background: {
             default: '#f8fafc',
@@ -93,15 +93,15 @@ const getDesignTokens = (mode: PaletteMode): ThemeOptions => ({
       : {
           // Dark mode palette - Sleek, modern dark aesthetic
           primary: {
-            main: '#f97316',
-            light: '#fb923c',
-            dark: '#ea580c',
-            contrastText: '#000000',
-          },
-          secondary: {
             main: '#3b82f6',
             light: '#60a5fa',
             dark: '#2563eb',
+            contrastText: '#ffffff',
+          },
+          secondary: {
+            main: '#f97316',
+            light: '#fb923c',
+            dark: '#ea580c',
           },
           background: {
             default: '#09090b',

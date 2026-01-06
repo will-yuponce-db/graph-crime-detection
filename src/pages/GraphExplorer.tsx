@@ -21,6 +21,7 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Tooltip,
+  TextField,
 } from '@mui/material';
 import {
   Hub,
@@ -35,10 +36,19 @@ import {
   People,
   Call,
   Place,
+  Edit,
+  Check,
+  Undo,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import ForceGraph2D from 'react-force-graph-2d';
-import { fetchGraphData, fetchSuspects, USE_DATABRICKS } from '../services/api';
+import {
+  fetchGraphData,
+  fetchSuspects,
+  USE_DATABRICKS,
+  setEntityTitle,
+  deleteEntityTitle,
+} from '../services/api';
 
 interface GraphNode {
   id: string;
@@ -69,6 +79,9 @@ interface GraphLink {
 interface Suspect {
   id: string;
   name: string;
+  originalName?: string;
+  customTitle?: string | null;
+  hasCustomTitle?: boolean;
   alias: string | null;
   threatLevel: string;
   criminalHistory: string | null;
@@ -96,6 +109,10 @@ const GraphExplorer: React.FC = () => {
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileSuspect, setProfileSuspect] = useState<Suspect | null>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+
+  // Entity title editing state
+  const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
 
   // Edge visibility toggles
   const [visibleEdges, setVisibleEdges] = useState<string[]>(['colocation', 'social', 'location']);
@@ -177,6 +194,87 @@ const GraphExplorer: React.FC = () => {
     setProfileOpen(true);
   }, []);
 
+  // Start editing entity title
+  const handleStartEditTitle = useCallback((suspect: Suspect, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingEntityId(suspect.id);
+    setEditingTitle(suspect.name);
+  }, []);
+
+  // Save entity title
+  const handleSaveTitle = useCallback(
+    async (suspectId: string) => {
+      if (!editingTitle.trim()) return;
+
+      try {
+        await setEntityTitle('persons', suspectId, editingTitle.trim());
+
+        // Update local state
+        setSuspects((prev) =>
+          prev.map((s) =>
+            s.id === suspectId
+              ? {
+                  ...s,
+                  name: editingTitle.trim(),
+                  customTitle: editingTitle.trim(),
+                  hasCustomTitle: true,
+                }
+              : s
+          )
+        );
+
+        // Update graph data node names
+        setGraphData((prev) => ({
+          ...prev,
+          nodes: prev.nodes.map((n) =>
+            n.id === suspectId ? { ...n, name: editingTitle.trim() } : n
+          ),
+        }));
+
+        setEditingEntityId(null);
+        setEditingTitle('');
+      } catch (err) {
+        console.error('Failed to save entity title:', err);
+      }
+    },
+    [editingTitle]
+  );
+
+  // Reset entity title to original
+  const handleResetTitle = useCallback(async (suspect: Suspect, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    if (!suspect.hasCustomTitle) return;
+
+    try {
+      await deleteEntityTitle('persons', suspect.id);
+
+      // Update local state
+      const originalName = suspect.originalName || `Entity ${suspect.id}`;
+      setSuspects((prev) =>
+        prev.map((s) =>
+          s.id === suspect.id
+            ? { ...s, name: originalName, customTitle: null, hasCustomTitle: false }
+            : s
+        )
+      );
+
+      // Update graph data node names
+      setGraphData((prev) => ({
+        ...prev,
+        nodes: prev.nodes.map((n) => (n.id === suspect.id ? { ...n, name: originalName } : n)),
+      }));
+    } catch (err) {
+      console.error('Failed to reset entity title:', err);
+    }
+  }, []);
+
+  // Cancel editing
+  const handleCancelEdit = useCallback(() => {
+    setEditingEntityId(null);
+    setEditingTitle('');
+  }, []);
+
   // Cleanup timeout on unmount
   useEffect(() => {
     return () => {
@@ -230,6 +328,9 @@ const GraphExplorer: React.FC = () => {
           suspectsData.map((p) => ({
             id: p.id,
             name: p.name,
+            originalName: p.originalName || p.name,
+            customTitle: p.customTitle,
+            hasCustomTitle: p.hasCustomTitle || false,
             alias: p.alias,
             threatLevel: p.threatLevel || 'Unknown',
             criminalHistory: p.criminalHistory,
@@ -392,7 +493,7 @@ const GraphExplorer: React.FC = () => {
           type: link.type,
           edgeCategory,
           color: isCoLocated ? '#fbbf24' : isSocial ? '#a78bfa' : '#3b82f640',
-          width: isCoLocated ? 3 : isSocial ? 2 : 1,
+          width: isCoLocated ? 9 : isSocial ? 6 : 3,
           count: isCoLocated ? link.count : undefined,
           curvature: isSocial ? 0.25 : 0,
         });
@@ -414,7 +515,7 @@ const GraphExplorer: React.FC = () => {
             type: 'CO_LOCATED',
             edgeCategory: 'colocation',
             color: '#fbbf24',
-            width: 3,
+            width: 9,
             count: Math.floor(Math.random() * 8) + 3, // Random co-location count 3-10
           });
         }
@@ -443,7 +544,7 @@ const GraphExplorer: React.FC = () => {
             type: 'DETECTED',
             edgeCategory: 'location',
             color: `${loc.color}40`,
-            width: 1,
+            width: 3,
             curvature: 0,
           });
         });
@@ -1319,15 +1420,15 @@ const GraphExplorer: React.FC = () => {
           {suspects.map((s, i) => (
             <Card
               key={s.id}
-              onClick={() => handleCardClick(s.id)}
-              onDoubleClick={() => handleCardDoubleClick(s)}
+              onClick={() => editingEntityId !== s.id && handleCardClick(s.id)}
+              onDoubleClick={() => editingEntityId !== s.id && handleCardDoubleClick(s)}
               sx={{
                 mt: 1.5,
                 bgcolor:
                   selectedSuspect === s.id ? `${theme.palette.accent.red}10` : 'background.default',
                 border: 1,
                 borderColor: selectedSuspect === s.id ? theme.palette.accent.red : 'border.main',
-                cursor: 'pointer',
+                cursor: editingEntityId === s.id ? 'default' : 'pointer',
                 transition: 'all 0.2s ease',
                 '&:hover': { borderColor: theme.palette.accent.red },
               }}
@@ -1346,19 +1447,94 @@ const GraphExplorer: React.FC = () => {
                     {i + 1}
                   </Avatar>
                   <Box sx={{ flex: 1 }}>
-                    <Typography
-                      variant="body2"
-                      sx={{ color: 'text.primary', fontWeight: 600, fontSize: '0.85rem' }}
-                    >
-                      {s.name}
-                    </Typography>
-                    {s.alias && (
+                    {editingEntityId === s.id ? (
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <TextField
+                          size="small"
+                          value={editingTitle}
+                          onChange={(e) => setEditingTitle(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveTitle(s.id);
+                            if (e.key === 'Escape') handleCancelEdit();
+                          }}
+                          autoFocus
+                          sx={{
+                            flex: 1,
+                            '& .MuiInputBase-input': { fontSize: '0.85rem', py: 0.5 },
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <IconButton
+                          size="small"
+                          onClick={() => handleSaveTitle(s.id)}
+                          sx={{ color: theme.palette.accent.green }}
+                        >
+                          <Check sx={{ fontSize: 16 }} />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          onClick={handleCancelEdit}
+                          sx={{ color: 'text.secondary' }}
+                        >
+                          <Close sx={{ fontSize: 16 }} />
+                        </IconButton>
+                      </Stack>
+                    ) : (
+                      <Stack direction="row" alignItems="center" spacing={0.5}>
+                        <Typography
+                          variant="body2"
+                          sx={{ color: 'text.primary', fontWeight: 600, fontSize: '0.85rem' }}
+                        >
+                          {s.name}
+                        </Typography>
+                        {s.hasCustomTitle && (
+                          <Chip
+                            label="edited"
+                            size="small"
+                            sx={{
+                              height: 14,
+                              fontSize: '0.55rem',
+                              bgcolor: `${theme.palette.accent.purple}20`,
+                              color: theme.palette.accent.purple,
+                            }}
+                          />
+                        )}
+                        <Tooltip title="Edit name">
+                          <IconButton
+                            size="small"
+                            onClick={(e) => handleStartEditTitle(s, e)}
+                            sx={{
+                              ml: 'auto',
+                              opacity: 0.5,
+                              '&:hover': { opacity: 1, color: theme.palette.accent.orange },
+                            }}
+                          >
+                            <Edit sx={{ fontSize: 14 }} />
+                          </IconButton>
+                        </Tooltip>
+                        {s.hasCustomTitle && (
+                          <Tooltip title="Reset to original name">
+                            <IconButton
+                              size="small"
+                              onClick={(e) => handleResetTitle(s, e)}
+                              sx={{
+                                opacity: 0.5,
+                                '&:hover': { opacity: 1, color: theme.palette.accent.red },
+                              }}
+                            >
+                              <Undo sx={{ fontSize: 14 }} />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                      </Stack>
+                    )}
+                    {s.alias && editingEntityId !== s.id && (
                       <Typography variant="caption" sx={{ color: theme.palette.accent.orange }}>
                         "{s.alias}"
                       </Typography>
                     )}
                   </Box>
-                  {s.totalScore && (
+                  {s.totalScore && editingEntityId !== s.id && (
                     <Chip
                       label={s.totalScore.toFixed(1)}
                       size="small"

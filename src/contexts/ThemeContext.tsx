@@ -27,7 +27,7 @@ interface ThemeContextProviderProps {
 }
 
 export const ThemeContextProvider: React.FC<ThemeContextProviderProps> = ({ children }) => {
-  const [mode, setMode] = useState<ThemeMode>('light');
+  const [mode, setMode] = useState<ThemeMode>('dark');
 
   const toggleTheme = () => {
     setMode((prevMode) => (prevMode === 'light' ? 'dark' : 'light'));
