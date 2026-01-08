@@ -143,7 +143,11 @@ const GraphExplorer: React.FC = () => {
   const [visibleEdges, setVisibleEdges] = useState<string[]>(['colocation', 'social', 'location']);
 
   // Node visibility toggles
-  const [visibleNodes, setVisibleNodes] = useState<string[]>(['suspects', 'locations']);
+  const [visibleNodes, setVisibleNodes] = useState<string[]>([
+    'suspects',
+    'associates',
+    'locations',
+  ]);
 
   // Track zoom level for label scaling (use ref to avoid re-renders)
   const zoomLevelRef = useRef(1);
@@ -257,6 +261,9 @@ const GraphExplorer: React.FC = () => {
     const filteredNodes = cityFilteredNodes.filter((node) => {
       if (node.type === 'person' && node.isSuspect) {
         return visibleNodes.includes('suspects');
+      }
+      if (node.type === 'person' && !node.isSuspect) {
+        return visibleNodes.includes('associates');
       }
       if (node.type === 'location') {
         return visibleNodes.includes('locations');
@@ -507,8 +514,9 @@ const GraphExplorer: React.FC = () => {
     const cx = 0,
       cy = 0;
 
-    // Find suspects from API data
+    // Find all person types from API data
     const suspectNodes = apiData.nodes?.filter((n) => n.type === 'person' && n.isSuspect) || [];
+    const associateNodes = apiData.nodes?.filter((n) => n.type === 'person' && !n.isSuspect) || [];
     const locationNodes = apiData.nodes?.filter((n) => n.type === 'location') || [];
 
     // Add ALL suspects with positions in expanding rings
@@ -571,12 +579,46 @@ const GraphExplorer: React.FC = () => {
       );
     }
 
+    // Add associates (non-suspect persons) in rings between suspects and locations
+    const suspectRings = Math.ceil(suspectNodes.length / 12);
+    const associateBaseRadius = 80 + suspectRings * 60 + 40; // Start just outside suspect rings
+
+    if (associateNodes.length > 0) {
+      const associatesPerRing = 14;
+      associateNodes.forEach((assoc, i) => {
+        const ringIndex = Math.floor(i / associatesPerRing);
+        const posInRing = i % associatesPerRing;
+        const ringCount = Math.min(
+          associatesPerRing,
+          associateNodes.length - ringIndex * associatesPerRing
+        );
+        const angle = (posInRing / ringCount) * Math.PI * 2 + Math.PI / 14; // Offset from suspects
+        const radius = associateBaseRadius + ringIndex * 50;
+
+        nodes.push({
+          id: assoc.id,
+          name: assoc.name,
+          alias: assoc.alias || assoc.id.slice(-4),
+          type: 'person',
+          color: '#6b7280', // Gray for non-suspects
+          size: 5,
+          isSuspect: false,
+          linkedCities: assoc.linkedCities,
+          fx: cx + Math.cos(angle) * radius,
+          fy: cy + Math.sin(angle) * radius,
+        });
+      });
+    }
+
+    // Calculate where locations should start (after associates)
+    const associateRings = Math.ceil(associateNodes.length / 14);
+    const locationBaseRadius = associateBaseRadius + associateRings * 50 + 60;
+
     // Use API location nodes or fallback to defaults
     if (locationNodes.length > 0) {
-      // Position ALL location nodes in outer rings around suspects
+      // Position ALL location nodes in outer rings around suspects and associates
       const locsPerRing = 16;
-      const suspectRings = Math.ceil(suspectNodes.length / 12);
-      const baseRadius = 80 + suspectRings * 60 + 80; // Start outside suspect rings
+      const baseRadius = locationBaseRadius;
 
       locationNodes.forEach((loc, i) => {
         const ringIndex = Math.floor(i / locsPerRing);
@@ -896,29 +938,35 @@ const GraphExplorer: React.FC = () => {
             }
 
             if (n.type === 'person') {
-              // Main node - simple solid fill
+              // Main node - different colors for suspects vs associates
               ctx.beginPath();
               ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
-              ctx.fillStyle = '#dc2626';
+              ctx.fillStyle = n.isSuspect ? '#dc2626' : '#6b7280'; // Red for suspects, gray for associates
               ctx.fill();
 
-              // Highlight ring for suspects
-              if (n.isSuspect) {
-                ctx.strokeStyle = isSelected
-                  ? 'rgba(255, 255, 255, 0.95)'
-                  : isHovered
-                    ? 'rgba(255, 255, 255, 0.8)'
-                    : 'rgba(255, 255, 255, 0.5)';
-                ctx.lineWidth = isSelected ? 2.5 : isHovered ? 2 : 1.5;
-                ctx.stroke();
-              }
+              // Highlight ring
+              ctx.strokeStyle = isSelected
+                ? 'rgba(255, 255, 255, 0.95)'
+                : isHovered
+                  ? 'rgba(255, 255, 255, 0.8)'
+                  : n.isSuspect
+                    ? 'rgba(255, 255, 255, 0.5)'
+                    : 'rgba(255, 255, 255, 0.3)';
+              ctx.lineWidth = isSelected ? 2.5 : isHovered ? 2 : 1;
+              ctx.stroke();
 
               // Label - scale font size inversely with zoom for consistent screen size
-              const labelFontSize = Math.max(8, Math.min(14, 11 / zoom));
-              ctx.font = `bold ${labelFontSize}px "SF Pro Display", "Segoe UI", system-ui, sans-serif`;
+              const labelFontSize = Math.max(8, Math.min(14, (n.isSuspect ? 11 : 9) / zoom));
+              ctx.font = `${n.isSuspect ? 'bold' : '500'} ${labelFontSize}px "SF Pro Display", "Segoe UI", system-ui, sans-serif`;
               ctx.textAlign = 'center';
               ctx.textBaseline = 'top';
-              ctx.fillStyle = theme.palette.mode === 'dark' ? '#fff' : '#1a1a2e';
+              ctx.fillStyle = n.isSuspect
+                ? theme.palette.mode === 'dark'
+                  ? '#fff'
+                  : '#1a1a2e'
+                : theme.palette.mode === 'dark'
+                  ? '#9ca3af'
+                  : '#6b7280';
               ctx.fillText(n.alias || n.name, node.x, node.y + r + 8 / zoom);
             } else {
               // Location nodes - hexagonal
@@ -1184,6 +1232,21 @@ const GraphExplorer: React.FC = () => {
                     Suspects
                   </ToggleButton>
                 </Tooltip>
+                <Tooltip title="Show/Hide Associates (non-suspects linked to network)">
+                  <ToggleButton
+                    value="associates"
+                    sx={{
+                      '&.Mui-selected': {
+                        bgcolor: 'rgba(107, 114, 128, 0.2)',
+                        color: '#9ca3af',
+                        '&:hover': { bgcolor: 'rgba(107, 114, 128, 0.3)' },
+                      },
+                    }}
+                  >
+                    <People sx={{ fontSize: 16, mr: 0.5 }} />
+                    Associates
+                  </ToggleButton>
+                </Tooltip>
                 <Tooltip title="Show/Hide Locations">
                   <ToggleButton
                     value="locations"
@@ -1367,12 +1430,26 @@ const GraphExplorer: React.FC = () => {
                   width: 14,
                   height: 14,
                   borderRadius: '50%',
-                  background: 'linear-gradient(135deg, #ff6b6b 0%, #dc2626 100%)',
-                  border: '2px solid rgba(255,255,255,0.6)',
+                  bgcolor: '#dc2626',
+                  border: '2px solid rgba(255,255,255,0.5)',
                 }}
               />
               <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 500 }}>
                 Suspect
+              </Typography>
+            </Stack>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Box
+                sx={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: '50%',
+                  bgcolor: '#6b7280',
+                  border: '1px solid rgba(255,255,255,0.3)',
+                }}
+              />
+              <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 500 }}>
+                Associate
               </Typography>
             </Stack>
             <Stack direction="row" alignItems="center" spacing={1}>
