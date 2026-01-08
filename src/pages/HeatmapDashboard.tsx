@@ -766,12 +766,12 @@ const HeatmapDashboard: React.FC = () => {
               <CircleMarker
                 key={d.deviceId}
                 center={[d.lat, d.lng]}
-                radius={d.isSuspect ? 6 : 4}
+                radius={d.isSuspect ? 6 : 5}
                 pathOptions={{
-                  color: d.isSuspect ? '#ef4444' : '#3b82f6',
-                  fillColor: d.isSuspect ? '#ef4444' : '#3b82f6',
+                  color: d.isSuspect ? '#ef4444' : '#6b7280',
+                  fillColor: d.isSuspect ? '#ef4444' : '#6b7280',
                   fillOpacity: 0.8,
-                  weight: d.isSuspect ? 2 : 1,
+                  weight: d.isSuspect ? 2 : 1.5,
                 }}
               >
                 <Tooltip direction="top" offset={[0, -5]} opacity={0.95}>
@@ -787,10 +787,10 @@ const HeatmapDashboard: React.FC = () => {
                         fontWeight: 700,
                         fontSize: '13px',
                         marginBottom: '4px',
-                        color: d.isSuspect ? '#ef4444' : '#3b82f6',
+                        color: d.isSuspect ? '#ef4444' : '#6b7280',
                       }}
                     >
-                      {d.isSuspect ? '⚠️ SUSPECT' : '📱 Device'}
+                      {d.isSuspect ? '⚠️ SUSPECT' : '👤 Associate'}
                     </div>
                     <div style={{ fontWeight: 600, fontSize: '12px', marginBottom: '2px' }}>
                       {d.ownerAlias ? `"${d.ownerAlias}"` : d.ownerName || 'Unknown'}
@@ -2368,17 +2368,17 @@ const HeatmapDashboard: React.FC = () => {
                   })}
               </Stack>
 
-              {/* Other Devices */}
+              {/* Associates */}
               <Typography
                 variant="overline"
                 sx={{
-                  color: theme.palette.accent.blue,
+                  color: '#9ca3af',
                   fontSize: '0.6rem',
                   mb: 1,
                   display: 'block',
                 }}
               >
-                Other Devices ({filteredPositions.filter((d) => !d.isSuspect).length})
+                Associates ({filteredPositions.filter((d) => !d.isSuspect).length})
               </Typography>
               <Stack spacing={0.5}>
                 {filteredPositions
@@ -2390,15 +2390,13 @@ const HeatmapDashboard: React.FC = () => {
                       sx={{
                         bgcolor:
                           selectedDevice?.deviceId === d.deviceId
-                            ? `${theme.palette.accent.blue}15`
+                            ? 'rgba(107, 114, 128, 0.15)'
                             : 'background.default',
                         border: 1,
                         borderColor:
-                          selectedDevice?.deviceId === d.deviceId
-                            ? theme.palette.accent.blue
-                            : 'border.main',
+                          selectedDevice?.deviceId === d.deviceId ? '#6b7280' : 'border.main',
                         cursor: 'pointer',
-                        '&:hover': { borderColor: theme.palette.accent.blue },
+                        '&:hover': { borderColor: '#6b7280' },
                       }}
                       onClick={() => {
                         setSelectedDevice(d);
@@ -2413,7 +2411,7 @@ const HeatmapDashboard: React.FC = () => {
                               width: 6,
                               height: 6,
                               borderRadius: '50%',
-                              bgcolor: theme.palette.accent.blue,
+                              bgcolor: '#6b7280',
                             }}
                           />
                           <Box sx={{ flex: 1 }}>

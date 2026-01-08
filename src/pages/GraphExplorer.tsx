@@ -91,6 +91,7 @@ interface Suspect {
   device?: string;
   linkedCities?: string[];
   totalScore?: number;
+  isSuspect?: boolean;
 }
 
 const GraphExplorer: React.FC = () => {
@@ -466,7 +467,7 @@ const GraphExplorer: React.FC = () => {
           },
         });
 
-        // Map suspects to expected format
+        // Map all persons to expected format (includes suspects and associates)
         setSuspects(
           suspectsData.map((p) => ({
             id: p.id,
@@ -480,6 +481,7 @@ const GraphExplorer: React.FC = () => {
             device: 'Device ' + p.id.slice(-4),
             linkedCities: p.linkedCities,
             totalScore: p.totalScore,
+            isSuspect: p.isSuspect !== false, // Default to true for backwards compat
           }))
         );
 
@@ -1766,18 +1768,20 @@ const GraphExplorer: React.FC = () => {
           </Box>
         </Box>
 
-        {/* Suspects */}
+        {/* Suspects & Associates */}
         <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
           <Typography
             variant="overline"
-            sx={{ color: 'text.secondary', letterSpacing: 2, fontSize: '0.65rem' }}
+            sx={{ color: theme.palette.accent.red, letterSpacing: 2, fontSize: '0.65rem' }}
           >
-            SUSPECTS
+            SUSPECTS ({suspects.filter((s) => s.isSuspect !== false).length})
           </Typography>
 
           {(cityFilter
-            ? suspects.filter((s) => (s.linkedCities || []).includes(cityFilter))
-            : suspects
+            ? suspects.filter(
+                (s) => s.isSuspect !== false && (s.linkedCities || []).includes(cityFilter)
+              )
+            : suspects.filter((s) => s.isSuspect !== false)
           ).map((s, i) => (
             <Card
               key={s.id}
@@ -1953,6 +1957,95 @@ const GraphExplorer: React.FC = () => {
               </CardContent>
             </Card>
           ))}
+
+          {/* Associates Section */}
+          {suspects.filter((s) => s.isSuspect === false).length > 0 && (
+            <>
+              <Typography
+                variant="overline"
+                sx={{
+                  color: '#9ca3af',
+                  letterSpacing: 2,
+                  fontSize: '0.65rem',
+                  mt: 3,
+                  display: 'block',
+                }}
+              >
+                ASSOCIATES ({suspects.filter((s) => s.isSuspect === false).length})
+              </Typography>
+
+              {(cityFilter
+                ? suspects.filter(
+                    (s) => s.isSuspect === false && (s.linkedCities || []).includes(cityFilter)
+                  )
+                : suspects.filter((s) => s.isSuspect === false)
+              )
+                .slice(0, 20)
+                .map((s, i) => (
+                  <Card
+                    key={s.id}
+                    onClick={(e) => {
+                      const multi = e.shiftKey || e.metaKey || e.ctrlKey;
+                      if (multi) {
+                        e.stopPropagation();
+                        toggleColocationEntity(s.id);
+                        return;
+                      }
+                      handleCardClick(s.id);
+                    }}
+                    sx={{
+                      mt: 1,
+                      bgcolor:
+                        selectedSuspect === s.id
+                          ? 'rgba(107, 114, 128, 0.1)'
+                          : 'background.default',
+                      border: 1,
+                      borderColor: selectedSuspect === s.id ? '#6b7280' : 'border.main',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      '&:hover': { borderColor: '#6b7280' },
+                    }}
+                  >
+                    <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
+                      <Stack direction="row" alignItems="center" spacing={1.5}>
+                        <Avatar
+                          sx={{
+                            bgcolor: '#6b7280',
+                            width: 28,
+                            height: 28,
+                            fontSize: 10,
+                            fontWeight: 600,
+                          }}
+                        >
+                          {i + 1}
+                        </Avatar>
+                        <Box sx={{ flex: 1 }}>
+                          <Typography
+                            variant="body2"
+                            sx={{ color: 'text.primary', fontWeight: 500, fontSize: '0.8rem' }}
+                          >
+                            {s.name}
+                          </Typography>
+                          {s.alias && (
+                            <Typography variant="caption" sx={{ color: '#9ca3af' }}>
+                              "{s.alias}"
+                            </Typography>
+                          )}
+                        </Box>
+                      </Stack>
+                      {s.linkedCities && s.linkedCities.length > 0 && (
+                        <Typography
+                          variant="caption"
+                          sx={{ color: '#9ca3af', fontSize: '0.6rem', display: 'block', mt: 0.5 }}
+                        >
+                          📍 {s.linkedCities.join(', ')}
+                        </Typography>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+            </>
+          )}
 
           {showBurner && (
             <Alert
