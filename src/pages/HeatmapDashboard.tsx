@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Paper,
@@ -27,6 +27,8 @@ import {
   Tabs,
   Tab,
   Tooltip as MuiTooltip,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import {
   PlayArrow,
@@ -66,10 +68,12 @@ import {
   Marker,
   Popup,
   Tooltip,
+  Polygon,
   useMap,
 } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { cellToBoundary, latLngToCell } from 'h3-js';
 import {
   fetchConfig,
   fetchPositions,
@@ -82,6 +86,7 @@ import {
   type Suspect,
   type Relationship,
 } from '../services/api';
+import HandoffAlerts from '../components/HandoffAlerts';
 
 // Types
 interface CellTower {
@@ -180,6 +185,7 @@ const HeatmapDashboard: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1); // 0.5x, 1x, 2x, 5x
   const [showDevices, setShowDevices] = useState(true);
+  const [showHexHeatmap, setShowHexHeatmap] = useState(true);
   const [mapCenter, setMapCenter] = useState<[number, number]>([38.9076, -77.0723]);
   const [mapZoom, setMapZoom] = useState(13);
   const [cityFilterParam, setCityFilterParam] = useState<string | null>(null);
@@ -215,6 +221,81 @@ const HeatmapDashboard: React.FC = () => {
   }, []);
 
   const getHotspotKey = useCallback((hs: Hotspot) => `${hs.towerId}|${hs.city}`, []);
+
+  // Fallback radius for connectedness (meters)
+  const CONNECTED_RADIUS_M = 150;
+
+  const haversineMeters = useCallback((lat1: number, lng1: number, lat2: number, lng2: number) => {
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const R = 6371000; // meters
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }, []);
+
+  // Build fast lookups for tower coordinates
+  const towerById = useMemo(() => {
+    const m = new Map<string, CellTower>();
+    for (const t of towers) m.set(t.id, t);
+    return m;
+  }, [towers]);
+
+  // Connected device count per hotspot (hybrid: towerId match + within-radius fallback)
+  const connectedCountByHotspotKey = useMemo(() => {
+    const deviceIdsByKey = new Map<string, Set<string>>();
+    const hotspotByTowerId = new Map<string, Hotspot[]>();
+
+    for (const hs of hotspots) {
+      const key = getHotspotKey(hs);
+      deviceIdsByKey.set(key, new Set());
+      const list = hotspotByTowerId.get(hs.towerId) || [];
+      list.push(hs);
+      hotspotByTowerId.set(hs.towerId, list);
+    }
+
+    for (const p of positions) {
+      let matchedByTowerId = false;
+      // Primary: towerId match
+      if (p.towerId) {
+        const hsList = hotspotByTowerId.get(p.towerId);
+        if (hsList && hsList.length > 0) {
+          matchedByTowerId = true;
+          for (const hs of hsList) {
+            deviceIdsByKey.get(getHotspotKey(hs))?.add(p.deviceId);
+          }
+        }
+      }
+
+      // Fallback: within radius of hotspot tower coordinates
+      if (!matchedByTowerId) {
+        for (const hs of hotspots) {
+          const tower = towerById.get(hs.towerId);
+          if (!tower) continue;
+          const d = haversineMeters(p.lat, p.lng, tower.latitude, tower.longitude);
+          if (d <= CONNECTED_RADIUS_M) {
+            deviceIdsByKey.get(getHotspotKey(hs))?.add(p.deviceId);
+          }
+        }
+      }
+    }
+
+    const out: Record<string, number> = {};
+    for (const [k, set] of deviceIdsByKey.entries()) out[k] = set.size;
+    return out;
+  }, [positions, hotspots, towerById, getHotspotKey, haversineMeters]);
+
+  const getConnectedCount = useCallback(
+    (hs: Hotspot) => {
+      const key = getHotspotKey(hs);
+      const v = connectedCountByHotspotKey[key];
+      return typeof v === 'number' ? v : hs.deviceCount;
+    },
+    [connectedCountByHotspotKey, getHotspotKey]
+  );
 
   // Derived selected hotspot (stable even when list is filtered/sorted)
   const selectedHotspot = selectedHotspotKey
@@ -315,6 +396,50 @@ const HeatmapDashboard: React.FC = () => {
   const hourFetchAbortRef = useRef<AbortController | null>(null);
   const isScrubbingRef = useRef(false);
 
+  // (Removed) Hotspot ring pulse/delta tracking: hex heatmap defines hotspots now.
+
+  // Per-hour activity by H3 cell (compute from actual lat/lng, resolution 9)
+  const activityByCell = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of positions) {
+      if (!Number.isFinite(p.lat) || !Number.isFinite(p.lng)) continue;
+      try {
+        const cell = latLngToCell(p.lat, p.lng, 9); // resolution 9
+        m.set(cell, (m.get(cell) || 0) + 1);
+      } catch {
+        // skip invalid coords
+      }
+    }
+    return m;
+  }, [positions]);
+
+  const topActiveCells = useMemo(() => {
+    const entries = Array.from(activityByCell.entries());
+    entries.sort((a, b) => b[1] - a[1]);
+    return entries.slice(0, 250);
+  }, [activityByCell]);
+
+  const maxCellActivity = useMemo(() => {
+    let max = 0;
+    for (const [, count] of topActiveCells) max = Math.max(max, count);
+    return max || 1;
+  }, [topActiveCells]);
+
+  const hexPolygons = useMemo(() => {
+    return topActiveCells
+      .map(([cell, count]) => {
+        try {
+          // geoJson=true => [lng, lat] coordinates
+          const boundary = cellToBoundary(cell, true);
+          const latLngs = boundary.map(([lng, lat]) => [lat, lng] as [number, number]);
+          return { cell, count, latLngs };
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean) as Array<{ cell: string; count: number; latLngs: [number, number][] }>;
+  }, [topActiveCells]);
+
   // Map navigation functions
   const PAN_AMOUNT = 0.02; // Degrees to pan
   const panMap = (direction: 'up' | 'down' | 'left' | 'right') => {
@@ -376,7 +501,8 @@ const HeatmapDashboard: React.FC = () => {
     loadAllData();
   }, []);
 
-  // Fetch positions and hotspots when hour changes
+  // Fetch positions and hotspots for the committed hour.
+  // Scrubbing uses `scrubHour` (UI-only) so it won't spam fetches while dragging.
   useEffect(() => {
     const loadData = async () => {
       // Cancel any in-flight hour fetch so stale responses can't "win"
@@ -581,6 +707,36 @@ const HeatmapDashboard: React.FC = () => {
           <TileLayer url={mapTileUrl} />
           <MapController center={mapCenter} zoom={mapZoom} />
 
+          {/* Hex heatmap (H3) */}
+          {showHexHeatmap &&
+            hexPolygons.map(({ cell, count, latLngs }) => {
+              const intensity = Math.min(1, Math.max(0, count / maxCellActivity));
+              // Red scale: more devices = redder/more opaque
+              const fillOpacity = 0.15 + intensity * 0.45; // 0.15 → 0.60
+              const strokeOpacity = 0.3 + intensity * 0.5; // 0.30 → 0.80
+              return (
+                <Polygon
+                  key={cell}
+                  positions={latLngs}
+                  pathOptions={{
+                    color: `rgba(239, 68, 68, ${strokeOpacity})`,
+                    weight: 1.5,
+                    fillColor: `rgba(239, 68, 68, ${fillOpacity})`,
+                    fillOpacity: 1,
+                  }}
+                >
+                  <Tooltip direction="top" opacity={0.95}>
+                    <div style={{ padding: '4px 8px', minWidth: '160px' }}>
+                      <div style={{ fontWeight: 700, fontSize: '12px', marginBottom: '4px' }}>
+                        Hex {cell.slice(-6)}
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#666' }}>Devices (hour): {count}</div>
+                    </div>
+                  </Tooltip>
+                </Polygon>
+              );
+            })}
+
           {/* Cell Towers */}
           {towers.map((tower) => (
             <React.Fragment key={tower.id}>
@@ -601,60 +757,6 @@ const HeatmapDashboard: React.FC = () => {
                   {tower.city}
                 </Popup>
               </Marker>
-            </React.Fragment>
-          ))}
-
-          {/* Hotspots - subtle ring indicators */}
-          {hotspots.map((hs, idx) => (
-            <React.Fragment key={`${hs.towerId}-${hs.city}-${idx}`}>
-              {/* Outer pulse ring for high activity */}
-              {hs.suspectCount > 0 && (
-                <CircleMarker
-                  center={[hs.lat, hs.lng]}
-                  radius={Math.min(24, 12 + hs.deviceCount * 2)}
-                  pathOptions={{
-                    color: 'rgba(239, 68, 68, 0.15)',
-                    fillColor: 'transparent',
-                    fillOpacity: 0,
-                    weight: 1,
-                    dashArray: '4, 4',
-                  }}
-                />
-              )}
-              {/* Main indicator ring */}
-              <CircleMarker
-                center={[hs.lat, hs.lng]}
-                radius={Math.min(18, 8 + hs.deviceCount * 1.5)}
-                pathOptions={{
-                  color:
-                    hs.suspectCount > 0 ? 'rgba(239, 68, 68, 0.6)' : 'rgba(100, 116, 139, 0.4)',
-                  fillColor: hs.suspectCount > 0 ? 'rgba(239, 68, 68, 0.04)' : 'transparent',
-                  fillOpacity: 1,
-                  weight: hs.suspectCount > 0 ? 1.5 : 1,
-                }}
-              >
-                <Tooltip direction="top" offset={[0, -5]} opacity={0.95}>
-                  <div style={{ padding: '4px 8px', minWidth: '120px' }}>
-                    <div style={{ fontWeight: 600, fontSize: '12px', marginBottom: '4px' }}>
-                      📡 {hs.towerName}
-                    </div>
-                    <div style={{ fontSize: '11px', color: '#666' }}>
-                      {hs.deviceCount} devices
-                      {hs.suspectCount > 0 && (
-                        <span style={{ color: '#ef4444', fontWeight: 600 }}>
-                          {' '}
-                          • {hs.suspectCount} suspects
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </Tooltip>
-                <Popup>
-                  <strong>📡 {hs.towerName}</strong>
-                  <br />
-                  {hs.deviceCount} devices{hs.suspectCount > 0 && `, ${hs.suspectCount} suspects`}
-                </Popup>
-              </CircleMarker>
             </React.Fragment>
           ))}
 
@@ -884,31 +986,52 @@ const HeatmapDashboard: React.FC = () => {
               </Box>
             </Stack>
 
-            {isKeyFrame && (
-              <Chip
-                icon={<Warning />}
-                label={
-                  casesAtCurrentHour.length > 1
-                    ? `${casesAtCurrentHour.length} CASES`
-                    : selectedCase?.caseNumber || 'KEY FRAME'
+            <Stack direction="row" alignItems="center" spacing={2}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    size="small"
+                    checked={showHexHeatmap}
+                    onChange={(e) => setShowHexHeatmap(e.target.checked)}
+                  />
                 }
-                onClick={handleCaseChipClick}
+                label="Hex heatmap"
                 sx={{
-                  bgcolor: selectedCase
-                    ? `${PRIORITY_COLORS[selectedCase.priority]}20`
-                    : `${theme.palette.accent.yellow}20`,
-                  color: selectedCase
-                    ? PRIORITY_COLORS[selectedCase.priority]
-                    : theme.palette.accent.yellow,
-                  cursor: casesAtCurrentHour.length > 1 ? 'pointer' : 'default',
-                  '& .MuiChip-icon': {
-                    color: selectedCase
-                      ? PRIORITY_COLORS[selectedCase.priority]
-                      : theme.palette.accent.yellow,
+                  m: 0,
+                  '& .MuiFormControlLabel-label': {
+                    fontSize: '0.75rem',
+                    color: 'text.secondary',
+                    userSelect: 'none',
                   },
                 }}
               />
-            )}
+
+              {isKeyFrame && (
+                <Chip
+                  icon={<Warning />}
+                  label={
+                    casesAtCurrentHour.length > 1
+                      ? `${casesAtCurrentHour.length} CASES`
+                      : selectedCase?.caseNumber || 'KEY FRAME'
+                  }
+                  onClick={handleCaseChipClick}
+                  sx={{
+                    bgcolor: selectedCase
+                      ? `${PRIORITY_COLORS[selectedCase.priority]}20`
+                      : `${theme.palette.accent.yellow}20`,
+                    color: selectedCase
+                      ? PRIORITY_COLORS[selectedCase.priority]
+                      : theme.palette.accent.yellow,
+                    cursor: casesAtCurrentHour.length > 1 ? 'pointer' : 'default',
+                    '& .MuiChip-icon': {
+                      color: selectedCase
+                        ? PRIORITY_COLORS[selectedCase.priority]
+                        : theme.palette.accent.yellow,
+                    },
+                  }}
+                />
+              )}
+            </Stack>
 
             {/* Case selection menu */}
             <Menu
@@ -1015,6 +1138,7 @@ const HeatmapDashboard: React.FC = () => {
                   isScrubbingRef.current = false;
                   setIsPlaying(false);
                   setScrubHour(null);
+                  // Commit the hour -> triggers one fetch (no spam while dragging)
                   setCurrentHour(v as number);
                 }}
                 min={0}
@@ -1369,6 +1493,11 @@ const HeatmapDashboard: React.FC = () => {
                 </Box>
               </Paper>
 
+              {/* Cross-Jurisdiction Handoff Alerts */}
+              <Box sx={{ p: 1.5, borderBottom: 1, borderColor: 'border.main' }}>
+                <HandoffAlerts compact maxItems={3} />
+              </Box>
+
               {/* Selected Case Info */}
               {isKeyFrame && selectedCase && (
                 <Paper
@@ -1505,10 +1634,10 @@ const HeatmapDashboard: React.FC = () => {
                         variant="h5"
                         sx={{ color: theme.palette.accent.blue, fontWeight: 700 }}
                       >
-                        {selectedHotspot.deviceCount}
+                        {getConnectedCount(selectedHotspot)}
                       </Typography>
                       <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                        Devices
+                        Connected devices
                       </Typography>
                     </Box>
                     <Box sx={{ textAlign: 'center' }}>
@@ -1619,7 +1748,7 @@ const HeatmapDashboard: React.FC = () => {
                             </Box>
                             <Stack direction="row" spacing={1}>
                               <Badge
-                                badgeContent={hs.deviceCount}
+                                badgeContent={getConnectedCount(hs)}
                                 sx={{
                                   '& .MuiBadge-badge': {
                                     bgcolor: theme.palette.accent.blue,

@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Box,
-  Drawer,
   Stack,
   Typography,
   IconButton,
@@ -33,9 +32,19 @@ function extractCaseId(text: string): string | null {
 export type AgentPanelProps = {
   open: boolean;
   onClose: () => void;
+  /**
+   * Screen-space (viewport) anchor for positioning the panel.
+   * Typically the top-left of the FAB.
+   */
+  anchor?: { x: number; y: number };
+  fabSize?: number;
 };
 
-const AgentPanel: React.FC<AgentPanelProps> = ({ open, onClose }) => {
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+const AgentPanel: React.FC<AgentPanelProps> = ({ open, onClose, anchor, fabSize = 56 }) => {
   const theme = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
@@ -220,9 +229,79 @@ const AgentPanel: React.FC<AgentPanelProps> = ({ open, onClose }) => {
     }
   };
 
+  if (!open) return null;
+
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1200;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+  const margin = 16;
+  const desiredPanelWidth = 420;
+  const panelWidth = Math.min(desiredPanelWidth, vw - margin * 2);
+  const desiredMaxPanelHeight = 460; // keep it visually close to the FAB
+  const desiredMinPanelHeight = 280;
+
+  // Default to bottom-right if no anchor is provided.
+  const anchorX = anchor?.x ?? vw - margin - fabSize;
+  const anchorY = anchor?.y ?? vh - margin - fabSize;
+
+  const gap = 12;
+
+  // Prefer positioning beside the FAB (left/right) when possible to keep it "close".
+  const availableRight = vw - (anchorX + fabSize + gap) - margin;
+  const availableLeft = anchorX - gap - margin;
+  const canRight = availableRight >= panelWidth;
+  const canLeft = availableLeft >= panelWidth;
+  const openRight = canRight && (!canLeft || availableRight >= availableLeft);
+
+  const left = (() => {
+    if (openRight) return anchorX + fabSize + gap;
+    if (canLeft) return anchorX - gap - panelWidth;
+    // Fallback: center-ish around the FAB, clamped.
+    return clamp(anchorX + fabSize / 2 - panelWidth / 2, margin, vw - panelWidth - margin);
+  })();
+
+  // Prefer above the FAB; if there isn't enough room, open below.
+  const availableAbove = anchorY - gap - margin;
+  const availableBelow = vh - (anchorY + fabSize + gap) - margin;
+  const canAbove = availableAbove >= desiredMinPanelHeight;
+  const canBelow = availableBelow >= desiredMinPanelHeight;
+  const openBelow = canBelow && (!canAbove || availableBelow > availableAbove);
+
+  const maxPanelHeight = (() => {
+    const available = openBelow ? availableBelow : availableAbove;
+    return Math.max(desiredMinPanelHeight, Math.min(desiredMaxPanelHeight, available));
+  })();
+
+  const top = (() => {
+    const rawTop = openBelow ? anchorY + fabSize + gap : anchorY - gap - maxPanelHeight;
+    return clamp(rawTop, margin, vh - maxPanelHeight - margin);
+  })();
+
   return (
-    <Drawer anchor="right" open={open} onClose={onClose}>
-      <Box sx={{ width: 420, height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <Box
+      sx={{
+        position: 'fixed',
+        left,
+        top,
+        width: panelWidth,
+        maxWidth: 'calc(100vw - 40px)',
+        maxHeight: maxPanelHeight,
+        zIndex: (t) => t.zIndex.modal + 2,
+        display: 'flex',
+        flexDirection: 'column',
+        pointerEvents: 'auto',
+      }}
+    >
+      <Paper
+        elevation={16}
+        sx={{
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          border: 1,
+          borderColor: 'border.main',
+          overflow: 'hidden',
+        }}
+      >
         <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ p: 2 }}>
           <Stack direction="row" spacing={1} alignItems="center">
             <SmartToy sx={{ color: theme.palette.accent.purple }} />
@@ -470,8 +549,8 @@ const AgentPanel: React.FC<AgentPanelProps> = ({ open, onClose }) => {
             </Button>
           </Stack>
         </Box>
-      </Box>
-    </Drawer>
+      </Paper>
+    </Box>
   );
 };
 

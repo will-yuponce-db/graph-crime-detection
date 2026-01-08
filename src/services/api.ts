@@ -199,6 +199,14 @@ export interface CaseLinkedEntity {
   totalScore?: number;
   linkedCities?: string[] | null;
   geoEvidence?: unknown;
+  // Optional richer fields (from case_summary_with_suspects)
+  personId?: string | null;
+  deviceId?: string | null;
+  personRole?: string | null;
+  caseRole?: string | null;
+  linkSource?: string | null;
+  notes?: string | null;
+  confidence?: number | null;
 }
 
 export interface GraphNode {
@@ -260,6 +268,87 @@ export interface EvidenceCard {
   recommendedAction: string;
 }
 
+// New types for enhanced data
+export interface HandoffCandidate {
+  entityId: string;
+  entityName: string;
+  originCity: string;
+  destinationCity: string;
+  originState?: string | null;
+  destinationState?: string | null;
+  detectedAt?: string | null;
+  confidence?: number | null;
+  timeDeltaHours?: number | null;
+}
+
+export interface Device {
+  id: string;
+  deviceId: string;
+  name: string;
+  deviceType: string;
+  ownerId: string;
+  ownerName: string;
+  ownerAlias?: string | null;
+  isBurner: boolean;
+  linkedCities: string[];
+  lastSeen?: string | null;
+  threatLevel: string;
+}
+
+export interface EntityEvidence {
+  entityId: string;
+  entityName: string;
+  alias?: string | null;
+  threatLevel: string;
+  totalScore?: number | null;
+  linkedCities: string[];
+  linkedCases: Array<{ caseId: string; overlapScore?: number; timeBucket?: string }>;
+  geoEvidence: unknown;
+  signals: {
+    geospatial: unknown[];
+    narrative: unknown[];
+    social: unknown[];
+  };
+  criminalHistory: string;
+  properties: Record<string, unknown>;
+}
+
+export interface DashboardStats {
+  totalCases: number;
+  activeCases: number;
+  totalSuspects: number;
+  highThreatSuspects: number;
+  mediumThreatSuspects: number;
+  totalCoLocations: number;
+  crossJurisdictionHandoffs: number;
+  cities: string[];
+  totalEstimatedLoss: number;
+}
+
+export interface CoLocationLogEntry {
+  time: string | null;
+  city: string | null;
+  state: string | null;
+  h3Cell: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  participantCount: number;
+  evidenceCount: number;
+  participants: Array<{ id: string; name: string }>;
+}
+
+export interface Pagination {
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+  total?: number | null;
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  pagination: Pagination;
+}
+
 // ============== API Functions ==============
 
 /**
@@ -304,13 +393,49 @@ export async function fetchHotspots(
 }
 
 /**
- * Fetch all cases
+ * Fetch all cases with optional pagination and filters
  */
-export async function fetchCases(): Promise<CaseData[]> {
-  const res = await fetch(`${API_BASE}/cases`);
+export async function fetchCases(options?: {
+  limit?: number;
+  offset?: number;
+  city?: string;
+  status?: string;
+  enriched?: boolean;
+}): Promise<CaseData[]> {
+  const params = new URLSearchParams();
+  if (options?.limit) params.set('limit', String(options.limit));
+  if (options?.offset) params.set('offset', String(options.offset));
+  if (options?.city) params.set('city', options.city);
+  if (options?.status) params.set('status', options.status);
+  if (options?.enriched !== undefined) params.set('enriched', String(options.enriched));
+
+  const url = params.toString() ? `${API_BASE}/cases?${params}` : `${API_BASE}/cases`;
+  const res = await fetch(url);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.cases;
+}
+
+/**
+ * Fetch cases with pagination info
+ */
+export async function fetchCasesPaginated(options?: {
+  limit?: number;
+  offset?: number;
+  city?: string;
+  status?: string;
+}): Promise<{ cases: CaseData[]; pagination: Pagination }> {
+  const params = new URLSearchParams();
+  if (options?.limit) params.set('limit', String(options.limit));
+  if (options?.offset) params.set('offset', String(options.offset));
+  if (options?.city) params.set('city', options.city);
+  if (options?.status) params.set('status', options.status);
+
+  const url = params.toString() ? `${API_BASE}/cases?${params}` : `${API_BASE}/cases`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return { cases: data.cases, pagination: data.pagination };
 }
 
 /**
@@ -326,10 +451,24 @@ export async function fetchCaseDetail(
 }
 
 /**
- * Fetch suspects/persons
+ * Fetch suspects/persons with optional pagination and filters
  */
-export async function fetchSuspects(): Promise<Suspect[]> {
-  const res = await fetch(`${API_BASE}/persons?suspects=true`);
+export async function fetchSuspects(options?: {
+  limit?: number;
+  offset?: number;
+  city?: string;
+  minScore?: number;
+  suspectsOnly?: boolean;
+}): Promise<Suspect[]> {
+  const params = new URLSearchParams();
+  if (options?.suspectsOnly !== false) params.set('suspects', 'true');
+  if (options?.limit) params.set('limit', String(options.limit));
+  if (options?.offset) params.set('offset', String(options.offset));
+  if (options?.city) params.set('city', options.city);
+  if (options?.minScore) params.set('minScore', String(options.minScore));
+
+  const url = `${API_BASE}/persons?${params}`;
+  const res = await fetch(url);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   const persons = Array.isArray(data.persons) ? data.persons : [];
@@ -337,16 +476,62 @@ export async function fetchSuspects(): Promise<Suspect[]> {
 }
 
 /**
- * Fetch graph data for network visualization
+ * Fetch suspects with pagination info
  */
-export async function fetchGraphData(): Promise<{
-  nodes: GraphNode[];
-  links: GraphLink[];
-}> {
-  const res = await fetch(`${API_BASE}/graph-data`);
+export async function fetchSuspectsPaginated(options?: {
+  limit?: number;
+  offset?: number;
+  city?: string;
+  minScore?: number;
+}): Promise<{ suspects: Suspect[]; pagination: Pagination }> {
+  const params = new URLSearchParams();
+  params.set('suspects', 'true');
+  if (options?.limit) params.set('limit', String(options.limit));
+  if (options?.offset) params.set('offset', String(options.offset));
+  if (options?.city) params.set('city', options.city);
+  if (options?.minScore) params.set('minScore', String(options.minScore));
+
+  const url = `${API_BASE}/persons?${params}`;
+  const res = await fetch(url);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
-  return { nodes: data.nodes, links: data.links };
+  const persons = Array.isArray(data.persons) ? data.persons : [];
+  return {
+    suspects: persons.map((p: AnyRecord) => normalizePerson(p)),
+    pagination: data.pagination,
+  };
+}
+
+/**
+ * Fetch graph data for network visualization with optional filters
+ */
+export async function fetchGraphData(options?: {
+  limit?: number;
+  city?: string;
+  minScore?: number;
+}): Promise<{
+  nodes: GraphNode[];
+  links: GraphLink[];
+  stats?: {
+    nodeCount: number;
+    linkCount: number;
+    personCount: number;
+    locationCount: number;
+    coLocationLinks: number;
+    socialLinks: number;
+    handoffLinks: number;
+  };
+}> {
+  const params = new URLSearchParams();
+  if (options?.limit) params.set('limit', String(options.limit));
+  if (options?.city) params.set('city', options.city);
+  if (options?.minScore) params.set('minScore', String(options.minScore));
+
+  const url = params.toString() ? `${API_BASE}/graph-data?${params}` : `${API_BASE}/graph-data`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return { nodes: data.nodes, links: data.links, stats: data.stats };
 }
 
 /**
@@ -687,6 +872,112 @@ export async function setEntityTitlesBulk(
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return { updated: data.updated, errors: data.errors };
+}
+
+// ============== NEW DATA ENDPOINTS ==============
+
+/**
+ * Fetch handoff candidates (suspects crossing jurisdictions)
+ */
+export async function fetchHandoffCandidates(): Promise<HandoffCandidate[]> {
+  const res = await fetch(`${API_BASE}/handoff-candidates`);
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return data.candidates || [];
+}
+
+/**
+ * Fetch devices with optional pagination
+ */
+export async function fetchDevicesPaginated(options?: {
+  limit?: number;
+  offset?: number;
+}): Promise<{ devices: Device[]; pagination: Pagination }> {
+  const params = new URLSearchParams();
+  if (options?.limit) params.set('limit', String(options.limit));
+  if (options?.offset) params.set('offset', String(options.offset));
+
+  const url = params.toString() ? `${API_BASE}/devices?${params}` : `${API_BASE}/devices`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return { devices: data.devices || [], pagination: data.pagination };
+}
+
+/**
+ * Fetch full evidence for a specific entity
+ */
+export async function fetchEntityEvidence(entityId: string): Promise<EntityEvidence> {
+  const res = await fetch(`${API_BASE}/evidence/${encodeURIComponent(entityId)}`);
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return data.evidence;
+}
+
+/**
+ * Fetch dashboard statistics
+ */
+export async function fetchDashboardStats(): Promise<DashboardStats> {
+  const res = await fetch(`${API_BASE}/stats`);
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return data.stats;
+}
+
+/**
+ * Fetch a best-effort co-location log for selected entities.
+ */
+export async function fetchCoLocationLog(input: {
+  entityIds: string[];
+  mode?: 'any' | 'all';
+  limit?: number;
+  bucketMinutes?: number;
+}): Promise<{
+  entityIds: string[];
+  mode: 'any' | 'all';
+  bucketMinutes: number;
+  timeColumn: string | null;
+  entries: CoLocationLogEntry[];
+}> {
+  const res = await fetch(`${API_BASE}/colocation-log`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return {
+    entityIds: data.entityIds || [],
+    mode: data.mode === 'all' ? 'all' : 'any',
+    bucketMinutes: data.bucketMinutes || 60,
+    timeColumn: data.timeColumn || null,
+    entries: data.entries || [],
+  };
+}
+
+/**
+ * Fetch positions with enhanced data
+ */
+export async function fetchPositionsEnhanced(
+  hour: number,
+  options?: { limit?: number; signal?: AbortSignal }
+): Promise<{
+  positions: DevicePosition[];
+  count: number;
+  suspectCount: number;
+}> {
+  const params = new URLSearchParams();
+  if (options?.limit) params.set('limit', String(options.limit));
+
+  const url = `${API_BASE}/positions/${hour}?${params}`;
+  const res = await fetch(url, { signal: options?.signal });
+  const data = await res.json();
+  if (!data.success) throw new Error(data.error);
+  return {
+    positions: data.positions || [],
+    count: data.count || 0,
+    suspectCount: data.suspectCount || 0,
+  };
 }
 
 // Export data source indicator

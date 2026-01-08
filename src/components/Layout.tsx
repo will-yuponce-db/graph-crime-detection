@@ -1,20 +1,77 @@
 import React from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { Box, AppBar, Toolbar, Typography, Button, Stack, Chip, useTheme } from '@mui/material';
+import {
+  Box,
+  AppBar,
+  Toolbar,
+  Typography,
+  Button,
+  Stack,
+  Chip,
+  Fab,
+  useTheme,
+} from '@mui/material';
 import {
   Map as MapIcon,
   Hub as GraphIcon,
   Description as EvidenceIcon,
   SmartToy as SmartToyIcon,
+  Close as CloseIcon,
 } from '@mui/icons-material';
 import ThemeToggle from './ThemeToggle';
 import AgentPanel from './AgentPanel';
+
+const FAB_SIZE = 56;
+const FAB_MARGIN = 20;
+const FAB_POS_STORAGE_KEY = 'copilotFabPos:v1';
+
+type FabPos = { x: number; y: number };
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
 
 const Layout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const theme = useTheme();
   const [agentOpen, setAgentOpen] = React.useState(false);
+  const [fabPos, setFabPos] = React.useState<FabPos>(() => {
+    // Default bottom-right, then try to restore from storage.
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1200;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+    const fallback = { x: vw - FAB_MARGIN - FAB_SIZE, y: vh - FAB_MARGIN - FAB_SIZE };
+
+    try {
+      const raw = window.localStorage.getItem(FAB_POS_STORAGE_KEY);
+      if (!raw) return fallback;
+      const parsed = JSON.parse(raw) as Partial<FabPos>;
+      if (typeof parsed.x !== 'number' || typeof parsed.y !== 'number') return fallback;
+      return parsed as FabPos;
+    } catch {
+      return fallback;
+    }
+  });
+
+  const draggingRef = React.useRef(false);
+  const pointerIdRef = React.useRef<number | null>(null);
+  const startPointerRef = React.useRef<{ x: number; y: number } | null>(null);
+  const startFabRef = React.useRef<FabPos | null>(null);
+  const didDragRef = React.useRef(false);
+
+  // Keep FAB on-screen on resize.
+  React.useEffect(() => {
+    const onResize = () => {
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      setFabPos((p) => ({
+        x: clamp(p.x, 0, vw - FAB_SIZE),
+        y: clamp(p.y, 0, vh - FAB_SIZE),
+      }));
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   const isActive = (path: string) => {
     if (path === '/') return location.pathname === '/' || location.pathname === '/heatmap';
@@ -114,7 +171,7 @@ const Layout: React.FC = () => {
           <Button
             variant="outlined"
             startIcon={<SmartToyIcon />}
-            onClick={() => setAgentOpen(true)}
+            onClick={() => setAgentOpen((v) => !v)}
             sx={{
               borderColor: 'border.main',
               color: 'text.secondary',
@@ -141,7 +198,78 @@ const Layout: React.FC = () => {
         <Outlet />
       </Box>
 
-      <AgentPanel open={agentOpen} onClose={() => setAgentOpen(false)} />
+      <AgentPanel
+        open={agentOpen}
+        onClose={() => setAgentOpen(false)}
+        anchor={fabPos}
+        fabSize={FAB_SIZE}
+      />
+
+      {/* Floating Copilot FAB (non-blocking) */}
+      <Fab
+        aria-label="Open Copilot"
+        onPointerDown={(e) => {
+          // Only handle primary button / touch.
+          if (e.pointerType === 'mouse' && e.button !== 0) return;
+          draggingRef.current = true;
+          didDragRef.current = false;
+          pointerIdRef.current = e.pointerId;
+          startPointerRef.current = { x: e.clientX, y: e.clientY };
+          startFabRef.current = fabPos;
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          if (!draggingRef.current) return;
+          if (pointerIdRef.current !== e.pointerId) return;
+          const startPointer = startPointerRef.current;
+          const startFab = startFabRef.current;
+          if (!startPointer || !startFab) return;
+
+          const dx = e.clientX - startPointer.x;
+          const dy = e.clientY - startPointer.y;
+
+          if (!didDragRef.current && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) {
+            didDragRef.current = true;
+          }
+
+          const vw = window.innerWidth;
+          const vh = window.innerHeight;
+          const next = {
+            x: clamp(startFab.x + dx, 0, vw - FAB_SIZE),
+            y: clamp(startFab.y + dy, 0, vh - FAB_SIZE),
+          };
+          setFabPos(next);
+        }}
+        onPointerUp={(e) => {
+          if (pointerIdRef.current !== e.pointerId) return;
+          draggingRef.current = false;
+          pointerIdRef.current = null;
+          startPointerRef.current = null;
+          startFabRef.current = null;
+          try {
+            window.localStorage.setItem(FAB_POS_STORAGE_KEY, JSON.stringify(fabPos));
+          } catch {
+            // ignore
+          }
+        }}
+        onClick={() => {
+          // Prevent accidental toggles after a drag.
+          if (didDragRef.current) return;
+          setAgentOpen((v) => !v);
+        }}
+        sx={{
+          position: 'fixed',
+          left: fabPos.x,
+          top: fabPos.y,
+          bgcolor: theme.palette.accent.purple,
+          color: '#fff',
+          '&:hover': { bgcolor: '#6d28d9' },
+          zIndex: (t) => t.zIndex.modal + 3,
+          touchAction: 'none',
+        }}
+      >
+        {agentOpen ? <CloseIcon /> : <SmartToyIcon />}
+      </Fab>
     </Box>
   );
 };

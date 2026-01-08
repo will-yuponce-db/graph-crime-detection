@@ -145,72 +145,81 @@ function getTableName(table) {
 
 /**
  * Get all cases from cases_silver table
+ * @param {number} limit - Max rows (default 10000, no artificial truncation)
  */
-async function getCases(limit = 100) {
+async function getCases(limit = 10000) {
   const sql = `SELECT * FROM ${getTableName('cases_silver')} LIMIT ${limit}`;
   return executeQuery(sql);
 }
 
 /**
  * Get suspect rankings
+ * @param {number} limit - Max rows (default 10000)
  */
-async function getSuspectRankings(limit = 50) {
+async function getSuspectRankings(limit = 10000) {
   const sql = `SELECT * FROM ${getTableName('suspect_rankings')} ORDER BY total_score DESC LIMIT ${limit}`;
   return executeQuery(sql);
 }
 
 /**
  * Get co-presence edges (suspects seen together)
+ * @param {number} limit - Max rows (default 50000 for full network)
  */
-async function getCoPresenceEdges(limit = 100) {
+async function getCoPresenceEdges(limit = 50000) {
   const sql = `SELECT * FROM ${getTableName('co_presence_edges')} LIMIT ${limit}`;
   return executeQuery(sql);
 }
 
 /**
  * Get social edges (communication/relationship links)
+ * @param {number} limit - Max rows (default 50000 for full network)
  */
-async function getSocialEdges(limit = 100) {
+async function getSocialEdges(limit = 50000) {
   const sql = `SELECT * FROM ${getTableName('social_edges_silver')} LIMIT ${limit}`;
   return executeQuery(sql);
 }
 
 /**
  * Get cell device counts per location
+ * @param {number} limit - Max rows (default 5000)
  */
-async function getCellDeviceCounts(limit = 100) {
+async function getCellDeviceCounts(limit = 5000) {
   const sql = `SELECT * FROM ${getTableName('cell_device_counts')} LIMIT ${limit}`;
   return executeQuery(sql);
 }
 
 /**
  * Get location events
+ * @param {number} limit - Max rows (default 10000)
  */
-async function getLocationEvents(limit = 100) {
+async function getLocationEvents(limit = 10000) {
   const sql = `SELECT * FROM ${getTableName('location_events_silver')} LIMIT ${limit}`;
   return executeQuery(sql);
 }
 
 /**
  * Get evidence card data
+ * @param {number} limit - Max rows (default 5000)
  */
-async function getEvidenceCardData(limit = 50) {
+async function getEvidenceCardData(limit = 5000) {
   const sql = `SELECT * FROM ${getTableName('evidence_card_data')} LIMIT ${limit}`;
   return executeQuery(sql);
 }
 
 /**
  * Get entity case overlap (entities appearing in multiple cases)
+ * @param {number} limit - Max rows (default 10000)
  */
-async function getEntityCaseOverlap(limit = 100) {
+async function getEntityCaseOverlap(limit = 10000) {
   const sql = `SELECT * FROM ${getTableName('entity_case_overlap')} LIMIT ${limit}`;
   return executeQuery(sql);
 }
 
 /**
  * Get handoff candidates (suspects that may have handed off between locations)
+ * @param {number} limit - Max rows (default 5000)
  */
-async function getHandoffCandidates(limit = 50) {
+async function getHandoffCandidates(limit = 5000) {
   const sql = `SELECT * FROM ${getTableName('handoff_candidates')} LIMIT ${limit}`;
   return executeQuery(sql);
 }

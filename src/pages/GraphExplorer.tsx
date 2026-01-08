@@ -48,7 +48,9 @@ import {
   USE_DATABRICKS,
   setEntityTitle,
   deleteEntityTitle,
+  fetchCoLocationLog,
 } from '../services/api';
+import HandoffAlerts from '../components/HandoffAlerts';
 
 interface GraphNode {
   id: string;
@@ -114,6 +116,25 @@ const GraphExplorer: React.FC = () => {
   const [cityFilter, setCityFilter] = useState<string | null>(null);
   const [focusedEntityIds, setFocusedEntityIds] = useState<Set<string>>(new Set());
 
+  // Multi-select for co-location log
+  const [colocationEntityIds, setColocationEntityIds] = useState<Set<string>>(new Set());
+  const [colocationMode, setColocationMode] = useState<'any' | 'all'>('any');
+  const [colocationLoading, setColocationLoading] = useState(false);
+  const [colocationError, setColocationError] = useState<string | null>(null);
+  const [colocationEntries, setColocationEntries] = useState<
+    Array<{
+      time: string | null;
+      city: string | null;
+      state: string | null;
+      h3Cell: string | null;
+      latitude: number | null;
+      longitude: number | null;
+      participantCount: number;
+      evidenceCount: number;
+      participants: Array<{ id: string; name: string }>;
+    }>
+  >([]);
+
   // Entity title editing state
   const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
@@ -140,6 +161,64 @@ const GraphExplorer: React.FC = () => {
       setFocusedEntityIds(new Set());
     }
   }, [searchParams]);
+
+  // Seed the co-location selection from deep-linked focused entity IDs (only if the user hasn't started selecting yet)
+  useEffect(() => {
+    if (colocationEntityIds.size > 0) return;
+    if (focusedEntityIds.size < 2) return;
+    setColocationEntityIds(new Set(Array.from(focusedEntityIds)));
+  }, [focusedEntityIds, colocationEntityIds.size]);
+
+  const suspectNameById = useMemo(() => {
+    return new Map(suspects.map((s) => [s.id, s.name]));
+  }, [suspects]);
+
+  const toggleColocationEntity = useCallback((entityId: string) => {
+    setColocationEntityIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(entityId)) next.delete(entityId);
+      else next.add(entityId);
+      return next;
+    });
+  }, []);
+
+  const clearColocationSelection = useCallback(() => {
+    setColocationEntityIds(new Set());
+  }, []);
+
+  // Fetch colocations whenever selection changes
+  useEffect(() => {
+    const ids = Array.from(colocationEntityIds);
+    if (ids.length < 2) {
+      setColocationEntries([]);
+      setColocationError(null);
+      setColocationLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setColocationLoading(true);
+    setColocationError(null);
+
+    fetchCoLocationLog({ entityIds: ids, mode: colocationMode, limit: 5000, bucketMinutes: 60 })
+      .then((resp) => {
+        if (cancelled) return;
+        setColocationEntries(resp.entries || []);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setColocationError(err?.message || 'Failed to load co-locations');
+        setColocationEntries([]);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setColocationLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [colocationEntityIds, colocationMode]);
 
   // Auto-select first focused entity once suspects are loaded
   useEffect(() => {
@@ -738,7 +817,12 @@ const GraphExplorer: React.FC = () => {
             event.stopPropagation();
             const n = node as GraphNode;
             if (n.type === 'person' && n.isSuspect) {
-              setSelectedSuspect(selectedSuspect === n.id ? null : n.id);
+              const multi = event.shiftKey || event.metaKey || event.ctrlKey;
+              if (multi) {
+                toggleColocationEntity(n.id);
+              } else {
+                setSelectedSuspect(selectedSuspect === n.id ? null : n.id);
+              }
             }
           }}
           nodePointerAreaPaint={(node, color, ctx) => {
@@ -755,7 +839,8 @@ const GraphExplorer: React.FC = () => {
             const baseR = n.size;
             const isHovered = hoveredNode === n.id;
             const isFocused = focusedEntityIds.has(n.id);
-            const isSelected = selectedSuspect === n.id || isFocused;
+            const isMultiSelected = colocationEntityIds.has(n.id);
+            const isSelected = selectedSuspect === n.id || isFocused || isMultiSelected;
             const r = isHovered ? baseR * 1.2 : baseR;
 
             if (
@@ -1442,7 +1527,7 @@ const GraphExplorer: React.FC = () => {
                 Suspects
               </Typography>
               <Chip
-                label={suspects.length || 2}
+                label={suspects.length || 0}
                 size="small"
                 sx={{
                   bgcolor: `${theme.palette.accent.red}20`,
@@ -1457,7 +1542,7 @@ const GraphExplorer: React.FC = () => {
                 Co-locations
               </Typography>
               <Chip
-                label="10"
+                label={graphData.links.filter((l) => l.type === 'CO_LOCATED').length}
                 size="small"
                 sx={{
                   bgcolor: `${theme.palette.accent.yellow}20`,
@@ -1469,14 +1554,29 @@ const GraphExplorer: React.FC = () => {
             </Stack>
             <Stack direction="row" justifyContent="space-between" alignItems="center">
               <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                Jurisdictions
+                Locations
               </Typography>
               <Chip
-                label="DC → Nashville"
+                label={graphData.nodes.filter((n) => n.type === 'location').length}
                 size="small"
                 sx={{
                   bgcolor: `${theme.palette.accent.green}20`,
                   color: theme.palette.accent.green,
+                  height: 20,
+                  fontSize: '0.7rem',
+                }}
+              />
+            </Stack>
+            <Stack direction="row" justifyContent="space-between" alignItems="center">
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                Social Links
+              </Typography>
+              <Chip
+                label={graphData.links.filter((l) => l.type === 'SOCIAL').length}
+                size="small"
+                sx={{
+                  bgcolor: `${theme.palette.accent.blue}20`,
+                  color: theme.palette.accent.blue,
                   height: 20,
                   fontSize: '0.7rem',
                 }}
@@ -1502,6 +1602,175 @@ const GraphExplorer: React.FC = () => {
           </Stack>
         </Box>
 
+        {/* Handoff Alerts */}
+        <Box sx={{ p: 1.5, borderBottom: 1, borderColor: 'border.main' }}>
+          <HandoffAlerts
+            compact
+            maxItems={3}
+            onEntityClick={(entityId) => setSelectedSuspect(entityId)}
+          />
+        </Box>
+
+        {/* Co-location Log */}
+        <Box sx={{ p: 2, borderBottom: 1, borderColor: 'border.main' }}>
+          <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <History sx={{ fontSize: 16, color: theme.palette.accent.yellow }} />
+              <Typography
+                variant="overline"
+                sx={{ color: 'text.secondary', letterSpacing: 2, fontSize: '0.65rem' }}
+              >
+                CO-LOCATION LOG
+              </Typography>
+            </Stack>
+            <Button
+              size="small"
+              variant="text"
+              onClick={clearColocationSelection}
+              sx={{ fontSize: '0.7rem', color: 'text.secondary' }}
+              disabled={colocationEntityIds.size === 0}
+            >
+              Clear
+            </Button>
+          </Stack>
+
+          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1 }}>
+            Shift/Ctrl-click suspects (graph or list) to compare where they were together.
+          </Typography>
+
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mb: 1 }}>
+            {Array.from(colocationEntityIds)
+              .slice(0, 8)
+              .map((id) => (
+                <Chip
+                  key={id}
+                  label={suspectNameById.get(id) || id}
+                  size="small"
+                  onDelete={() => toggleColocationEntity(id)}
+                  sx={{
+                    bgcolor: `${theme.palette.accent.yellow}15`,
+                    color: theme.palette.accent.yellow,
+                    '& .MuiChip-deleteIcon': { color: theme.palette.accent.yellow, opacity: 0.8 },
+                  }}
+                />
+              ))}
+            {colocationEntityIds.size > 8 && (
+              <Chip
+                label={`+${colocationEntityIds.size - 8}`}
+                size="small"
+                sx={{ bgcolor: 'background.default', color: 'text.secondary' }}
+              />
+            )}
+          </Stack>
+
+          <ToggleButtonGroup
+            value={colocationMode}
+            exclusive
+            onChange={(_e, v) => v && setColocationMode(v)}
+            size="small"
+            sx={{
+              mb: 1.5,
+              '& .MuiToggleButton-root': {
+                border: 1,
+                borderColor: 'border.main',
+                color: 'text.secondary',
+                fontSize: '0.7rem',
+                px: 1.25,
+                py: 0.25,
+                textTransform: 'none',
+                '&.Mui-selected': {
+                  bgcolor: `${theme.palette.accent.yellow}15`,
+                  color: theme.palette.accent.yellow,
+                  borderColor: 'transparent',
+                  '&:hover': { bgcolor: `${theme.palette.accent.yellow}20` },
+                },
+              },
+            }}
+          >
+            <ToggleButton value="any">Any overlap</ToggleButton>
+            <ToggleButton value="all">All together</ToggleButton>
+          </ToggleButtonGroup>
+
+          <Box
+            sx={{
+              maxHeight: 220,
+              overflow: 'auto',
+              pr: 0.5,
+            }}
+          >
+            {colocationEntityIds.size < 2 ? (
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                Select at least 2 suspects to see co-locations.
+              </Typography>
+            ) : colocationLoading ? (
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <CircularProgress size={14} sx={{ color: theme.palette.accent.yellow }} />
+                <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                  Loading…
+                </Typography>
+              </Stack>
+            ) : colocationError ? (
+              <Alert
+                severity="error"
+                sx={{
+                  bgcolor: `${theme.palette.accent.red}10`,
+                  border: 1,
+                  borderColor: `${theme.palette.accent.red}30`,
+                }}
+              >
+                <Typography variant="caption">{colocationError}</Typography>
+              </Alert>
+            ) : colocationEntries.length === 0 ? (
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                No shared locations found (within the sampled events).
+              </Typography>
+            ) : (
+              <Stack spacing={1}>
+                {colocationEntries.slice(0, 25).map((e, idx) => {
+                  const timeLabel = e.time ? new Date(e.time).toLocaleString() : 'Time unknown';
+                  const placeLabel =
+                    [e.city, e.state].filter(Boolean).join(', ') || 'Unknown location';
+                  const cellLabel = e.h3Cell ? ` • Cell ${String(e.h3Cell).slice(-6)}` : '';
+                  return (
+                    <Paper
+                      key={`${e.time || 'no_time'}-${e.h3Cell || 'no_cell'}-${idx}`}
+                      sx={{
+                        p: 1.25,
+                        bgcolor: 'background.default',
+                        border: 1,
+                        borderColor: 'border.main',
+                      }}
+                    >
+                      <Typography
+                        variant="caption"
+                        sx={{ color: 'text.secondary', display: 'block' }}
+                      >
+                        {timeLabel}
+                      </Typography>
+                      <Typography
+                        variant="body2"
+                        sx={{ color: 'text.primary', fontWeight: 600, fontSize: '0.8rem' }}
+                      >
+                        {placeLabel}
+                        <Typography
+                          component="span"
+                          variant="caption"
+                          sx={{ color: 'text.secondary' }}
+                        >
+                          {cellLabel}
+                        </Typography>
+                      </Typography>
+                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                        {e.participantCount} participants • {e.evidenceCount} pings
+                      </Typography>
+                    </Paper>
+                  );
+                })}
+              </Stack>
+            )}
+          </Box>
+        </Box>
+
         {/* Suspects */}
         <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
           <Typography
@@ -1517,7 +1786,16 @@ const GraphExplorer: React.FC = () => {
           ).map((s, i) => (
             <Card
               key={s.id}
-              onClick={() => editingEntityId !== s.id && handleCardClick(s.id)}
+              onClick={(e) => {
+                if (editingEntityId === s.id) return;
+                const multi = e.shiftKey || e.metaKey || e.ctrlKey;
+                if (multi) {
+                  e.stopPropagation();
+                  toggleColocationEntity(s.id);
+                  return;
+                }
+                handleCardClick(s.id);
+              }}
               onDoubleClick={() => editingEntityId !== s.id && handleCardDoubleClick(s)}
               sx={{
                 mt: 1.5,

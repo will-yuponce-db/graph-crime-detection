@@ -65,7 +65,16 @@ function makeStubDatabricks() {
       },
     ],
     listTables: async () => [{ tableName: 'x' }],
-    describeTable: async () => [],
+    describeTable: async () => [
+      // Minimal schema surface for colocation log endpoint (no timestamp column)
+      { col_name: 'entity_id' },
+      { col_name: 'latitude' },
+      { col_name: 'longitude' },
+      { col_name: 'h3_cell' },
+      { col_name: 'city' },
+      { col_name: 'state' },
+      // (intentionally omit time cols so endpoint falls back to time:null)
+    ],
     getLastSql: () => lastSql,
   };
   return stub;
@@ -175,6 +184,77 @@ test('GET /api/demo/persons/:id escapes SQL literals', async () => {
     assert.ok(sql);
     assert.ok(sql.includes("E_''1"));
     assert.ok(!sql.includes("E_'1'")); // would be unsafe/unescaped
+  } finally {
+    server.close();
+  }
+});
+
+test('POST /api/demo/colocation-log returns grouped colocations (best-effort without timestamps)', async () => {
+  const dataDir = makeTmpDir();
+  const databricks = makeStubDatabricks();
+
+  databricks.runCustomQuery = async (sql) => {
+    const u = String(sql || '').toUpperCase();
+    if (u.includes('FROM CAT.SCH.SUSPECT_RANKINGS')) {
+      return [
+        { entity_id: 'A', entity_name: 'Alice' },
+        { entity_id: 'B', entity_name: 'Bob' },
+        { entity_id: 'C', entity_name: 'Carol' },
+      ];
+    }
+    if (u.includes('FROM CAT.SCH.LOCATION_EVENTS_SILVER')) {
+      // Return three location rows:
+      // - A + B co-present at same h3/city/state
+      // - C alone somewhere else
+      return [
+        {
+          entity_id: 'A',
+          latitude: 38.9,
+          longitude: -77.07,
+          h3_cell: 'h3_1',
+          city: 'Washington',
+          state: 'DC',
+        },
+        {
+          entity_id: 'B',
+          latitude: 38.9001,
+          longitude: -77.0701,
+          h3_cell: 'h3_1',
+          city: 'Washington',
+          state: 'DC',
+        },
+        {
+          entity_id: 'C',
+          latitude: 36.16,
+          longitude: -86.78,
+          h3_cell: 'h3_2',
+          city: 'Nashville',
+          state: 'TN',
+        },
+      ];
+    }
+    return [];
+  };
+
+  const { app } = createApp({ databricks, dataDir, distPath: path.join(dataDir, 'no-dist') });
+  const { server, baseUrl } = await start(app);
+  try {
+    const res = await fetch(`${baseUrl}/api/demo/colocation-log`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entityIds: ['A', 'B', 'C'], mode: 'any', limit: 1000 }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.success, true);
+    assert.equal(Array.isArray(body.entries), true);
+    // Should include only the A+B co-location group (>=2 participants)
+    assert.equal(body.entries.length, 1);
+    assert.equal(body.entries[0].participantCount, 2);
+    const ids = body.entries[0].participants.map((p) => p.id).sort();
+    assert.deepEqual(ids, ['A', 'B']);
+    assert.equal(body.entries[0].time, null);
+    assert.equal(body.entries[0].city, 'Washington');
   } finally {
     server.close();
   }

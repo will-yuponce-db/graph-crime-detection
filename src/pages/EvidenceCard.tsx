@@ -74,6 +74,12 @@ interface CaseData {
   description?: string;
   persons?: { id: string; name: string; alias?: string }[];
   devices?: { id: string; name: string }[];
+  // Richer summary counts (may be present even if persons/devices arrays are truncated)
+  suspectCount?: number;
+  deviceCount?: number;
+  victimCount?: number | null;
+  witnessCount?: number | null;
+  poiCount?: number | null;
 }
 
 const STATUS_CONFIG = {
@@ -481,7 +487,9 @@ const CaseView: React.FC = () => {
             <Stack direction="row" spacing={0.5} alignItems="center">
               <Person sx={{ fontSize: 14, color: theme.palette.accent.red }} />
               <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                {caseData.persons?.length || 0}
+                {typeof caseData.suspectCount === 'number'
+                  ? caseData.suspectCount
+                  : caseData.persons?.length || 0}
               </Typography>
             </Stack>
           </Tooltip>
@@ -489,7 +497,9 @@ const CaseView: React.FC = () => {
             <Stack direction="row" spacing={0.5} alignItems="center">
               <Devices sx={{ fontSize: 14, color: theme.palette.accent.orange }} />
               <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                {caseData.devices?.length || 0}
+                {typeof caseData.deviceCount === 'number'
+                  ? caseData.deviceCount
+                  : caseData.devices?.length || 0}
               </Typography>
             </Stack>
           </Tooltip>
@@ -1039,7 +1049,9 @@ const CaseView: React.FC = () => {
                     <CardContent sx={{ textAlign: 'center', py: 2 }}>
                       <Person sx={{ color: theme.palette.accent.red, fontSize: 32 }} />
                       <Typography variant="h4" sx={{ color: 'text.primary', fontWeight: 700 }}>
-                        {selectedCase.persons?.length || 0}
+                        {typeof selectedCase.suspectCount === 'number'
+                          ? selectedCase.suspectCount
+                          : selectedCase.persons?.length || 0}
                       </Typography>
                       <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                         Suspects
@@ -1057,7 +1069,9 @@ const CaseView: React.FC = () => {
                     <CardContent sx={{ textAlign: 'center', py: 2 }}>
                       <Devices sx={{ color: theme.palette.accent.orange, fontSize: 32 }} />
                       <Typography variant="h4" sx={{ color: 'text.primary', fontWeight: 700 }}>
-                        {selectedCase.devices?.length || 0}
+                        {typeof selectedCase.deviceCount === 'number'
+                          ? selectedCase.deviceCount
+                          : selectedCase.devices?.length || 0}
                       </Typography>
                       <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                         Devices
