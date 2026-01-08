@@ -476,16 +476,18 @@ export async function fetchSuspects(options?: {
 }
 
 /**
- * Fetch suspects with pagination info
+ * Fetch suspects/persons with pagination info
  */
 export async function fetchSuspectsPaginated(options?: {
   limit?: number;
   offset?: number;
   city?: string;
   minScore?: number;
+  suspectsOnly?: boolean;
 }): Promise<{ suspects: Suspect[]; pagination: Pagination }> {
   const params = new URLSearchParams();
-  params.set('suspects', 'true');
+  // Default to suspects only, but allow fetching all persons
+  if (options?.suspectsOnly !== false) params.set('suspects', 'true');
   if (options?.limit) params.set('limit', String(options.limit));
   if (options?.offset) params.set('offset', String(options.offset));
   if (options?.city) params.set('city', options.city);
@@ -992,13 +994,14 @@ export interface ProgressCallback {
 }
 
 /**
- * Fetch all suspects with progressive loading
+ * Fetch all suspects/persons with progressive loading
  * Calls onProgress with each batch as it arrives
  */
 export async function fetchAllSuspectsProgressive(options?: {
   batchSize?: number;
   city?: string;
   minScore?: number;
+  suspectsOnly?: boolean;
   onProgress?: ProgressCallback;
 }): Promise<Suspect[]> {
   const batchSize = options?.batchSize || 1000;
@@ -1012,6 +1015,7 @@ export async function fetchAllSuspectsProgressive(options?: {
       offset,
       city: options?.city,
       minScore: options?.minScore,
+      suspectsOnly: options?.suspectsOnly,
     });
 
     allSuspects.push(...suspects);
@@ -1162,12 +1166,13 @@ export async function loadAllDataProgressive(options?: {
     options?.onProgress?.(progress);
   };
 
-  // Fetch in parallel
+  // Fetch in parallel - get ALL persons (not just suspects) for graph visualization
   const [suspects, graphData] = await Promise.all([
     fetchAllSuspectsProgressive({
       batchSize: 2000,
       city: options?.city,
       minScore: options?.minScore,
+      suspectsOnly: false, // Get all persons including associates
       onProgress: (p) => {
         progress.suspects = p;
         updateProgress();

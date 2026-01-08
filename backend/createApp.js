@@ -1230,10 +1230,12 @@ function createApp(options = {}) {
       }
 
       const rankingIds = new Set(filteredRankings.map((r) => r.entity_id));
+      const rankingMap = new Map(filteredRankings.map((r) => [r.entity_id, r]));
 
       const nodes = filteredRankings.map((r) => {
         const customTitle = getEntityTitle('persons', r.entity_id);
         const originalName = r.entity_name || `Entity ${r.entity_id}`;
+        const isSuspect = r.total_score > 0.5;
         return {
           id: r.entity_id,
           name: customTitle?.title || originalName,
@@ -1243,7 +1245,7 @@ function createApp(options = {}) {
           hasCustomTitle: !!customTitle,
           alias: r.alias || null,
           type: 'person',
-          isSuspect: true,
+          isSuspect,
           threatLevel: r.total_score > 1.5 ? 'High' : r.total_score > 1 ? 'Medium' : 'Low',
           totalScore: r.total_score,
           linkedCities: r.linked_cities,
@@ -1251,6 +1253,9 @@ function createApp(options = {}) {
           properties: r.properties ? JSON.parse(r.properties) : {},
         };
       });
+
+      // Track nodes we've already added
+      const addedNodeIds = new Set(nodes.map((n) => n.id));
 
       // Location nodes (one per city)
       const citySet = new Set();
@@ -1289,10 +1294,54 @@ function createApp(options = {}) {
         });
       });
 
-      // Social links
+      // Social links - also add nodes for non-ranking persons (associates)
       (socialEdges || []).forEach((edge) => {
         if (!edge?.entity_id_1 || !edge?.entity_id_2) return;
+        // Skip if neither party is a known ranking
         if (!rankingIds.has(edge.entity_id_1) && !rankingIds.has(edge.entity_id_2)) return;
+
+        // Add node for entity_id_1 if not already added (associate)
+        if (!addedNodeIds.has(edge.entity_id_1)) {
+          const customTitle = getEntityTitle('persons', edge.entity_id_1);
+          nodes.push({
+            id: edge.entity_id_1,
+            name:
+              customTitle?.title || edge.entity_name_1 || `Entity ${edge.entity_id_1.slice(-6)}`,
+            originalName: edge.entity_name_1 || `Entity ${edge.entity_id_1}`,
+            customTitle: customTitle?.title || null,
+            hasCustomTitle: !!customTitle,
+            alias: null,
+            type: 'person',
+            isSuspect: false,
+            threatLevel: 'Unknown',
+            totalScore: 0,
+            linkedCities: [],
+            caseCount: 0,
+          });
+          addedNodeIds.add(edge.entity_id_1);
+        }
+
+        // Add node for entity_id_2 if not already added (associate)
+        if (!addedNodeIds.has(edge.entity_id_2)) {
+          const customTitle = getEntityTitle('persons', edge.entity_id_2);
+          nodes.push({
+            id: edge.entity_id_2,
+            name:
+              customTitle?.title || edge.entity_name_2 || `Entity ${edge.entity_id_2.slice(-6)}`,
+            originalName: edge.entity_name_2 || `Entity ${edge.entity_id_2}`,
+            customTitle: customTitle?.title || null,
+            hasCustomTitle: !!customTitle,
+            alias: null,
+            type: 'person',
+            isSuspect: false,
+            threatLevel: 'Unknown',
+            totalScore: 0,
+            linkedCities: [],
+            caseCount: 0,
+          });
+          addedNodeIds.add(edge.entity_id_2);
+        }
+
         links.push({
           source: edge.entity_id_1,
           target: edge.entity_id_2,
