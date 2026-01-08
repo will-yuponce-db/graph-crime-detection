@@ -38,3 +38,4 @@ databricks sync --watch "${LOCAL_DIR}" "${WORKSPACE_DIR_PATH}" "${EXCLUDE_FROM[@
 
 
 
+

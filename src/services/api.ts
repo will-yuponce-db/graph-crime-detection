@@ -984,3 +984,208 @@ export async function fetchPositionsEnhanced(
 export function getDataSource(): string {
   return 'Databricks Unity Catalog';
 }
+
+// ============== PROGRESSIVE/LAZY LOADING HELPERS ==============
+
+export interface ProgressCallback {
+  (progress: { loaded: number; total: number | null; complete: boolean }): void;
+}
+
+/**
+ * Fetch all suspects with progressive loading
+ * Calls onProgress with each batch as it arrives
+ */
+export async function fetchAllSuspectsProgressive(options?: {
+  batchSize?: number;
+  city?: string;
+  minScore?: number;
+  onProgress?: ProgressCallback;
+}): Promise<Suspect[]> {
+  const batchSize = options?.batchSize || 1000;
+  const allSuspects: Suspect[] = [];
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { suspects, pagination } = await fetchSuspectsPaginated({
+      limit: batchSize,
+      offset,
+      city: options?.city,
+      minScore: options?.minScore,
+    });
+
+    allSuspects.push(...suspects);
+    hasMore = pagination.hasMore;
+    offset += batchSize;
+
+    options?.onProgress?.({
+      loaded: allSuspects.length,
+      total: pagination.total,
+      complete: !hasMore,
+    });
+  }
+
+  return allSuspects;
+}
+
+/**
+ * Fetch all cases with progressive loading
+ */
+export async function fetchAllCasesProgressive(options?: {
+  batchSize?: number;
+  city?: string;
+  status?: string;
+  onProgress?: ProgressCallback;
+}): Promise<CaseData[]> {
+  const batchSize = options?.batchSize || 500;
+  const allCases: CaseData[] = [];
+  let offset = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { cases, pagination } = await fetchCasesPaginated({
+      limit: batchSize,
+      offset,
+      city: options?.city,
+      status: options?.status,
+    });
+
+    allCases.push(...cases);
+    hasMore = pagination.hasMore;
+    offset += batchSize;
+
+    options?.onProgress?.({
+      loaded: allCases.length,
+      total: pagination.total,
+      complete: !hasMore,
+    });
+  }
+
+  return allCases;
+}
+
+export interface GraphDataProgressCallback {
+  (progress: {
+    nodes: GraphNode[];
+    links: GraphLink[];
+    stats?: {
+      nodeCount: number;
+      linkCount: number;
+      personCount: number;
+      locationCount: number;
+      coLocationLinks: number;
+      socialLinks: number;
+      handoffLinks: number;
+    };
+    complete: boolean;
+    batchIndex: number;
+  }): void;
+}
+
+/**
+ * Fetch graph data progressively with larger batches
+ * Graph data endpoint doesn't have traditional pagination, so we request
+ * larger limits to get all data
+ */
+export async function fetchGraphDataProgressive(options?: {
+  city?: string;
+  minScore?: number;
+  onProgress?: GraphDataProgressCallback;
+}): Promise<{
+  nodes: GraphNode[];
+  links: GraphLink[];
+  stats?: {
+    nodeCount: number;
+    linkCount: number;
+    personCount: number;
+    locationCount: number;
+    coLocationLinks: number;
+    socialLinks: number;
+    handoffLinks: number;
+  };
+}> {
+  // Request full dataset with high limit (backend now supports up to 100k rows)
+  const result = await fetchGraphData({
+    limit: 50000,
+    city: options?.city,
+    minScore: options?.minScore,
+  });
+
+  options?.onProgress?.({
+    nodes: result.nodes,
+    links: result.links,
+    stats: result.stats,
+    complete: true,
+    batchIndex: 0,
+  });
+
+  return result;
+}
+
+/**
+ * Progressive data loader that fetches graph data, suspects, and relationships
+ * in parallel with progress updates
+ */
+export interface FullDataLoadProgress {
+  suspects: { loaded: number; total: number | null; complete: boolean };
+  graph: { nodes: number; links: number; complete: boolean };
+  overall: { percent: number; complete: boolean };
+}
+
+export async function loadAllDataProgressive(options?: {
+  city?: string;
+  minScore?: number;
+  onProgress?: (progress: FullDataLoadProgress) => void;
+}): Promise<{
+  suspects: Suspect[];
+  graphData: { nodes: GraphNode[]; links: GraphLink[] };
+}> {
+  const progress: FullDataLoadProgress = {
+    suspects: { loaded: 0, total: null, complete: false },
+    graph: { nodes: 0, links: 0, complete: false },
+    overall: { percent: 0, complete: false },
+  };
+
+  const updateProgress = () => {
+    const suspectsWeight = 0.4;
+    const graphWeight = 0.6;
+
+    const suspectsPct = progress.suspects.complete
+      ? 100
+      : progress.suspects.total
+        ? (progress.suspects.loaded / progress.suspects.total) * 100
+        : 50;
+    const graphPct = progress.graph.complete ? 100 : 50;
+
+    progress.overall.percent = Math.round(suspectsPct * suspectsWeight + graphPct * graphWeight);
+    progress.overall.complete = progress.suspects.complete && progress.graph.complete;
+    options?.onProgress?.(progress);
+  };
+
+  // Fetch in parallel
+  const [suspects, graphData] = await Promise.all([
+    fetchAllSuspectsProgressive({
+      batchSize: 2000,
+      city: options?.city,
+      minScore: options?.minScore,
+      onProgress: (p) => {
+        progress.suspects = p;
+        updateProgress();
+      },
+    }),
+    fetchGraphDataProgressive({
+      city: options?.city,
+      minScore: options?.minScore,
+      onProgress: (p) => {
+        progress.graph = {
+          nodes: p.nodes.length,
+          links: p.links.length,
+          complete: p.complete,
+        };
+        updateProgress();
+      },
+    }),
+  ]);
+
+  return { suspects, graphData };
+}

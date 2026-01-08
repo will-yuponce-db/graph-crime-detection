@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Box,
   Stack,
@@ -18,6 +18,37 @@ import type { AgentMessage, UIAction } from '../agent/actions';
 import { executeActions } from '../agent/executeActions';
 import { agentStep } from '../services/agent';
 import { fetchEvidenceCard } from '../services/api';
+
+const MIN_PANEL_WIDTH = 320;
+const MAX_PANEL_WIDTH = 800;
+const MIN_PANEL_HEIGHT = 280;
+const MAX_PANEL_HEIGHT = 700;
+const DEFAULT_PANEL_WIDTH = 420;
+const DEFAULT_PANEL_HEIGHT = 460;
+
+function loadPanelSize() {
+  try {
+    const stored = window.localStorage.getItem('agentPanelSize');
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return {
+        width: clamp(parsed.width || DEFAULT_PANEL_WIDTH, MIN_PANEL_WIDTH, MAX_PANEL_WIDTH),
+        height: clamp(parsed.height || DEFAULT_PANEL_HEIGHT, MIN_PANEL_HEIGHT, MAX_PANEL_HEIGHT),
+      };
+    }
+  } catch {
+    // ignore
+  }
+  return { width: DEFAULT_PANEL_WIDTH, height: DEFAULT_PANEL_HEIGHT };
+}
+
+function savePanelSize(width: number, height: number) {
+  try {
+    window.localStorage.setItem('agentPanelSize', JSON.stringify({ width, height }));
+  } catch {
+    // ignore
+  }
+}
 
 function newSessionId() {
   return `sess_${Math.random().toString(16).slice(2)}_${Date.now()}`;
@@ -57,6 +88,60 @@ const AgentPanel: React.FC<AgentPanelProps> = ({ open, onClose, anchor, fabSize 
     window.localStorage.setItem('agentSessionId', next);
     return next;
   });
+
+  // Resize state
+  const [panelSize, setPanelSize] = useState(loadPanelSize);
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeStartRef = useRef<{ x: number; y: number; width: number; height: number } | null>(
+    null
+  );
+
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsResizing(true);
+      resizeStartRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        width: panelSize.width,
+        height: panelSize.height,
+      };
+    },
+    [panelSize]
+  );
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!resizeStartRef.current) return;
+      const { x, y, width, height } = resizeStartRef.current;
+      const deltaX = e.clientX - x;
+      const deltaY = e.clientY - y;
+
+      const newWidth = clamp(width + deltaX, MIN_PANEL_WIDTH, MAX_PANEL_WIDTH);
+      const newHeight = clamp(height + deltaY, MIN_PANEL_HEIGHT, MAX_PANEL_HEIGHT);
+
+      setPanelSize({ width: newWidth, height: newHeight });
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      if (resizeStartRef.current) {
+        savePanelSize(panelSize.width, panelSize.height);
+      }
+      resizeStartRef.current = null;
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing, panelSize]);
 
   const [messages, setMessages] = useState<AgentMessage[]>(() => [
     {
@@ -234,10 +319,8 @@ const AgentPanel: React.FC<AgentPanelProps> = ({ open, onClose, anchor, fabSize 
   const vw = typeof window !== 'undefined' ? window.innerWidth : 1200;
   const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
   const margin = 16;
-  const desiredPanelWidth = 420;
-  const panelWidth = Math.min(desiredPanelWidth, vw - margin * 2);
-  const desiredMaxPanelHeight = 460; // keep it visually close to the FAB
-  const desiredMinPanelHeight = 280;
+  const panelWidth = Math.min(panelSize.width, vw - margin * 2);
+  const panelHeight = Math.min(panelSize.height, vh - margin * 2);
 
   // Default to bottom-right if no anchor is provided.
   const anchorX = anchor?.x ?? vw - margin - fabSize;
@@ -262,18 +345,13 @@ const AgentPanel: React.FC<AgentPanelProps> = ({ open, onClose, anchor, fabSize 
   // Prefer above the FAB; if there isn't enough room, open below.
   const availableAbove = anchorY - gap - margin;
   const availableBelow = vh - (anchorY + fabSize + gap) - margin;
-  const canAbove = availableAbove >= desiredMinPanelHeight;
-  const canBelow = availableBelow >= desiredMinPanelHeight;
+  const canAbove = availableAbove >= MIN_PANEL_HEIGHT;
+  const canBelow = availableBelow >= MIN_PANEL_HEIGHT;
   const openBelow = canBelow && (!canAbove || availableBelow > availableAbove);
 
-  const maxPanelHeight = (() => {
-    const available = openBelow ? availableBelow : availableAbove;
-    return Math.max(desiredMinPanelHeight, Math.min(desiredMaxPanelHeight, available));
-  })();
-
   const top = (() => {
-    const rawTop = openBelow ? anchorY + fabSize + gap : anchorY - gap - maxPanelHeight;
-    return clamp(rawTop, margin, vh - maxPanelHeight - margin);
+    const rawTop = openBelow ? anchorY + fabSize + gap : anchorY - gap - panelHeight;
+    return clamp(rawTop, margin, vh - panelHeight - margin);
   })();
 
   return (
@@ -548,6 +626,35 @@ const AgentPanel: React.FC<AgentPanelProps> = ({ open, onClose, anchor, fabSize 
               New session
             </Button>
           </Stack>
+        </Box>
+
+        {/* Resize handle */}
+        <Box
+          onMouseDown={handleResizeStart}
+          sx={{
+            position: 'absolute',
+            bottom: 0,
+            right: 0,
+            width: 20,
+            height: 20,
+            cursor: 'se-resize',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'text.secondary',
+            opacity: 0.5,
+            transition: 'opacity 0.15s',
+            '&:hover': {
+              opacity: 1,
+            },
+          }}
+        >
+          <OpenInFull
+            sx={{
+              fontSize: 12,
+              transform: 'rotate(90deg)',
+            }}
+          />
         </Box>
       </Paper>
     </Box>

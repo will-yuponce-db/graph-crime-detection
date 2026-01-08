@@ -43,12 +43,12 @@ import {
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import ForceGraph2D from 'react-force-graph-2d';
 import {
-  fetchGraphData,
-  fetchSuspects,
   USE_DATABRICKS,
   setEntityTitle,
   deleteEntityTitle,
   fetchCoLocationLog,
+  loadAllDataProgressive,
+  type FullDataLoadProgress,
 } from '../services/api';
 import HandoffAlerts from '../components/HandoffAlerts';
 
@@ -102,6 +102,7 @@ const GraphExplorer: React.FC = () => {
   const theme = useTheme();
 
   const [loading, setLoading] = useState(true);
+  const [loadProgress, setLoadProgress] = useState<FullDataLoadProgress | null>(null);
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; links: GraphLink[] }>({
     nodes: [],
     links: [],
@@ -112,7 +113,6 @@ const GraphExplorer: React.FC = () => {
   const [selectedSuspect, setSelectedSuspect] = useState<string | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileSuspect, setProfileSuspect] = useState<Suspect | null>(null);
-  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [cityFilter, setCityFilter] = useState<string | null>(null);
   const [focusedEntityIds, setFocusedEntityIds] = useState<Set<string>>(new Set());
 
@@ -144,6 +144,12 @@ const GraphExplorer: React.FC = () => {
 
   // Node visibility toggles
   const [visibleNodes, setVisibleNodes] = useState<string[]>(['suspects', 'locations']);
+
+  // Track zoom level for label scaling (use ref to avoid re-renders)
+  const zoomLevelRef = useRef(1);
+
+  // Track hovered node without triggering re-renders
+  const hoveredNodeRef = useRef<string | null>(null);
 
   // Deep-link params (from Hotspot Explorer / Case View)
   useEffect(() => {
@@ -442,11 +448,16 @@ const GraphExplorer: React.FC = () => {
     link.click();
   };
 
-  // Fetch graph data from API
+  // Fetch graph data from API with progressive loading
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [graphData, suspectsData] = await Promise.all([fetchGraphData(), fetchSuspects()]);
+        // Use progressive loader for full data fetch
+        const { suspects: suspectsData, graphData } = await loadAllDataProgressive({
+          onProgress: (progress) => {
+            setLoadProgress(progress);
+          },
+        });
 
         // Map suspects to expected format
         setSuspects(
@@ -471,6 +482,7 @@ const GraphExplorer: React.FC = () => {
         console.error('Failed to fetch graph data:', err);
       } finally {
         setLoading(false);
+        setLoadProgress(null);
       }
     };
 
@@ -754,13 +766,36 @@ const GraphExplorer: React.FC = () => {
       <Box
         sx={{
           display: 'flex',
+          flexDirection: 'column',
           justifyContent: 'center',
           alignItems: 'center',
           height: '80vh',
           bgcolor: 'background.default',
+          gap: 2,
         }}
       >
-        <CircularProgress sx={{ color: theme.palette.accent.orange }} />
+        <CircularProgress
+          variant={loadProgress ? 'determinate' : 'indeterminate'}
+          value={loadProgress?.overall.percent || 0}
+          size={56}
+          sx={{ color: theme.palette.accent.orange }}
+        />
+        {loadProgress && (
+          <Stack spacing={0.5} alignItems="center">
+            <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+              Loading data... {loadProgress.overall.percent}%
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              Suspects: {loadProgress.suspects.loaded}
+              {loadProgress.suspects.total ? ` / ${loadProgress.suspects.total}` : ''}
+              {loadProgress.suspects.complete && ' ✓'}
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              Graph: {loadProgress.graph.nodes} nodes, {loadProgress.graph.links} links
+              {loadProgress.graph.complete && ' ✓'}
+            </Typography>
+          </Stack>
+        )}
       </Box>
     );
   }
@@ -810,8 +845,12 @@ const GraphExplorer: React.FC = () => {
           d3AlphaDecay={1}
           d3VelocityDecay={1}
           cooldownTicks={0}
+          enableNodeDrag={false}
+          warmupTicks={0}
+          minZoom={0.3}
+          maxZoom={5}
           onNodeHover={(node) => {
-            setHoveredNode(node ? (node as GraphNode).id : null);
+            hoveredNodeRef.current = node ? (node as GraphNode).id : null;
           }}
           onNodeClick={(node, event) => {
             event.stopPropagation();
@@ -825,6 +864,9 @@ const GraphExplorer: React.FC = () => {
               }
             }
           }}
+          onZoom={({ k }) => {
+            zoomLevelRef.current = k;
+          }}
           nodePointerAreaPaint={(node, color, ctx) => {
             const n = node as GraphNode;
             const r = n.size + 8;
@@ -837,11 +879,12 @@ const GraphExplorer: React.FC = () => {
           nodeCanvasObject={(node, ctx) => {
             const n = node as GraphNode;
             const baseR = n.size;
-            const isHovered = hoveredNode === n.id;
+            const isHovered = hoveredNodeRef.current === n.id;
             const isFocused = focusedEntityIds.has(n.id);
             const isMultiSelected = colocationEntityIds.has(n.id);
             const isSelected = selectedSuspect === n.id || isFocused || isMultiSelected;
             const r = isHovered ? baseR * 1.2 : baseR;
+            const zoom = zoomLevelRef.current;
 
             if (
               typeof node.x !== 'number' ||
@@ -853,67 +896,13 @@ const GraphExplorer: React.FC = () => {
             }
 
             if (n.type === 'person') {
-              // Outer glow ring for suspects
-              if (n.isSuspect) {
-                const pulseScale = 1;
-                const pulseAlpha = 0.2;
-
-                // Outer glow ring
-                const gradient = ctx.createRadialGradient(
-                  node.x,
-                  node.y,
-                  r * 0.5,
-                  node.x,
-                  node.y,
-                  r * 3 * pulseScale
-                );
-                gradient.addColorStop(0, `rgba(255, 80, 80, ${pulseAlpha * 0.8})`);
-                gradient.addColorStop(0.5, `rgba(255, 50, 50, ${pulseAlpha * 0.4})`);
-                gradient.addColorStop(1, 'rgba(255, 50, 50, 0)');
-
-                ctx.beginPath();
-                ctx.arc(node.x, node.y, r * 3 * pulseScale, 0, 2 * Math.PI);
-                ctx.fillStyle = gradient;
-                ctx.fill();
-              }
-
-              // Inner glow
-              const innerGlow = ctx.createRadialGradient(
-                node.x,
-                node.y,
-                0,
-                node.x,
-                node.y,
-                r * 1.8
-              );
-              innerGlow.addColorStop(0, 'rgba(255, 100, 100, 0.6)');
-              innerGlow.addColorStop(0.6, 'rgba(255, 60, 60, 0.2)');
-              innerGlow.addColorStop(1, 'rgba(255, 60, 60, 0)');
-
-              ctx.beginPath();
-              ctx.arc(node.x, node.y, r * 1.8, 0, 2 * Math.PI);
-              ctx.fillStyle = innerGlow;
-              ctx.fill();
-
-              // Main node with gradient
-              const mainGrad = ctx.createRadialGradient(
-                node.x - r * 0.3,
-                node.y - r * 0.3,
-                0,
-                node.x,
-                node.y,
-                r
-              );
-              mainGrad.addColorStop(0, '#ff6b6b');
-              mainGrad.addColorStop(0.7, '#dc2626');
-              mainGrad.addColorStop(1, '#b91c1c');
-
+              // Main node - simple solid fill
               ctx.beginPath();
               ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
-              ctx.fillStyle = mainGrad;
+              ctx.fillStyle = '#dc2626';
               ctx.fill();
 
-              // Highlight ring
+              // Highlight ring for suspects
               if (n.isSuspect) {
                 ctx.strokeStyle = isSelected
                   ? 'rgba(255, 255, 255, 0.95)'
@@ -922,104 +911,59 @@ const GraphExplorer: React.FC = () => {
                     : 'rgba(255, 255, 255, 0.5)';
                 ctx.lineWidth = isSelected ? 2.5 : isHovered ? 2 : 1.5;
                 ctx.stroke();
-
-                // Secondary ring
-                ctx.beginPath();
-                ctx.arc(node.x, node.y, r + 4, 0, 2 * Math.PI);
-                ctx.strokeStyle = `rgba(255, 100, 100, ${isSelected ? 0.6 : 0.3})`;
-                ctx.lineWidth = 1;
-                ctx.stroke();
               }
 
-              // Specular highlight
-              ctx.beginPath();
-              ctx.arc(node.x - r * 0.25, node.y - r * 0.25, r * 0.35, 0, 2 * Math.PI);
-              ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-              ctx.fill();
-
-              // Label
-              ctx.font = `bold 11px "SF Pro Display", "Segoe UI", system-ui, sans-serif`;
+              // Label - scale font size inversely with zoom for consistent screen size
+              const labelFontSize = Math.max(8, Math.min(14, 11 / zoom));
+              ctx.font = `bold ${labelFontSize}px "SF Pro Display", "Segoe UI", system-ui, sans-serif`;
               ctx.textAlign = 'center';
               ctx.textBaseline = 'top';
               ctx.fillStyle = theme.palette.mode === 'dark' ? '#fff' : '#1a1a2e';
-              ctx.fillText(n.alias || n.name, node.x, node.y + r + 8);
+              ctx.fillText(n.alias || n.name, node.x, node.y + r + 8 / zoom);
             } else {
-              // Location nodes - hexagonal with glow
+              // Location nodes - hexagonal
               const s = r * 1.2;
               const isLocationHovered = isHovered;
-
-              // Glow effect
-              const locGlow = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, s * 2.5);
               const baseColor = n.color || '#3b82f6';
-              locGlow.addColorStop(0, baseColor.replace(')', ', 0.4)').replace('rgb', 'rgba'));
-              locGlow.addColorStop(0.5, baseColor.replace(')', ', 0.15)').replace('rgb', 'rgba'));
-              locGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
-
-              // Apply hex color conversion for glow
-              const hexToRgba = (hex: string, alpha: number) => {
-                const r = parseInt(hex.slice(1, 3), 16);
-                const g = parseInt(hex.slice(3, 5), 16);
-                const b = parseInt(hex.slice(5, 7), 16);
-                return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-              };
-
-              const locGlow2 = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, s * 2.5);
-              locGlow2.addColorStop(0, hexToRgba(baseColor, 0.4));
-              locGlow2.addColorStop(0.5, hexToRgba(baseColor, 0.15));
-              locGlow2.addColorStop(1, 'rgba(0, 0, 0, 0)');
-
-              ctx.beginPath();
-              ctx.arc(node.x, node.y, s * 2.5, 0, 2 * Math.PI);
-              ctx.fillStyle = locGlow2;
-              ctx.fill();
 
               // Hexagon shape
-              ctx.save();
-              ctx.translate(node.x, node.y);
               ctx.beginPath();
               for (let i = 0; i < 6; i++) {
                 const angle = (Math.PI / 3) * i - Math.PI / 2;
-                const x = Math.cos(angle) * s;
-                const y = Math.sin(angle) * s;
-                if (i === 0) ctx.moveTo(x, y);
-                else ctx.lineTo(x, y);
+                const hx = node.x + Math.cos(angle) * s;
+                const hy = node.y + Math.sin(angle) * s;
+                if (i === 0) ctx.moveTo(hx, hy);
+                else ctx.lineTo(hx, hy);
               }
               ctx.closePath();
-
-              // Gradient fill
-              const hexGrad = ctx.createLinearGradient(-s, -s, s, s);
-              hexGrad.addColorStop(0, hexToRgba(baseColor, 0.9));
-              hexGrad.addColorStop(1, hexToRgba(baseColor, 0.6));
-              ctx.fillStyle = hexGrad;
+              ctx.fillStyle = baseColor + 'cc'; // ~80% opacity
               ctx.fill();
 
               // Border
-              ctx.strokeStyle = isLocationHovered
-                ? hexToRgba(baseColor, 1)
-                : hexToRgba(baseColor, 0.7);
+              ctx.strokeStyle = isLocationHovered ? baseColor : baseColor + 'b3';
               ctx.lineWidth = isLocationHovered ? 2 : 1.5;
               ctx.stroke();
-              ctx.restore();
 
-              // Location icon (simple pin shape)
+              // Location icon dot
               ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
               ctx.beginPath();
               ctx.arc(node.x, node.y - 1, s * 0.3, 0, 2 * Math.PI);
               ctx.fill();
 
-              // Label
-              ctx.font = `600 10px "SF Pro Display", "Segoe UI", system-ui, sans-serif`;
+              // Label - scale font size inversely with zoom for consistent screen size
+              const locLabelFontSize = Math.max(6, Math.min(12, 10 / zoom));
+              ctx.font = `600 ${locLabelFontSize}px "SF Pro Display", "Segoe UI", system-ui, sans-serif`;
               ctx.textAlign = 'center';
               ctx.textBaseline = 'top';
-
-              ctx.fillStyle = hexToRgba(baseColor, 1);
-              ctx.fillText(n.name, node.x, node.y + s + 6);
+              ctx.fillStyle = baseColor;
+              ctx.fillText(n.name, node.x, node.y + s + 6 / zoom);
 
               if (n.city) {
-                ctx.font = `500 8px "SF Pro Display", system-ui, sans-serif`;
+                const cityFontSize = Math.max(5, Math.min(10, 8 / zoom));
+                ctx.font = `500 ${cityFontSize}px "SF Pro Display", system-ui, sans-serif`;
                 ctx.fillStyle =
                   theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.4)';
-                ctx.fillText(n.city, node.x, node.y + s + 18);
+                ctx.fillText(n.city, node.x, node.y + s + 18 / zoom);
               }
             }
           }}
@@ -1044,6 +988,7 @@ const GraphExplorer: React.FC = () => {
             )
               return;
 
+            const zoom = zoomLevelRef.current;
             const isImportant = l.type === 'CO_LOCATED' || l.type === 'FLED_TO';
 
             // Calculate path
@@ -1061,35 +1006,7 @@ const GraphExplorer: React.FC = () => {
               midY = ctrlY;
             }
 
-            // Draw glow for important links
-            if (isImportant) {
-              ctx.beginPath();
-              if (l.curvature) {
-                ctx.moveTo(start.x, start.y);
-                ctx.quadraticCurveTo(ctrlX, ctrlY, end.x, end.y);
-              } else {
-                ctx.moveTo(start.x, start.y);
-                ctx.lineTo(end.x, end.y);
-              }
-              ctx.strokeStyle =
-                l.type === 'FLED_TO' ? 'rgba(251, 146, 60, 0.2)' : 'rgba(251, 191, 36, 0.2)';
-              ctx.lineWidth = l.width * 2;
-              ctx.stroke();
-            }
-
-            // Main line with gradient
-            const gradient = ctx.createLinearGradient(start.x, start.y, end.x, end.y);
-            const baseColor = l.color || '#3b82f6';
-
-            if (isImportant) {
-              gradient.addColorStop(0, l.type === 'FLED_TO' ? '#fb923c' : '#fbbf24');
-              gradient.addColorStop(0.5, l.type === 'FLED_TO' ? '#f97316' : '#f59e0b');
-              gradient.addColorStop(1, l.type === 'FLED_TO' ? '#fb923c' : '#fbbf24');
-            } else {
-              gradient.addColorStop(0, baseColor);
-              gradient.addColorStop(1, baseColor);
-            }
-
+            // Main line - solid color instead of gradient
             ctx.beginPath();
             if (l.curvature) {
               ctx.moveTo(start.x, start.y);
@@ -1098,48 +1015,49 @@ const GraphExplorer: React.FC = () => {
               ctx.moveTo(start.x, start.y);
               ctx.lineTo(end.x, end.y);
             }
-            ctx.strokeStyle = gradient;
+            ctx.strokeStyle = isImportant
+              ? l.type === 'FLED_TO'
+                ? '#fb923c'
+                : '#fbbf24'
+              : l.color || '#3b82f6';
             ctx.lineWidth = l.width;
             ctx.stroke();
 
             // Label badge for important connections (only CO_LOCATED between people and FLED_TO)
             if ((l.type === 'CO_LOCATED' && l.count) || l.type === 'FLED_TO') {
-              const label = l.type === 'CO_LOCATED' ? `${l.count}× co-located` : 'FLED TO';
+              const label = l.type === 'CO_LOCATED' ? `${l.count}× co-loc` : 'FLED TO';
 
-              ctx.font = `600 9px "SF Pro Display", system-ui, sans-serif`;
+              // Scale everything inversely with zoom for consistent screen size
+              // Use a base size that we divide by zoom
+              const scale = 1 / zoom;
+              const baseFontSize = 9;
+              const fontSize = baseFontSize * scale;
+
+              ctx.font = `600 ${fontSize}px "SF Pro Display", system-ui, sans-serif`;
               const textWidth = ctx.measureText(label).width;
-              const badgeWidth = textWidth + 16;
-              const badgeHeight = 20;
 
-              // Badge background with gradient
-              const badgeGrad = ctx.createLinearGradient(
-                midX - badgeWidth / 2,
-                midY - badgeHeight / 2,
-                midX + badgeWidth / 2,
-                midY + badgeHeight / 2
-              );
-              if (l.type === 'FLED_TO') {
-                badgeGrad.addColorStop(0, '#1c1917');
-                badgeGrad.addColorStop(1, '#292524');
-              } else {
-                badgeGrad.addColorStop(0, '#1a1a2e');
-                badgeGrad.addColorStop(1, '#16161f');
-              }
+              // Padding and dimensions in screen-space (scaled)
+              const paddingX = 8 * scale;
+              const paddingY = 5 * scale;
+              const badgeWidth = textWidth + paddingX * 2;
+              const badgeHeight = fontSize + paddingY * 2;
+              const borderRadius = Math.min(badgeHeight / 2, 10 * scale);
 
+              // Badge background
               ctx.beginPath();
               ctx.roundRect(
                 midX - badgeWidth / 2,
                 midY - badgeHeight / 2,
                 badgeWidth,
                 badgeHeight,
-                10
+                borderRadius
               );
-              ctx.fillStyle = badgeGrad;
+              ctx.fillStyle = 'rgba(26, 26, 46, 0.95)';
               ctx.fill();
 
               // Badge border
               ctx.strokeStyle = l.type === 'FLED_TO' ? '#fb923c' : '#fbbf24';
-              ctx.lineWidth = 1.5;
+              ctx.lineWidth = 1.5 * scale;
               ctx.stroke();
 
               // Badge text

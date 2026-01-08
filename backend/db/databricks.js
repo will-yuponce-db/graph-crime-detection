@@ -125,7 +125,9 @@ async function executeQuery(sql, params = []) {
 
   const operation = await sess.executeStatement(sql, {
     runAsync: true,
-    maxRows: 10000,
+    // Allow larger batches for complete data fetches
+    // UI will paginate to load progressively
+    maxRows: 100000,
   });
 
   const result = await operation.fetchAll();

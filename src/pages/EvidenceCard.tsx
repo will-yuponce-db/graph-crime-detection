@@ -39,7 +39,6 @@ import {
   Download,
 } from '@mui/icons-material';
 import {
-  fetchCases,
   createCase,
   updateCaseStatus,
   USE_DATABRICKS,
@@ -47,6 +46,7 @@ import {
   assignCase,
   fetchCaseDetail,
   fetchEvidenceCard,
+  fetchAllCasesProgressive,
 } from '../services/api';
 import type {
   Assignee,
@@ -118,6 +118,9 @@ const CaseView: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const theme = useTheme();
   const [loading, setLoading] = useState(true);
+  const [loadProgress, setLoadProgress] = useState<{ loaded: number; total: number | null } | null>(
+    null
+  );
   const [cases, setCases] = useState<CaseData[]>([]);
   const [selectedCase, setSelectedCase] = useState<CaseData | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -144,22 +147,37 @@ const CaseView: React.FC = () => {
   const [generatedEvidenceError, setGeneratedEvidenceError] = useState<string | null>(null);
   const [generatedEvidence, setGeneratedEvidence] = useState<EvidenceCardPayload | null>(null);
 
-  // Fetch cases and assignees from API
+  // Fetch cases and assignees from API with progressive loading
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [casesData, assigneesData] = await Promise.all([fetchCases(), fetchAssignees(true)]);
+        // Start both fetches - assignees is small, cases uses progressive loading
+        const assigneesPromise = fetchAssignees(true);
+
+        // Progressive load all cases
+        const casesData = await fetchAllCasesProgressive({
+          batchSize: 500,
+          onProgress: (progress) => {
+            setLoadProgress({ loaded: progress.loaded, total: progress.total });
+            // Progressively update cases as batches arrive
+            // (already handled by the accumulation in fetchAllCasesProgressive)
+          },
+        });
+
         setCases(
-          casesData.map((c: CaseData) => ({
+          casesData.map((c) => ({
             ...c,
             status: (c.status || 'investigating') as CaseStatus,
           }))
         );
+
+        const assigneesData = await assigneesPromise;
         setAssignees(assigneesData);
       } catch (err) {
         console.error('Failed to fetch data:', err);
       } finally {
         setLoading(false);
+        setLoadProgress(null);
       }
     };
     loadData();
@@ -605,13 +623,31 @@ const CaseView: React.FC = () => {
       <Box
         sx={{
           display: 'flex',
+          flexDirection: 'column',
           justifyContent: 'center',
           alignItems: 'center',
           height: '80vh',
           bgcolor: 'background.default',
+          gap: 2,
         }}
       >
-        <CircularProgress sx={{ color: theme.palette.accent.orange }} />
+        <CircularProgress
+          variant={loadProgress?.total ? 'determinate' : 'indeterminate'}
+          value={loadProgress?.total ? (loadProgress.loaded / loadProgress.total) * 100 : 0}
+          size={56}
+          sx={{ color: theme.palette.accent.orange }}
+        />
+        {loadProgress && (
+          <Stack spacing={0.5} alignItems="center">
+            <Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+              Loading cases...
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              {loadProgress.loaded} cases loaded
+              {loadProgress.total ? ` of ${loadProgress.total}` : ''}
+            </Typography>
+          </Stack>
+        )}
       </Box>
     );
   }
