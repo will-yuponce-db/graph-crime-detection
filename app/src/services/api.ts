@@ -421,9 +421,15 @@ export async function fetchPositionsBulk(options?: {
  */
 export async function fetchHotspots(
   hour: number,
-  options?: { signal?: AbortSignal }
+  options?: { signal?: AbortSignal; startHour?: number; endHour?: number }
 ): Promise<Hotspot[]> {
-  const res = await fetch(`${API_BASE}/hotspots/${hour}`, { signal: options?.signal });
+  const params = new URLSearchParams();
+  if (options?.startHour !== undefined) params.set('startHour', String(options.startHour));
+  if (options?.endHour !== undefined) params.set('endHour', String(options.endHour));
+  const url = params.toString()
+    ? `${API_BASE}/hotspots/${hour}?${params.toString()}`
+    : `${API_BASE}/hotspots/${hour}`;
+  const res = await fetch(url, { signal: options?.signal });
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.hotspots;

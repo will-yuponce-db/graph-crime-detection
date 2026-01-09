@@ -1111,8 +1111,31 @@ function createApp(options = {}) {
       if (!isValidHourParam(hour))
         return res.status(400).json({ success: false, error: 'Hour must be 0-71' });
 
+      // Allow optional start/end hour window while keeping :hour route shape
+      const hasWindow = req.query.startHour !== undefined || req.query.endHour !== undefined;
+      const startHourRaw = hasWindow ? parseInt(req.query.startHour, 10) : hour;
+      const endHourRaw = hasWindow
+        ? parseInt(req.query.endHour !== undefined ? req.query.endHour : req.query.startHour, 10)
+        : hour;
+
+      if (
+        Number.isNaN(startHourRaw) ||
+        Number.isNaN(endHourRaw) ||
+        startHourRaw < 0 ||
+        endHourRaw < 0 ||
+        startHourRaw > 71 ||
+        endHourRaw > 71
+      ) {
+        return res
+          .status(400)
+          .json({ success: false, error: 'startHour/endHour must be between 0-71' });
+      }
+
+      const startHour = Math.min(startHourRaw, endHourRaw);
+      const endHour = Math.max(startHourRaw, endHourRaw);
+
       const limit = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
-      const cacheKey = `hotspots-${hour}-${limit}`;
+      const cacheKey = `hotspots-${startHour}-${endHour}-${limit}`;
 
       const cached = cache.get(cacheKey);
       if (cached) return res.json({ success: true, hour, ...cached, fromCache: true });
@@ -1126,9 +1149,24 @@ function createApp(options = {}) {
       // Build set of suspect entity IDs for fast lookup
       const suspectIds = new Set((suspectRankings || []).map((s) => s.entity_id));
 
-      // Aggregate by h3_cell to deduplicate rows from different time_buckets
+      // Map time_bucket -> hour index based on chronological order (if present)
+      const buckets = Array.from(
+        new Set((cellCounts || []).map((r) => r.time_bucket).filter(Boolean))
+      ).sort();
+      const bucketToHour = new Map(buckets.map((b, i) => [b, i]));
+      // Clamp requested window to available buckets if any
+      const maxBucketIndex = buckets.length > 0 ? buckets.length - 1 : 71;
+      const windowStart = Math.min(Math.max(startHour, 0), maxBucketIndex);
+      const windowEnd = Math.min(Math.max(endHour, windowStart), maxBucketIndex);
+
       const cellMap = new Map();
       for (const row of cellCounts || []) {
+        // If we have time buckets, filter rows outside the requested window
+        if (bucketToHour.size) {
+          const idx = bucketToHour.get(row.time_bucket);
+          if (idx === undefined || idx < windowStart || idx > windowEnd) continue;
+        }
+
         const cellId = row.h3_cell;
         if (!cellId) continue;
 
@@ -1196,6 +1234,8 @@ function createApp(options = {}) {
         hotspots,
         totalHotspots: cellMap.size,
         totalSuspects: suspectIds.size,
+        startHour: windowStart,
+        endHour: windowEnd,
       };
       cache.set(cacheKey, result, CACHE_TTL.POSITIONS);
       res.json({ success: true, hour, ...result, fromCache: false });

@@ -64,9 +64,10 @@ function makeStubDatabricks() {
         device_count: 2,
         entity_ids: ['E_001', 'E_002'],
         is_high_activity: true,
+        time_bucket: '2025-01-01T00:00',
       },
       {
-        // Duplicate h3_cell with different time_bucket should be aggregated
+        // Duplicate h3_cell in same bucket should be aggregated
         h3_cell: '892a1072a9fffff',
         city: 'Washington',
         state: 'DC',
@@ -75,6 +76,31 @@ function makeStubDatabricks() {
         device_count: 3,
         entity_ids: ['E_001', 'E_003'],
         is_high_activity: false,
+        time_bucket: '2025-01-01T00:00',
+      },
+      {
+        // Different bucket, same cell
+        h3_cell: '892a1072a9fffff',
+        city: 'Washington',
+        state: 'DC',
+        center_lat: 38.9,
+        center_lon: -77.07,
+        device_count: 1,
+        entity_ids: ['E_005'],
+        is_high_activity: false,
+        time_bucket: '2025-01-01T02:00',
+      },
+      {
+        // Different cell and bucket
+        h3_cell: '892a1072a8fffff',
+        city: 'Washington',
+        state: 'DC',
+        center_lat: 38.91,
+        center_lon: -77.071,
+        device_count: 4,
+        entity_ids: ['E_004'],
+        is_high_activity: false,
+        time_bucket: '2025-01-01T02:00',
       },
     ],
     getHotspotsForHour: async () => [
@@ -186,6 +212,41 @@ test('GET /api/demo/hotspots/:hour deduplicates h3_cells and calculates suspect 
     assert.equal(hotspot.lng, -77.07);
     // Name should use 8 chars not 6
     assert.ok(hotspot.towerName.includes('2a9fffff'));
+  } finally {
+    server.close();
+  }
+});
+
+test('GET /api/demo/hotspots/:hour supports bounded windows', async () => {
+  const dataDir = makeTmpDir();
+  const databricks = makeStubDatabricks();
+  const { app } = createApp({ databricks, dataDir, distPath: path.join(dataDir, 'no-dist') });
+
+  const { server, baseUrl } = await start(app);
+  try {
+    // Window covering only first bucket
+    const resNarrow = await fetch(`${baseUrl}/api/demo/hotspots/0?startHour=0&endHour=0`);
+    assert.equal(resNarrow.status, 200);
+    const bodyNarrow = await resNarrow.json();
+    assert.equal(bodyNarrow.success, true);
+    assert.equal(bodyNarrow.hotspots.length, 1);
+    assert.equal(bodyNarrow.hotspots[0].deviceCount, 5); // first bucket only
+    assert.equal(bodyNarrow.startHour, 0);
+    assert.equal(bodyNarrow.endHour, 0);
+
+    // Window covering both buckets
+    const resWide = await fetch(`${baseUrl}/api/demo/hotspots/0?startHour=0&endHour=1`);
+    assert.equal(resWide.status, 200);
+    const bodyWide = await resWide.json();
+    assert.equal(bodyWide.success, true);
+    assert.equal(bodyWide.hotspots.length, 2); // second cell appears
+    const first = bodyWide.hotspots.find((h) => h.towerId === '892a1072a9fffff');
+    const second = bodyWide.hotspots.find((h) => h.towerId === '892a1072a8fffff');
+    assert.ok(first);
+    assert.ok(second);
+    assert.equal(first.deviceCount, 6); // adds bucket 2 for same cell
+    assert.equal(bodyWide.startHour, 0);
+    assert.equal(bodyWide.endHour, 1);
   } finally {
     server.close();
   }

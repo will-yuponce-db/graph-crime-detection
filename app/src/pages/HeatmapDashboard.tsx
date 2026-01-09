@@ -22,6 +22,7 @@ import {
   CircularProgress,
   TextField,
   InputAdornment,
+  InputBase,
   useTheme,
   Divider,
   Tabs,
@@ -231,6 +232,11 @@ const HeatmapDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [bulkLoadProgress, setBulkLoadProgress] = useState<number | null>(null); // null = not started, 0-100 = loading, 100 = done
   const [currentHour, setCurrentHour] = useState(25);
+  const [timeWindow, setTimeWindow] = useState<[number, number]>([0, 71]);
+  const [startInput, setStartInput] = useState(formatHour(0));
+  const [endInput, setEndInput] = useState(formatHour(71));
+  const [startError, setStartError] = useState<string | null>(null);
+  const [endError, setEndError] = useState<string | null>(null);
   const [scrubHour, setScrubHour] = useState<number | null>(null);
   const [pendingCaseJump, setPendingCaseJump] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -238,6 +244,7 @@ const HeatmapDashboard: React.FC = () => {
   const [showDevices, setShowDevices] = useState(true);
   const [showDeviceLabels, setShowDeviceLabels] = useState(false);
   const [showHexHeatmap, setShowHexHeatmap] = useState(true);
+  const [navExpanded, setNavExpanded] = useState(false);
   const [mapCenter, setMapCenter] = useState<[number, number]>([38.9076, -77.0723]);
   const [mapZoom, setMapZoom] = useState(13);
   const [cityFilterParam, setCityFilterParam] = useState<string | null>(null);
@@ -359,6 +366,55 @@ const HeatmapDashboard: React.FC = () => {
     const normalized = ((Math.round(n) % 72) + 72) % 72;
     return normalized;
   }, []);
+
+  const parseHourInput = useCallback(
+    (raw: string | null): number | null => {
+      if (!raw) return null;
+      const text = raw.trim().toLowerCase();
+      if (!text) return null;
+
+      // Day-aware patterns like "day2 3pm"
+      const dayHourMatch = text.match(/day\s*(\d)[,\s]*\s*(\d{1,2})(?::\d{2})?\s*(am|pm)?/);
+      if (dayHourMatch) {
+        const dayIdx = Math.max(1, Math.min(3, parseInt(dayHourMatch[1], 10))) - 1; // 0-based day
+        let hour = parseInt(dayHourMatch[2], 10);
+        const ampm = dayHourMatch[3];
+        if (ampm === 'pm' && hour < 12) hour += 12;
+        if (ampm === 'am' && hour === 12) hour = 0;
+        hour = Math.min(Math.max(hour, 0), 23);
+        return Math.min(Math.max(dayIdx * 24 + hour, 0), 71);
+      }
+
+      // Simple hour with optional am/pm (assumes day 1)
+      const simple = text.match(/(\d{1,2})(?::\d{2})?\s*(am|pm)?/);
+      if (simple) {
+        let hour = parseInt(simple[1], 10);
+        const ampm = simple[2];
+        if (ampm === 'pm' && hour < 12) hour += 12;
+        if (ampm === 'am' && hour === 12) hour = 0;
+        hour = Math.min(Math.max(hour, 0), 23);
+        return hour;
+      }
+
+      // Fallback to numeric parse across full 0-71 range
+      const n = parseInt(text, 10);
+      if (!Number.isFinite(n)) return null;
+      return Math.min(Math.max(n, 0), 71);
+    },
+    []
+  );
+
+  const parseWindowParams = useCallback(
+    (startRaw: string | null, endRaw: string | null): [number, number] | null => {
+      const start = parseHourParam(startRaw);
+      const end = parseHourParam(endRaw);
+      if (start == null && end == null) return null;
+      const s = start ?? 0;
+      const e = end ?? start ?? 71;
+      return [Math.min(s, e), Math.max(s, e)];
+    },
+    [parseHourParam]
+  );
 
   const getHotspotKey = useCallback((hs: Hotspot) => `${hs.towerId}|${hs.city}`, []);
 
@@ -617,7 +673,17 @@ const HeatmapDashboard: React.FC = () => {
 
   // Cache for ALL positions (bulk loaded for smooth playback)
   const positionsCacheRef = useRef<Map<number, DevicePosition[]>>(new Map());
-  const hotspotsCacheRef = useRef<Map<number, Hotspot[]>>(new Map());
+  const hotspotsCacheRef = useRef<Map<string, Hotspot[]>>(new Map());
+
+  const getHotspotCacheKey = useCallback(
+    (hour: number, windowRange: [number, number]) => `${hour}-${windowRange[0]}-${windowRange[1]}`,
+    []
+  );
+
+  const clampHourToWindow = useCallback(
+    (hour: number) => Math.min(Math.max(hour, timeWindow[0]), timeWindow[1]),
+    [timeWindow]
+  );
 
   // (Removed) Hotspot ring pulse/delta tracking: hex heatmap defines hotspots now.
 
@@ -711,7 +777,7 @@ const HeatmapDashboard: React.FC = () => {
           fetchSuspects(),
           fetchRelationships(),
           fetchPositions(currentHour),
-          fetchHotspots(currentHour),
+          fetchHotspots(currentHour, { startHour: timeWindow[0], endHour: timeWindow[1] }),
           fetchEntitiesWithLinkStatus().catch(() => ({ persons: [], devices: [], stats: {} })),
         ]);
         
@@ -740,7 +806,10 @@ const HeatmapDashboard: React.FC = () => {
         
         // Cache the current hour
         positionsCacheRef.current.set(currentHour, currentPositions || []);
-        hotspotsCacheRef.current.set(currentHour, currentHotspots || []);
+        hotspotsCacheRef.current.set(
+          getHotspotCacheKey(currentHour, timeWindow),
+          currentHotspots || []
+        );
       } catch (err) {
         console.error('Failed to fetch essential data:', err);
       } finally {
@@ -748,6 +817,7 @@ const HeatmapDashboard: React.FC = () => {
       }
     };
     loadEssentialData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Phase 2: Bulk load all positions in background for smooth playback
@@ -819,10 +889,11 @@ const HeatmapDashboard: React.FC = () => {
   useEffect(() => {
     // If bulk loaded, use cache directly - no network calls needed during playback
     const cachedPositions = positionsCacheRef.current.get(currentHour);
+    const windowKey = getHotspotCacheKey(currentHour, timeWindow);
     if (cachedPositions) {
       setPositions(cachedPositions);
       // Only fetch hotspots if not cached (they're smaller and change less)
-      const cachedHotspots = hotspotsCacheRef.current.get(currentHour);
+      const cachedHotspots = hotspotsCacheRef.current.get(windowKey);
       if (cachedHotspots) {
         setHotspots(cachedHotspots);
         return;
@@ -840,11 +911,17 @@ const HeatmapDashboard: React.FC = () => {
       try {
         // Only fetch what's missing
         const needsPositions = !cachedPositions;
-        const needsHotspots = !hotspotsCacheRef.current.get(currentHour);
+        const needsHotspots = !hotspotsCacheRef.current.get(windowKey);
 
         const [positionsData, hotspotsData] = await Promise.all([
           needsPositions ? fetchPositions(currentHour, { signal: controller.signal }) : Promise.resolve(cachedPositions),
-          needsHotspots ? fetchHotspots(currentHour, { signal: controller.signal }) : Promise.resolve(hotspotsCacheRef.current.get(currentHour)),
+          needsHotspots
+            ? fetchHotspots(currentHour, {
+                signal: controller.signal,
+                startHour: timeWindow[0],
+                endHour: timeWindow[1],
+              })
+            : Promise.resolve(hotspotsCacheRef.current.get(windowKey)),
         ]);
         if (controller.signal.aborted) return;
 
@@ -853,7 +930,7 @@ const HeatmapDashboard: React.FC = () => {
           setPositions(positionsData);
         }
         if (needsHotspots && hotspotsData) {
-          hotspotsCacheRef.current.set(currentHour, hotspotsData);
+          hotspotsCacheRef.current.set(windowKey, hotspotsData);
           setHotspots(hotspotsData);
         }
       } catch (err) {
@@ -863,7 +940,7 @@ const HeatmapDashboard: React.FC = () => {
     };
 
     // Only fetch if we don't have the data
-    if (!cachedPositions || !hotspotsCacheRef.current.get(currentHour)) {
+    if (!cachedPositions || !hotspotsCacheRef.current.get(windowKey)) {
       loadData();
     }
 
@@ -872,7 +949,7 @@ const HeatmapDashboard: React.FC = () => {
         hourFetchAbortRef.current.abort();
       }
     };
-  }, [currentHour]);
+  }, [currentHour, timeWindow, getHotspotCacheKey]);
 
   // Get cases at current hour
   const casesAtCurrentHour = keyFrames.filter((kf) => kf.hour === currentHour);
@@ -890,12 +967,24 @@ const HeatmapDashboard: React.FC = () => {
     }
   }, [currentHour, keyFrames]);
 
+  // Keep playhead/scrub within the selected window
+  useEffect(() => {
+    setCurrentHour((h) => clampHourToWindow(h));
+    setScrubHour((h) => (h === null ? null : clampHourToWindow(h)));
+    setStartInput((prev) => (prev === formatHour(timeWindow[0]) ? prev : formatHour(timeWindow[0])));
+    setEndInput((prev) => (prev === formatHour(timeWindow[1]) ? prev : formatHour(timeWindow[1])));
+  }, [clampHourToWindow, timeWindow]);
+
   // Playback with speed control
   useEffect(() => {
     if (isPlaying) {
       const interval = 500 / playbackSpeed; // Faster speed = shorter interval
       playIntervalRef.current = setInterval(() => {
-        setCurrentHour((h) => (h >= 71 ? 0 : h + 1));
+        setCurrentHour((h) => {
+          if (h < timeWindow[0]) return timeWindow[0];
+          if (h >= timeWindow[1]) return timeWindow[0];
+          return h + 1;
+        });
       }, interval);
     } else {
       if (playIntervalRef.current) clearInterval(playIntervalRef.current);
@@ -903,7 +992,7 @@ const HeatmapDashboard: React.FC = () => {
     return () => {
       if (playIntervalRef.current) clearInterval(playIntervalRef.current);
     };
-  }, [isPlaying, playbackSpeed]);
+  }, [isPlaying, playbackSpeed, timeWindow]);
 
   const jumpToKeyFrame = useCallback((kf: KeyFrame) => {
     setCurrentHour(kf.hour);
@@ -964,6 +1053,21 @@ const HeatmapDashboard: React.FC = () => {
       setCurrentHour(parsed);
     }
 
+    const windowParsed = parseWindowParams(
+      searchParams.get('startHour'),
+      searchParams.get('endHour')
+    );
+    if (windowParsed) {
+      setTimeWindow((prev) => {
+        if (prev[0] === windowParsed[0] && prev[1] === windowParsed[1]) return prev;
+        return windowParsed;
+      });
+      setStartInput(formatHour(windowParsed[0]));
+      setEndInput(formatHour(windowParsed[1]));
+      setStartError(null);
+      setEndError(null);
+    }
+
     // Parse entityIds for person tracking
     const entityIdsParam = searchParams.get('entityIds');
     if (entityIdsParam) {
@@ -975,7 +1079,7 @@ const HeatmapDashboard: React.FC = () => {
     } else {
       setFocusedEntityIds(new Set());
     }
-  }, [searchParams, parseHourParam]);
+  }, [searchParams, parseHourParam, parseWindowParams]);
 
   // If a city filter is provided, recenter the map to a tower in that city (best effort).
   useEffect(() => {
@@ -1053,6 +1157,7 @@ const HeatmapDashboard: React.FC = () => {
             height: '100%',
             width: '100%',
             background: theme.palette.background.default,
+            zIndex: 0, // keep map under floating UI
           }}
           zoomControl={false}
         >
@@ -1366,7 +1471,7 @@ const HeatmapDashboard: React.FC = () => {
               borderColor: 'border.main',
               borderRadius: 2,
               backdropFilter: 'blur(8px)',
-              zIndex: 1000,
+              zIndex: (theme) => theme.zIndex.modal + 2,
               maxWidth: 280,
             }}
           >
@@ -1449,99 +1554,149 @@ const HeatmapDashboard: React.FC = () => {
           </Paper>
         )}
 
-        {/* Map Navigation Controls */}
+        {/* Map Navigation Controls - Collapsible */}
         <Paper
           sx={{
             position: 'absolute',
-            bottom: 110,
-            right: 0,
-            p: 1,
+            top: 90,
+            right: 12,
+            p: navExpanded ? 1.25 : 0.5,
             bgcolor: theme.palette.surface.overlay,
-            borderLeft: 1,
-            borderTop: 1,
+            border: 1,
             borderColor: 'border.main',
-            borderRadius: 0,
+            borderRadius: 2,
             backdropFilter: 'blur(8px)',
-            zIndex: 1000,
+            zIndex: (theme) => theme.zIndex.modal + 2,
           }}
         >
-          <Stack spacing={0.5}>
-            <Typography
-              variant="caption"
-              sx={{ color: 'text.secondary', textAlign: 'center', fontSize: '0.6rem' }}
-            >
-              NAV
-            </Typography>
-            <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-              <IconButton
-                size="small"
-                onClick={() => panMap('up')}
-                sx={{ color: 'text.secondary', '&:hover': { color: theme.palette.accent.orange } }}
-                title="Pan Up"
+          {navExpanded ? (
+            <Stack spacing={0.5} alignItems="center">
+              <Box
+                sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', mb: 0.5 }}
               >
-                <ArrowUpward sx={{ fontSize: 18 }} />
-              </IconButton>
-            </Box>
-            <Stack direction="row" spacing={0.5} justifyContent="center">
-              <IconButton
-                size="small"
-                onClick={() => panMap('left')}
-                sx={{ color: 'text.secondary', '&:hover': { color: theme.palette.accent.orange } }}
-                title="Pan Left"
+                <Typography
+                  variant="caption"
+                  sx={{ color: 'text.secondary', fontSize: '0.65rem', letterSpacing: 0.5 }}
+                >
+                  NAV
+                </Typography>
+                <IconButton
+                  size="small"
+                  onClick={() => setNavExpanded(false)}
+                  sx={{ color: 'text.secondary', p: 0.25, '&:hover': { color: theme.palette.accent.orange } }}
+                  title="Collapse"
+                >
+                  <Clear sx={{ fontSize: 14 }} />
+                </IconButton>
+              </Box>
+              <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+                <IconButton
+                  size="small"
+                  onClick={() => panMap('up')}
+                  sx={{
+                    color: 'text.secondary',
+                    '&:hover': { color: theme.palette.accent.orange, bgcolor: 'rgba(255,255,255,0.04)' },
+                    p: 0.75,
+                  }}
+                  title="Pan Up"
+                >
+                  <ArrowUpward sx={{ fontSize: 18 }} />
+                </IconButton>
+              </Box>
+              <Stack direction="row" spacing={0.5} justifyContent="center">
+                <IconButton
+                  size="small"
+                  onClick={() => panMap('left')}
+                  sx={{
+                    color: 'text.secondary',
+                    '&:hover': { color: theme.palette.accent.orange, bgcolor: 'rgba(255,255,255,0.04)' },
+                    p: 0.75,
+                  }}
+                  title="Pan Left"
+                >
+                  <ArrowBack sx={{ fontSize: 18 }} />
+                </IconButton>
+                <IconButton
+                  size="small"
+                  onClick={resetMapView}
+                  sx={{
+                    color: 'text.secondary',
+                    '&:hover': { color: theme.palette.accent.blue, bgcolor: 'rgba(255,255,255,0.04)' },
+                    p: 0.75,
+                  }}
+                  title="Reset View"
+                >
+                  <CenterFocusStrong sx={{ fontSize: 18 }} />
+                </IconButton>
+                <IconButton
+                  size="small"
+                  onClick={() => panMap('right')}
+                  sx={{
+                    color: 'text.secondary',
+                    '&:hover': { color: theme.palette.accent.orange, bgcolor: 'rgba(255,255,255,0.04)' },
+                    p: 0.75,
+                  }}
+                  title="Pan Right"
+                >
+                  <ArrowForward sx={{ fontSize: 18 }} />
+                </IconButton>
+              </Stack>
+              <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+                <IconButton
+                  size="small"
+                  onClick={() => panMap('down')}
+                  sx={{
+                    color: 'text.secondary',
+                    '&:hover': { color: theme.palette.accent.orange, bgcolor: 'rgba(255,255,255,0.04)' },
+                    p: 0.75,
+                  }}
+                  title="Pan Down"
+                >
+                  <ArrowDownward sx={{ fontSize: 18 }} />
+                </IconButton>
+              </Box>
+              <Stack
+                direction="row"
+                spacing={0.5}
+                justifyContent="center"
+                sx={{ mt: 1, pt: 1, borderTop: 1, borderColor: 'border.main' }}
               >
-                <ArrowBack sx={{ fontSize: 18 }} />
-              </IconButton>
-              <IconButton
-                size="small"
-                onClick={resetMapView}
-                sx={{ color: 'text.secondary', '&:hover': { color: theme.palette.accent.blue } }}
-                title="Reset View"
-              >
-                <CenterFocusStrong sx={{ fontSize: 18 }} />
-              </IconButton>
-              <IconButton
-                size="small"
-                onClick={() => panMap('right')}
-                sx={{ color: 'text.secondary', '&:hover': { color: theme.palette.accent.orange } }}
-                title="Pan Right"
-              >
-                <ArrowForward sx={{ fontSize: 18 }} />
-              </IconButton>
+                <IconButton
+                  size="small"
+                  onClick={() => zoomMap('out')}
+                  sx={{
+                    color: 'text.secondary',
+                    '&:hover': { color: theme.palette.accent.orange, bgcolor: 'rgba(255,255,255,0.04)' },
+                    p: 0.75,
+                  }}
+                  title="Zoom Out"
+                >
+                  <ZoomOut sx={{ fontSize: 18 }} />
+                </IconButton>
+                <IconButton
+                  size="small"
+                  onClick={() => zoomMap('in')}
+                  sx={{
+                    color: 'text.secondary',
+                    '&:hover': { color: theme.palette.accent.orange, bgcolor: 'rgba(255,255,255,0.04)' },
+                    p: 0.75,
+                  }}
+                  title="Zoom In"
+                >
+                  <ZoomIn sx={{ fontSize: 18 }} />
+                </IconButton>
+              </Stack>
             </Stack>
-            <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-              <IconButton
-                size="small"
-                onClick={() => panMap('down')}
-                sx={{ color: 'text.secondary', '&:hover': { color: theme.palette.accent.orange } }}
-                title="Pan Down"
-              >
-                <ArrowDownward sx={{ fontSize: 18 }} />
-              </IconButton>
-            </Box>
-            <Stack
-              direction="row"
-              spacing={0.5}
-              justifyContent="center"
-              sx={{ mt: 1, pt: 1, borderTop: 1, borderColor: 'border.main' }}
+          ) : (
+            <IconButton
+              size="small"
+              onClick={() => setNavExpanded(true)}
+              sx={{ color: 'text.secondary', p: 0.5, '&:hover': { color: theme.palette.accent.orange } }}
+              title="Expand Nav"
             >
-              <IconButton
-                size="small"
-                onClick={() => zoomMap('out')}
-                sx={{ color: 'text.secondary', '&:hover': { color: theme.palette.accent.orange } }}
-                title="Zoom Out"
-              >
-                <ZoomOut sx={{ fontSize: 18 }} />
-              </IconButton>
-              <IconButton
-                size="small"
-                onClick={() => zoomMap('in')}
-                sx={{ color: 'text.secondary', '&:hover': { color: theme.palette.accent.orange } }}
-                title="Zoom In"
-              >
-                <ZoomIn sx={{ fontSize: 18 }} />
-              </IconButton>
-            </Stack>
-          </Stack>
+              <CenterFocusStrong sx={{ fontSize: 18 }} />
+            </IconButton>
+          )}
         </Paper>
 
         {/* Header */}
@@ -1557,7 +1712,7 @@ const HeatmapDashboard: React.FC = () => {
             borderColor: 'border.main',
             borderRadius: 0,
             backdropFilter: 'blur(8px)',
-            zIndex: 1000,
+            zIndex: (theme) => theme.zIndex.modal + 2,
           }}
         >
           <Stack direction="row" justifyContent="space-between" alignItems="center">
@@ -1741,16 +1896,133 @@ const HeatmapDashboard: React.FC = () => {
             borderTop: 1,
             borderColor: 'border.main',
             borderRadius: 0,
-            zIndex: 1000,
+            zIndex: (theme) => theme.zIndex.modal + 1,
+            pointerEvents: 'auto',
           }}
         >
+        <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 1 }}>
+          <Typography variant="body2" sx={{ minWidth: 90, color: 'text.secondary' }}>
+            Time window
+          </Typography>
+          <Box sx={{ flex: 1 }}>
+            <Slider
+              value={timeWindow}
+              onChange={(_, v) => {
+                const [rawStart, rawEnd] = v as number[];
+                const start = Math.max(0, Math.min(rawStart, rawEnd));
+                const end = Math.min(71, Math.max(rawStart, rawEnd));
+                setTimeWindow([start, end]);
+                setIsPlaying(false);
+              }}
+              onChangeCommitted={(_, v) => {
+                const [rawStart, rawEnd] = v as number[];
+                const start = Math.max(0, Math.min(rawStart, rawEnd));
+                const end = Math.min(71, Math.max(rawStart, rawEnd));
+                setTimeWindow([start, end]);
+              }}
+              min={0}
+              max={71}
+              disableSwap
+              sx={{ color: theme.palette.accent.orange }}
+            />
+          </Box>
+          <Stack spacing={0.5} direction="row" alignItems="center" sx={{ flexShrink: 0 }}>
+            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>
+              Start
+            </Typography>
+            <InputBase
+              value={startInput}
+              placeholder={formatHour(timeWindow[0])}
+              onChange={(e) => {
+                setStartInput(e.target.value);
+                setStartError(null);
+              }}
+              onBlur={() => {
+                const parsed = parseHourInput(startInput);
+                if (parsed == null) {
+                  setStartError('Use 0-71 or like "Day2 3pm"');
+                  return;
+                }
+                setStartError(null);
+                setTimeWindow(([_, end]) => {
+                  const next: [number, number] = [Math.min(parsed, end), Math.max(parsed, end)];
+                  setStartInput(formatHour(next[0]));
+                  return next;
+                });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+              inputProps={{ inputMode: 'text' }}
+              sx={{
+                width: 120,
+                flexShrink: 0,
+                px: 1,
+                py: 0.5,
+                fontSize: '0.7rem',
+                fontFamily: 'monospace',
+                border: '1px solid',
+                borderColor: startError ? theme.palette.error.main : 'border.main',
+                borderRadius: 1,
+                bgcolor: 'background.paper',
+                '& input': { p: 0 },
+              }}
+            />
+            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', ml: 0.5 }}>
+              End
+            </Typography>
+            <InputBase
+              value={endInput}
+              placeholder={formatHour(timeWindow[1])}
+              onChange={(e) => {
+                setEndInput(e.target.value);
+                setEndError(null);
+              }}
+              onBlur={() => {
+                const parsed = parseHourInput(endInput);
+                if (parsed == null) {
+                  setEndError('Use 0-71 or like "Day2 3pm"');
+                  return;
+                }
+                setEndError(null);
+                setTimeWindow(([start, _]) => {
+                  const next: [number, number] = [Math.min(start, parsed), Math.max(start, parsed)];
+                  setEndInput(formatHour(next[1]));
+                  return next;
+                });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+              inputProps={{ inputMode: 'text' }}
+              sx={{
+                width: 120,
+                flexShrink: 0,
+                px: 1,
+                py: 0.5,
+                fontSize: '0.7rem',
+                fontFamily: 'monospace',
+                border: '1px solid',
+                borderColor: endError ? theme.palette.error.main : 'border.main',
+                borderRadius: 1,
+                bgcolor: 'background.paper',
+                '& input': { p: 0 },
+              }}
+            />
+          </Stack>
+        </Stack>
+
           <Stack direction="row" alignItems="center" spacing={2}>
             <IconButton
               onClick={() => {
                 setScrubHour(null);
                 isScrubbingRef.current = false;
                 setIsPlaying(false);
-                setCurrentHour((h) => Math.max(0, h - 1));
+                setCurrentHour((h) => Math.max(timeWindow[0], h - 1));
               }}
               sx={{ color: 'text.secondary' }}
             >
@@ -1767,7 +2039,7 @@ const HeatmapDashboard: React.FC = () => {
                 setScrubHour(null);
                 isScrubbingRef.current = false;
                 setIsPlaying(false);
-                setCurrentHour((h) => Math.min(71, h + 1));
+                setCurrentHour((h) => Math.min(timeWindow[1], h + 1));
               }}
               sx={{ color: 'text.secondary' }}
             >
@@ -1782,14 +2054,14 @@ const HeatmapDashboard: React.FC = () => {
                     isScrubbingRef.current = true;
                     setIsPlaying(false);
                   }
-                  setScrubHour(v as number);
+                setScrubHour(clampHourToWindow(v as number));
                 }}
                 onChangeCommitted={(_, v) => {
                   isScrubbingRef.current = false;
                   setIsPlaying(false);
                   setScrubHour(null);
                   // Commit the hour -> triggers one fetch (no spam while dragging)
-                  setCurrentHour(v as number);
+                setCurrentHour(clampHourToWindow(v as number));
                 }}
                 min={0}
                 max={71}
@@ -1923,25 +2195,26 @@ const HeatmapDashboard: React.FC = () => {
         <Paper
           sx={{
             position: 'absolute',
-            bottom: 110,
-            left: 0,
-            p: 1.5,
+            top: 90,
+            left: 12,
+            px: 1.5,
+            py: 1,
             bgcolor: theme.palette.surface.overlay,
-            borderRight: 1,
-            borderTop: 1,
+            border: 1,
             borderColor: 'border.main',
-            borderRadius: 0,
-            zIndex: 1001,
+            borderRadius: 2,
+            backdropFilter: 'blur(8px)',
+            zIndex: (theme) => theme.zIndex.modal + 2,
           }}
         >
-          <Stack spacing={0.5}>
-            <Stack direction="row" alignItems="center" spacing={1}>
-              <Box sx={{ fontSize: 12 }}>📡</Box>
-              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <Stack direction="row" alignItems="center" spacing={0.75}>
+              <Box sx={{ fontSize: 12, opacity: 0.85 }}>📡</Box>
+              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
                 Tower
               </Typography>
             </Stack>
-            <Stack direction="row" alignItems="center" spacing={1}>
+            <Stack direction="row" alignItems="center" spacing={0.75}>
               <Box
                 sx={{
                   width: 8,
@@ -1950,20 +2223,20 @@ const HeatmapDashboard: React.FC = () => {
                   bgcolor: theme.palette.accent.red,
                 }}
               />
-              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
                 Person of Interest
               </Typography>
             </Stack>
-            <Stack direction="row" alignItems="center" spacing={1}>
+            <Stack direction="row" alignItems="center" spacing={0.75}>
               <Box
                 sx={{
                   width: 8,
                   height: 8,
                   borderRadius: '50%',
-                  border: `2px dashed ${theme.palette.accent.orange}`,
+                  border: `1.5px dashed ${theme.palette.accent.orange}`,
                 }}
               />
-              <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
                 Case
               </Typography>
             </Stack>
