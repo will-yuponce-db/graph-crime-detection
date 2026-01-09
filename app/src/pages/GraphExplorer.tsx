@@ -181,6 +181,38 @@ const GraphExplorer: React.FC = () => {
     'devices',
   ]);
 
+  // Container dimensions for responsive graph sizing
+  const [containerDimensions, setContainerDimensions] = useState<{ width: number; height: number }>({
+    width: 0,
+    height: 0,
+  });
+
+  // Track container dimensions with ResizeObserver for proper graph sizing on load
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Set initial dimensions
+    setContainerDimensions({
+      width: container.clientWidth,
+      height: container.clientHeight,
+    });
+
+    // Observe for resize changes
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        setContainerDimensions({ width, height });
+      }
+    });
+
+    resizeObserver.observe(container);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
   // Graph view mode: 'persons' (default) or 'devices'
   const [graphViewMode, setGraphViewMode] = useState<'persons' | 'devices'>('persons');
 
@@ -1260,8 +1292,8 @@ const GraphExplorer: React.FC = () => {
         <ForceGraph2D
           ref={graphRef}
           graphData={filteredGraphData}
-          width={containerRef.current?.clientWidth || 800}
-          height={containerRef.current?.clientHeight || 600}
+          width={containerDimensions.width || 800}
+          height={containerDimensions.height || 600}
           backgroundColor="transparent"
           nodeRelSize={1}
           nodeVal={(node) => (node as GraphNode).size}
