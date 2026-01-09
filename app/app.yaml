@@ -1,0 +1,52 @@
+# Databricks Apps Configuration
+# This app connects to Unity Catalog: pubsec_geo_law.demo
+
+command:
+  - "bash"
+  - "-c"
+  - |
+    # Production start (clean Vite build + backend server)
+    npm run start:prod
+
+env:
+  # Server configuration
+  - name: NODE_ENV
+    value: "production"
+  - name: PORT
+    value: "8000"
+  
+  # Databricks Unity Catalog configuration
+  - name: DATABRICKS_HOST
+    value: "fe-vm-industry-solutions-buildathon.cloud.databricks.com"
+  - name: DATABRICKS_HTTP_PATH
+    value: "/sql/1.0/warehouses/288a7ec183eea397"
+  - name: DATABRICKS_CATALOG
+    value: "pubsec_geo_law"
+  - name: DATABRICKS_SCHEMA
+    value: "demo"
+  
+  # Agent configuration
+  - name: DATABRICKS_AGENT_ENDPOINT
+    value: "databricks-gpt-5-2"
+  
+  # Databricks Apps automatically injects DATABRICKS_TOKEN for the app's service principal
+
+resources:
+  # Compute allocation
+  memory: "2Gi"
+  cpu: "1"
+  
+  # Declare resources the app needs access to
+  # This grants the app's service principal permission to use these resources
+  sql_warehouse:
+    - name: sql-warehouse
+      id: "288a7ec183eea397"
+      permission: CAN_USE
+  
+  serving_endpoint:
+    - name: agent-endpoint
+      endpoint_name: "databricks-gpt-5-2"
+      permission: CAN_QUERY
+
+
+

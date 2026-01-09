@@ -1,0 +1,17 @@
+{
+  "links": [
+    {
+      "linkId": "DPL_1767901632662_fcsxoj",
+      "deviceId": "E_1098",
+      "personId": "P_001",
+      "relationship": "suspected_owner",
+      "confidence": 0.7,
+      "validFrom": "2026-01-08",
+      "validTo": null,
+      "notes": null,
+      "source": "manual",
+      "createdAt": "2026-01-08T19:47:12.662Z"
+    }
+  ],
+  "rejectedSuggestions": []
+}
