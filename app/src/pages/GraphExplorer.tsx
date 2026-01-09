@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Box,
   Paper,
@@ -124,6 +124,7 @@ const GraphExplorer: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const containerRef = useRef<HTMLDivElement>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const graphRef = useRef<ForceGraphMethods<GraphNode, GraphLink> | undefined>(undefined);
   const clickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const theme = useTheme();
@@ -187,35 +188,45 @@ const GraphExplorer: React.FC = () => {
     height: 0,
   });
 
-  // Track container dimensions with ResizeObserver for proper graph sizing on load
-  // Using useLayoutEffect to measure synchronously before paint
-  useLayoutEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+  // Callback ref to measure container when it mounts - more reliable than useLayoutEffect
+  const containerCallbackRef = useCallback((node: HTMLDivElement | null) => {
+    // Clean up previous observer
+    if (resizeObserverRef.current) {
+      resizeObserverRef.current.disconnect();
+      resizeObserverRef.current = null;
+    }
 
-    // Set initial dimensions synchronously
-    const rect = container.getBoundingClientRect();
-    setContainerDimensions({
-      width: rect.width,
-      height: rect.height,
-    });
+    if (node) {
+      // Store ref for other uses
+      (containerRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
 
-    // Observe for resize changes
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        if (width > 0 && height > 0) {
-          setContainerDimensions({ width, height });
-        }
+      // Measure immediately
+      const rect = node.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setContainerDimensions({ width: rect.width, height: rect.height });
       }
-    });
 
-    resizeObserver.observe(container);
+      // Set up observer for future resizes
+      resizeObserverRef.current = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const { width, height } = entry.contentRect;
+          if (width > 0 && height > 0) {
+            setContainerDimensions({ width, height });
+          }
+        }
+      });
+      resizeObserverRef.current.observe(node);
+    }
+  }, []);
 
+  // Cleanup observer on unmount
+  useEffect(() => {
     return () => {
-      resizeObserver.disconnect();
+      if (resizeObserverRef.current) {
+        resizeObserverRef.current.disconnect();
+      }
     };
-  }, [loading]); // Re-run when loading changes (container appears after loading)
+  }, []);
 
   // Graph view mode: 'persons' (default) or 'devices'
   const [graphViewMode, setGraphViewMode] = useState<'persons' | 'devices'>('persons');
@@ -1263,7 +1274,7 @@ const GraphExplorer: React.FC = () => {
     <Box sx={{ height: 'calc(100vh - 64px)', display: 'flex', bgcolor: 'background.default' }}>
       {/* Graph Area */}
       <Box
-        ref={containerRef}
+        ref={containerCallbackRef}
         sx={{
           flex: 1,
           position: 'relative',
