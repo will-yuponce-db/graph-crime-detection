@@ -917,11 +917,22 @@ def persons_bronze():
             "age": 37,
             "ssn_last4": "4412",
             "known_addresses": "1842 Rhode Island Ave NE, Washington DC",
-            "criminal_history": "Prior arrests: B&E (2019), Possession stolen property (2021)",
+            "criminal_history": "Prior arrests: B&E (2019), Possession stolen property (2021). Convicted: B&E (2021) - 18 months, released early.",
             "notes": "Primary suspect in regional burglary series. Known to use burner phones. Travels between DC and Nashville.",
             "role": "primary_suspect",
             "risk_level": "high",
-            "status": "active"
+            "status": "active",
+            # Probation/Parole info
+            "supervision_status": "probation",
+            "supervision_type": "felony_probation",
+            "supervision_start": "2023-06-15",
+            "supervision_end": "2026-06-15",
+            "probation_officer": "Officer James Martinez",
+            "probation_officer_phone": "202-555-0147",
+            "supervision_conditions": "No contact with known felons, No travel outside DC/MD/VA without permission, Weekly check-ins, Employment required",
+            "last_checkin": "2025-01-10",
+            "compliance_status": "violation_suspected",
+            "violation_notes": "Failed to report out-of-state travel to Nashville (Jan 6-8). Possible association with known felon P_002."
         },
         {
             "person_id": "P_002",
@@ -934,11 +945,22 @@ def persons_bronze():
             "age": 33,
             "ssn_last4": "1098",
             "known_addresses": "3421 Martin Luther King Jr Ave SE, Washington DC",
-            "criminal_history": "Prior arrests: Grand theft auto (2018), B&E (2020, with P_001)",
+            "criminal_history": "Prior arrests: Grand theft auto (2018), B&E (2020, with P_001). Convicted: GTA (2018) - 2 years served.",
             "notes": "Known associate of Marcus Williams. Suspected getaway driver. Co-arrested with Williams in 2020.",
             "role": "primary_suspect",
             "risk_level": "high",
-            "status": "active"
+            "status": "active",
+            # Parole info
+            "supervision_status": "parole",
+            "supervision_type": "state_parole",
+            "supervision_start": "2022-03-01",
+            "supervision_end": "2025-03-01",
+            "probation_officer": "Officer Linda Chen",
+            "probation_officer_phone": "202-555-0198",
+            "supervision_conditions": "No contact with P_001 (co-defendant), Curfew 10PM-6AM, GPS monitoring required, No vehicle operation without permission",
+            "last_checkin": "2025-01-08",
+            "compliance_status": "violation_confirmed",
+            "violation_notes": "GPS shows contact with P_001 on multiple occasions. Curfew violations Jan 6, 8, 10, 12, 13, 15. Vehicle operation detected."
         },
         {
             "person_id": "P_003",
@@ -951,11 +973,22 @@ def persons_bronze():
             "age": 49,
             "ssn_last4": "9901",
             "known_addresses": "1500 Russell St, Baltimore MD; 422 N Charles St, Baltimore MD",
-            "criminal_history": "Prior convictions: Fencing stolen goods (2015), Fencing (2018)",
+            "criminal_history": "Prior convictions: Fencing stolen goods (2015) - 2 years, Fencing (2018) - 3 years. Released 2021.",
             "notes": "Known fence operating out of Baltimore industrial district. Multiple informant tips. Suspected connection to broader fencing network.",
             "role": "fence",
             "risk_level": "medium",
-            "status": "active"
+            "status": "active",
+            # Parole info
+            "supervision_status": "parole",
+            "supervision_type": "federal_supervised_release",
+            "supervision_start": "2021-09-01",
+            "supervision_end": "2026-09-01",
+            "probation_officer": "Officer Michael Brown",
+            "probation_officer_phone": "410-555-0234",
+            "supervision_conditions": "No possession of stolen property, Submit to searches, Employment verification required, No contact with known fences",
+            "last_checkin": "2025-01-05",
+            "compliance_status": "compliant",
+            "violation_notes": None
         },
         {
             "person_id": "P_004",
@@ -972,7 +1005,17 @@ def persons_bronze():
             "notes": "Device E_7734 appeared after E_0412 went dark on Jan 15. Suspected device switch by Marcus Williams (P_001).",
             "role": "suspected_alias",
             "risk_level": "high",
-            "status": "unidentified"
+            "status": "unidentified",
+            "supervision_status": None,
+            "supervision_type": None,
+            "supervision_start": None,
+            "supervision_end": None,
+            "probation_officer": None,
+            "probation_officer_phone": None,
+            "supervision_conditions": None,
+            "last_checkin": None,
+            "compliance_status": None,
+            "violation_notes": None
         },
         # ===== ADDITIONAL SUSPECTS / CREW MEMBERS =====
         {
@@ -986,11 +1029,22 @@ def persons_bronze():
             "age": 35,
             "ssn_last4": "7823",
             "known_addresses": "2215 Benning Rd NE, Washington DC",
-            "criminal_history": "Prior arrests: Burglary (2017), Assault (2019)",
+            "criminal_history": "Prior arrests: Burglary (2017) - dismissed, Assault (2019) - 6 months served",
             "notes": "Suspected lookout for the crew. Device shows occasional presence near crime scenes but not inside.",
             "role": "suspected_lookout",
             "risk_level": "medium",
-            "status": "active"
+            "status": "active",
+            # Probation info
+            "supervision_status": "probation",
+            "supervision_type": "misdemeanor_probation",
+            "supervision_start": "2024-01-15",
+            "supervision_end": "2025-07-15",
+            "probation_officer": "Officer Sarah Williams",
+            "probation_officer_phone": "202-555-0156",
+            "supervision_conditions": "No weapons, Anger management classes, Monthly check-ins",
+            "last_checkin": "2025-01-02",
+            "compliance_status": "compliant",
+            "violation_notes": None
         },
         {
             "person_id": "P_006",
@@ -1003,13 +1057,24 @@ def persons_bronze():
             "age": 30,
             "ssn_last4": "3341",
             "known_addresses": "1901 Good Hope Rd SE, Washington DC",
-            "criminal_history": "Prior arrests: Receiving stolen property (2020)",
+            "criminal_history": "Prior arrests: Receiving stolen property (2020) - Convicted, 1 year suspended",
             "notes": "Suspected secondary fence or middleman. May broker deals between crew and Ray-O.",
             "role": "suspected_middleman",
             "risk_level": "medium",
-            "status": "active"
+            "status": "active",
+            # Probation info  
+            "supervision_status": "probation",
+            "supervision_type": "felony_probation",
+            "supervision_start": "2021-06-01",
+            "supervision_end": "2025-06-01",
+            "probation_officer": "Officer David Kim",
+            "probation_officer_phone": "202-555-0178",
+            "supervision_conditions": "No contact with stolen property, Employment required, Bi-weekly check-ins",
+            "last_checkin": "2025-01-12",
+            "compliance_status": "violation_suspected",
+            "violation_notes": "Observed at known fence location (P_003 residence) on Jan 9 and Jan 14."
         },
-        # ===== VICTIMS =====
+        # ===== VICTIMS (no supervision) =====
         {
             "person_id": "V_001",
             "first_name": "Eleanor",
@@ -1025,7 +1090,10 @@ def persons_bronze():
             "notes": "Victim - CASE_DC_001. High net worth individual. Reported $450,000 in jewelry stolen.",
             "role": "victim",
             "risk_level": None,
-            "status": "victim"
+            "status": "victim",
+            "supervision_status": None, "supervision_type": None, "supervision_start": None, "supervision_end": None,
+            "probation_officer": None, "probation_officer_phone": None, "supervision_conditions": None,
+            "last_checkin": None, "compliance_status": None, "violation_notes": None
         },
         {
             "person_id": "V_002",
@@ -1042,7 +1110,10 @@ def persons_bronze():
             "notes": "Victim - CASE_TN_007. Art collector. Reported $320,000 in antiques stolen.",
             "role": "victim",
             "risk_level": None,
-            "status": "victim"
+            "status": "victim",
+            "supervision_status": None, "supervision_type": None, "supervision_start": None, "supervision_end": None,
+            "probation_officer": None, "probation_officer_phone": None, "supervision_conditions": None,
+            "last_checkin": None, "compliance_status": None, "violation_notes": None
         },
         {
             "person_id": "V_003",
@@ -1059,9 +1130,12 @@ def persons_bronze():
             "notes": "Victim - CASE_VA_003. Investment banker. Reported $180,000 in valuables stolen.",
             "role": "victim",
             "risk_level": None,
-            "status": "victim"
+            "status": "victim",
+            "supervision_status": None, "supervision_type": None, "supervision_start": None, "supervision_end": None,
+            "probation_officer": None, "probation_officer_phone": None, "supervision_conditions": None,
+            "last_checkin": None, "compliance_status": None, "violation_notes": None
         },
-        # ===== WITNESSES =====
+        # ===== WITNESSES (no supervision) =====
         {
             "person_id": "W_001",
             "first_name": "Maria",
@@ -1077,7 +1151,10 @@ def persons_bronze():
             "notes": "Witness - CASE_DC_001. Neighbor who reported seeing suspicious vehicle (dark SUV) at 2:15 AM.",
             "role": "witness",
             "risk_level": None,
-            "status": "cooperating"
+            "status": "cooperating",
+            "supervision_status": None, "supervision_type": None, "supervision_start": None, "supervision_end": None,
+            "probation_officer": None, "probation_officer_phone": None, "supervision_conditions": None,
+            "last_checkin": None, "compliance_status": None, "violation_notes": None
         },
         {
             "person_id": "W_002",
@@ -1094,9 +1171,12 @@ def persons_bronze():
             "notes": "Witness - CASE_DC_002. Security guard who observed two males leaving property at 10:15 PM.",
             "role": "witness",
             "risk_level": None,
-            "status": "cooperating"
+            "status": "cooperating",
+            "supervision_status": None, "supervision_type": None, "supervision_start": None, "supervision_end": None,
+            "probation_officer": None, "probation_officer_phone": None, "supervision_conditions": None,
+            "last_checkin": None, "compliance_status": None, "violation_notes": None
         },
-        # ===== CLEARED INDIVIDUALS (False Positives) =====
+        # ===== CLEARED INDIVIDUALS (no supervision) =====
         {
             "person_id": "C_001",
             "first_name": "David",
@@ -1112,7 +1192,10 @@ def persons_bronze():
             "notes": "Initially flagged due to device proximity. CLEARED - verified employment alibi at Georgetown Hospital during incidents.",
             "role": "cleared",
             "risk_level": None,
-            "status": "cleared"
+            "status": "cleared",
+            "supervision_status": None, "supervision_type": None, "supervision_start": None, "supervision_end": None,
+            "probation_officer": None, "probation_officer_phone": None, "supervision_conditions": None,
+            "last_checkin": None, "compliance_status": None, "violation_notes": None
         },
         {
             "person_id": "C_002",
@@ -1129,7 +1212,10 @@ def persons_bronze():
             "notes": "Initially flagged due to repeated presence in Georgetown area. CLEARED - resident of the neighborhood, established pattern.",
             "role": "cleared",
             "risk_level": None,
-            "status": "cleared"
+            "status": "cleared",
+            "supervision_status": None, "supervision_type": None, "supervision_start": None, "supervision_end": None,
+            "probation_officer": None, "probation_officer_phone": None, "supervision_conditions": None,
+            "last_checkin": None, "compliance_status": None, "violation_notes": None
         }
     ]
     
@@ -1149,6 +1235,17 @@ def persons_bronze():
         StructField("role", StringType(), True),
         StructField("risk_level", StringType(), True),
         StructField("status", StringType(), True),
+        # Supervision/Probation fields
+        StructField("supervision_status", StringType(), True),
+        StructField("supervision_type", StringType(), True),
+        StructField("supervision_start", StringType(), True),
+        StructField("supervision_end", StringType(), True),
+        StructField("probation_officer", StringType(), True),
+        StructField("probation_officer_phone", StringType(), True),
+        StructField("supervision_conditions", StringType(), True),
+        StructField("last_checkin", StringType(), True),
+        StructField("compliance_status", StringType(), True),
+        StructField("violation_notes", StringType(), True),
     ])
     
     return spark.createDataFrame(persons, schema)
@@ -1332,6 +1429,310 @@ def case_persons_bronze():
     ])
     
     return spark.createDataFrame(case_persons, schema)
+
+
+# =============================================================================
+# WARRANTS - Warrant requests and tracking
+# =============================================================================
+
+@dp.materialized_view(
+    name="warrants_bronze",
+    comment="Warrant requests linked to cases and suspects"
+)
+def warrants_bronze():
+    """Generate warrant records for the investigation."""
+    
+    warrants = [
+        # Arrest warrants for main suspects
+        {
+            "warrant_id": "WR_001",
+            "warrant_type": "arrest",
+            "case_id": "CASE_DC_001",
+            "target_person_id": "P_001",
+            "target_address": "1842 Rhode Island Ave NE, Washington DC",
+            "requesting_agency": "DC Metropolitan Police",
+            "requesting_officer": "Det. Sarah Mitchell",
+            "badge_number": "MPD-4521",
+            "submitted_date": "2025-01-16",
+            "approved_date": "2025-01-17",
+            "approving_judge": "Hon. Michael Chen",
+            "court": "DC Superior Court",
+            "expiration_date": "2025-02-17",
+            "status": "approved",
+            "priority": "high",
+            "probable_cause_summary": """Marcus Williams (DOB: 1987-03-15) is wanted for Burglary in the First Degree. 
+Device E_0412 registered to subject was detected at crime scene (CASE_DC_001) at 4521 Foxhall Rd NW 
+during the burglary incident on 2025-01-15 at approximately 14:30. Same device detected at 5 prior 
+burglary scenes across DC/Nashville. Subject has prior convictions for B&E (2021) and is currently 
+on felony probation with travel restrictions violated. Subject believed to have switched to burner 
+device E_7734 after incident to avoid detection.""",
+            "charges": "Burglary First Degree, Probation Violation, Interstate Flight",
+            "bail_recommendation": "No bail - flight risk",
+            "armed_dangerous": True,
+            "notes": "Subject known to use burner phones. May be armed. Last known location: Georgetown area."
+        },
+        {
+            "warrant_id": "WR_002",
+            "warrant_type": "arrest",
+            "case_id": "CASE_DC_001",
+            "target_person_id": "P_002",
+            "target_address": "3421 Martin Luther King Jr Ave SE, Washington DC",
+            "requesting_agency": "DC Metropolitan Police",
+            "requesting_officer": "Det. Sarah Mitchell",
+            "badge_number": "MPD-4521",
+            "submitted_date": "2025-01-16",
+            "approved_date": "2025-01-17",
+            "approving_judge": "Hon. Michael Chen",
+            "court": "DC Superior Court",
+            "expiration_date": "2025-02-17",
+            "status": "approved",
+            "priority": "high",
+            "probable_cause_summary": """Devon Carter (DOB: 1991-08-22) is wanted for Burglary in the First Degree.
+Device E_1098 registered to subject was detected at crime scene (CASE_DC_001) co-located with 
+known associate Marcus Williams. GPS monitoring (condition of parole) confirms multiple curfew 
+violations and contact with co-defendant Williams in violation of parole conditions. Same device 
+detected at 6 burglary scenes across DC/Nashville area.""",
+            "charges": "Burglary First Degree, Parole Violation, Conspiracy",
+            "bail_recommendation": "No bail - multiple parole violations",
+            "armed_dangerous": False,
+            "notes": "GPS ankle monitor may still be active. Known to drive dark-colored SUV."
+        },
+        # Search warrant for fence location
+        {
+            "warrant_id": "WR_003",
+            "warrant_type": "search",
+            "case_id": "CASE_MD_001",
+            "target_person_id": "P_003",
+            "target_address": "1500 Russell St, Baltimore MD",
+            "requesting_agency": "Baltimore Police Department",
+            "requesting_officer": "Det. James Rodriguez",
+            "badge_number": "BPD-7892",
+            "submitted_date": "2025-01-17",
+            "approved_date": None,
+            "approving_judge": None,
+            "court": "Baltimore City Circuit Court",
+            "expiration_date": None,
+            "status": "pending",
+            "priority": "medium",
+            "probable_cause_summary": """Raymond Okonkwo (DOB: 1975-11-03) operates a suspected fencing operation 
+at 1500 Russell St, Baltimore MD. Surveillance confirmed meetings with suspects P_001 and P_002 
+on Jan 9 and Jan 14 respectively. Subject has prior convictions for fencing (2015, 2018) and is 
+on federal supervised release. Items sought: stolen jewelry matching description from DC/Nashville 
+burglary series, financial records, communication devices.""",
+            "charges": "Receiving Stolen Property, Fencing",
+            "bail_recommendation": None,
+            "armed_dangerous": False,
+            "notes": "Coordinate with DC Metro and Nashville PD. May require multi-jurisdiction task force."
+        },
+        # Geofence warrant for crime scene analysis
+        {
+            "warrant_id": "WR_004",
+            "warrant_type": "geofence",
+            "case_id": "CASE_DC_001",
+            "target_person_id": None,
+            "target_address": "4521 Foxhall Rd NW, Washington DC (H3: 892a1008003ffff)",
+            "requesting_agency": "DC Metropolitan Police",
+            "requesting_officer": "Det. Sarah Mitchell",
+            "badge_number": "MPD-4521",
+            "submitted_date": "2025-01-15",
+            "approved_date": "2025-01-15",
+            "approving_judge": "Hon. Lisa Park",
+            "court": "DC Superior Court",
+            "expiration_date": "2025-01-22",
+            "status": "executed",
+            "priority": "high",
+            "probable_cause_summary": """Request for geofence data from Google/Apple for H3 cell 892a1008003ffff 
+(Georgetown area) during time window 2025-01-15 14:00 to 15:00. Burglary reported at 4521 Foxhall Rd NW 
+with estimated incident time 14:30. Seeking all device identifiers present in geofence to identify 
+potential suspects and witnesses.""",
+            "charges": "Investigative - Burglary First Degree",
+            "bail_recommendation": None,
+            "armed_dangerous": False,
+            "notes": "Data received 2025-01-16. 50 devices identified in cell during window. Analysis complete."
+        },
+        # Tower dump warrant
+        {
+            "warrant_id": "WR_005",
+            "warrant_type": "tower_dump",
+            "case_id": "CASE_TN_007",
+            "target_person_id": None,
+            "target_address": "Cell Tower ID: TN-NASH-4412, Belle Meade area",
+            "requesting_agency": "Nashville Metro Police",
+            "requesting_officer": "Det. Robert Thompson",
+            "badge_number": "MNPD-2234",
+            "submitted_date": "2025-01-09",
+            "approved_date": "2025-01-09",
+            "approving_judge": "Hon. William Davis",
+            "court": "Davidson County Criminal Court",
+            "expiration_date": "2025-01-16",
+            "status": "executed",
+            "priority": "high",
+            "probable_cause_summary": """Request for cell tower records from Verizon/AT&T/T-Mobile for tower 
+TN-NASH-4412 covering Belle Meade residential area during burglary incident 2025-01-08 15:00-16:00. 
+Seeking device connection records to identify suspects in residential burglary at 4501 Harding Pike.""",
+            "charges": "Investigative - Burglary",
+            "bail_recommendation": None,
+            "armed_dangerous": False,
+            "notes": "Cross-reference with DC geofence data revealed matching devices E_0412 and E_1098."
+        },
+        # Probation violation warrant
+        {
+            "warrant_id": "WR_006",
+            "warrant_type": "probation_violation",
+            "case_id": None,
+            "target_person_id": "P_001",
+            "target_address": "1842 Rhode Island Ave NE, Washington DC",
+            "requesting_agency": "DC Pretrial Services Agency",
+            "requesting_officer": "Officer James Martinez",
+            "badge_number": "PSA-1147",
+            "submitted_date": "2025-01-17",
+            "approved_date": "2025-01-17",
+            "approving_judge": "Hon. Michael Chen",
+            "court": "DC Superior Court",
+            "expiration_date": None,
+            "status": "approved",
+            "priority": "high",
+            "probable_cause_summary": """Marcus Williams violated conditions of felony probation:
+1. Failed to report out-of-state travel to Nashville, TN (Jan 6-8, 2025)
+2. Association with known felon Devon Carter (P_002) - multiple documented contacts
+3. Failed to maintain employment as required
+4. Missed scheduled check-in on Jan 15, 2025
+Recommend immediate revocation of probation and remand to custody.""",
+            "charges": "Probation Violation",
+            "bail_recommendation": "Remand - probation revocation",
+            "armed_dangerous": True,
+            "notes": "Coordinate with arrest warrant WR_001."
+        },
+        # Arrest warrant for lookout
+        {
+            "warrant_id": "WR_007",
+            "warrant_type": "arrest",
+            "case_id": "CASE_DC_001",
+            "target_person_id": "P_005",
+            "target_address": "2215 Benning Rd NE, Washington DC",
+            "requesting_agency": "DC Metropolitan Police",
+            "requesting_officer": "Det. Sarah Mitchell",
+            "badge_number": "MPD-4521",
+            "submitted_date": "2025-01-18",
+            "approved_date": None,
+            "approving_judge": None,
+            "court": "DC Superior Court",
+            "expiration_date": None,
+            "status": "draft",
+            "priority": "medium",
+            "probable_cause_summary": """Terrence Jackson (DOB: 1989-06-12) suspected of acting as lookout 
+for burglary crew. Device E_7823 detected in perimeter of crime scenes during CASE_DC_001 and 
+CASE_DC_004. Not detected inside properties but consistent presence suggests coordination. 
+Subject currently on misdemeanor probation for assault.""",
+            "charges": "Conspiracy to Commit Burglary",
+            "bail_recommendation": "$25,000",
+            "armed_dangerous": False,
+            "notes": "Lower priority - gather additional evidence before submission."
+        }
+    ]
+    
+    schema = StructType([
+        StructField("warrant_id", StringType(), False),
+        StructField("warrant_type", StringType(), False),
+        StructField("case_id", StringType(), True),
+        StructField("target_person_id", StringType(), True),
+        StructField("target_address", StringType(), True),
+        StructField("requesting_agency", StringType(), False),
+        StructField("requesting_officer", StringType(), False),
+        StructField("badge_number", StringType(), True),
+        StructField("submitted_date", StringType(), True),
+        StructField("approved_date", StringType(), True),
+        StructField("approving_judge", StringType(), True),
+        StructField("court", StringType(), True),
+        StructField("expiration_date", StringType(), True),
+        StructField("status", StringType(), False),
+        StructField("priority", StringType(), True),
+        StructField("probable_cause_summary", StringType(), True),
+        StructField("charges", StringType(), True),
+        StructField("bail_recommendation", StringType(), True),
+        StructField("armed_dangerous", BooleanType(), True),
+        StructField("notes", StringType(), True),
+    ])
+    
+    return spark.createDataFrame(warrants, schema)
+
+
+@dp.materialized_view(
+    name="warrant_evidence_bronze",
+    comment="Evidence items supporting warrant applications"
+)
+def warrant_evidence_bronze():
+    """Generate evidence records linked to warrants."""
+    
+    evidence = [
+        # Evidence for WR_001 (Arrest warrant for P_001)
+        {"evidence_id": "EV_001", "warrant_id": "WR_001", "evidence_type": "device_location",
+         "description": "Device E_0412 detected at CASE_DC_001 crime scene (H3: 892a1008003ffff) on 2025-01-15 14:30",
+         "source_table": "location_events_silver", "confidence": 0.95, "weight": 0.30},
+        {"evidence_id": "EV_002", "warrant_id": "WR_001", "evidence_type": "cross_jurisdiction",
+         "description": "Same device E_0412 detected at 5 additional burglary scenes in DC and Nashville",
+         "source_table": "entity_case_overlap", "confidence": 0.92, "weight": 0.25},
+        {"evidence_id": "EV_003", "warrant_id": "WR_001", "evidence_type": "co_presence",
+         "description": "Device E_0412 consistently co-located with E_1098 (known associate Devon Carter)",
+         "source_table": "co_presence_edges", "confidence": 0.95, "weight": 0.15},
+        {"evidence_id": "EV_004", "warrant_id": "WR_001", "evidence_type": "probation_violation",
+         "description": "Subject on felony probation violated travel restrictions (Nashville Jan 6-8)",
+         "source_table": "persons_silver", "confidence": 1.0, "weight": 0.20},
+        {"evidence_id": "EV_005", "warrant_id": "WR_001", "evidence_type": "device_handoff",
+         "description": "Device E_0412 went dark at 14:45, burner E_7734 appeared same location - suspected switch",
+         "source_table": "handoff_candidates", "confidence": 0.85, "weight": 0.10},
+        
+        # Evidence for WR_002 (Arrest warrant for P_002)
+        {"evidence_id": "EV_006", "warrant_id": "WR_002", "evidence_type": "device_location",
+         "description": "Device E_1098 detected at CASE_DC_001 crime scene co-located with E_0412",
+         "source_table": "location_events_silver", "confidence": 0.95, "weight": 0.30},
+        {"evidence_id": "EV_007", "warrant_id": "WR_002", "evidence_type": "cross_jurisdiction",
+         "description": "Device E_1098 detected at 6 burglary scenes across DC and Nashville",
+         "source_table": "entity_case_overlap", "confidence": 0.92, "weight": 0.25},
+        {"evidence_id": "EV_008", "warrant_id": "WR_002", "evidence_type": "parole_violation",
+         "description": "GPS monitoring shows curfew violations on Jan 6, 8, 10, 12, 13, 15",
+         "source_table": "persons_silver", "confidence": 1.0, "weight": 0.25},
+        {"evidence_id": "EV_009", "warrant_id": "WR_002", "evidence_type": "parole_violation",
+         "description": "Contact with co-defendant P_001 in violation of parole conditions",
+         "source_table": "co_presence_edges", "confidence": 0.98, "weight": 0.20},
+        
+        # Evidence for WR_003 (Search warrant for fence)
+        {"evidence_id": "EV_010", "warrant_id": "WR_003", "evidence_type": "surveillance",
+         "description": "Subject P_003 observed meeting with P_001 at 1500 Russell St on Jan 9",
+         "source_table": "person_social_edges_silver", "confidence": 0.85, "weight": 0.35},
+        {"evidence_id": "EV_011", "warrant_id": "WR_003", "evidence_type": "surveillance",
+         "description": "Subject P_003 observed meeting with P_002 at 1500 Russell St on Jan 14",
+         "source_table": "person_social_edges_silver", "confidence": 0.80, "weight": 0.30},
+        {"evidence_id": "EV_012", "warrant_id": "WR_003", "evidence_type": "prior_convictions",
+         "description": "Subject has 2 prior convictions for fencing stolen goods (2015, 2018)",
+         "source_table": "persons_silver", "confidence": 1.0, "weight": 0.20},
+        {"evidence_id": "EV_013", "warrant_id": "WR_003", "evidence_type": "informant_tip",
+         "description": "Confidential informant reports subject actively buying stolen jewelry",
+         "source_table": None, "confidence": 0.70, "weight": 0.15},
+        
+        # Evidence for WR_006 (Probation violation)
+        {"evidence_id": "EV_014", "warrant_id": "WR_006", "evidence_type": "travel_violation",
+         "description": "Device E_0412 detected in Nashville Jan 6-8 without travel permission",
+         "source_table": "location_events_silver", "confidence": 0.98, "weight": 0.40},
+        {"evidence_id": "EV_015", "warrant_id": "WR_006", "evidence_type": "association_violation",
+         "description": "Multiple documented contacts with known felon P_002 (Carter)",
+         "source_table": "co_presence_edges", "confidence": 0.95, "weight": 0.35},
+        {"evidence_id": "EV_016", "warrant_id": "WR_006", "evidence_type": "missed_checkin",
+         "description": "Failed to appear for scheduled check-in on 2025-01-15",
+         "source_table": "persons_silver", "confidence": 1.0, "weight": 0.25},
+    ]
+    
+    schema = StructType([
+        StructField("evidence_id", StringType(), False),
+        StructField("warrant_id", StringType(), False),
+        StructField("evidence_type", StringType(), False),
+        StructField("description", StringType(), False),
+        StructField("source_table", StringType(), True),
+        StructField("confidence", DoubleType(), False),
+        StructField("weight", DoubleType(), False),
+    ])
+    
+    return spark.createDataFrame(evidence, schema)
 
 
 @dp.materialized_view(
@@ -2655,5 +3056,194 @@ def co_presence_with_persons():
                 F.col("p2.role").isin("primary_suspect", "suspected_lookout", "suspected_middleman", "fence"),
                 True
             ).otherwise(False).alias("both_suspects")
+        )
+    )
+
+
+# =============================================================================
+# WARRANT SILVER & GOLD TABLES
+# =============================================================================
+
+@dp.materialized_view(
+    name="warrants_silver",
+    comment="Cleaned warrant records with parsed dates"
+)
+def warrants_silver():
+    """Clean and enrich warrant data."""
+    return (
+        dp.read("warrants_bronze")
+        .withColumn("submitted_date_ts", F.to_date("submitted_date"))
+        .withColumn("approved_date_ts", F.to_date("approved_date"))
+        .withColumn("expiration_date_ts", F.to_date("expiration_date"))
+        .withColumn("is_active", 
+            F.when(
+                (F.col("status") == "approved") & 
+                (F.col("expiration_date_ts") >= F.current_date()),
+                True
+            ).otherwise(False)
+        )
+        .withColumn("days_until_expiration",
+            F.when(F.col("expiration_date_ts").isNotNull(),
+                F.datediff(F.col("expiration_date_ts"), F.current_date())
+            ).otherwise(None)
+        )
+        .withColumn("ingestion_timestamp", F.current_timestamp())
+    )
+
+
+@dp.materialized_view(
+    name="warrant_evidence_silver",
+    comment="Cleaned warrant evidence records"
+)
+def warrant_evidence_silver():
+    """Clean warrant evidence data."""
+    return (
+        dp.read("warrant_evidence_bronze")
+        .withColumn("weighted_score", F.col("confidence") * F.col("weight"))
+        .withColumn("ingestion_timestamp", F.current_timestamp())
+    )
+
+
+@dp.materialized_view(
+    name="warrant_package_data",
+    comment="Complete warrant packages with all linked data for PDF generation"
+)
+def warrant_package_data():
+    """
+    Combine warrant, person, case, and evidence data into a complete package
+    ready for rendering warrant documents and the app UI.
+    """
+    warrants = dp.read("warrants_silver").alias("w")
+    persons = dp.read("persons_silver").alias("p")
+    cases = dp.read("cases_silver").alias("c")
+    evidence = dp.read("warrant_evidence_silver").alias("e")
+    
+    # Aggregate evidence per warrant
+    evidence_agg = (
+        evidence
+        .groupBy("warrant_id")
+        .agg(
+            F.count("*").alias("evidence_count"),
+            F.sum("weighted_score").alias("total_evidence_score"),
+            F.collect_list(
+                F.struct(
+                    F.col("evidence_id"),
+                    F.col("evidence_type"),
+                    F.col("description"),
+                    F.col("source_table"),
+                    F.col("confidence"),
+                    F.col("weight"),
+                    F.col("weighted_score")
+                )
+            ).alias("evidence_items")
+        )
+    ).alias("ea")
+    
+    # Build comprehensive warrant package
+    return (
+        warrants
+        .join(persons, F.col("w.target_person_id") == F.col("p.person_id"), "left")
+        .join(cases, F.col("w.case_id") == F.col("c.case_id"), "left")
+        .join(evidence_agg, F.col("w.warrant_id") == F.col("ea.warrant_id"), "left")
+        .select(
+            # Warrant info
+            F.col("w.warrant_id"),
+            F.col("w.warrant_type"),
+            F.col("w.status").alias("warrant_status"),
+            F.col("w.priority"),
+            F.col("w.submitted_date"),
+            F.col("w.approved_date"),
+            F.col("w.expiration_date"),
+            F.col("w.is_active"),
+            F.col("w.days_until_expiration"),
+            F.col("w.requesting_agency"),
+            F.col("w.requesting_officer"),
+            F.col("w.badge_number"),
+            F.col("w.approving_judge"),
+            F.col("w.court"),
+            F.col("w.target_address"),
+            F.col("w.probable_cause_summary"),
+            F.col("w.charges"),
+            F.col("w.bail_recommendation"),
+            F.col("w.armed_dangerous"),
+            F.col("w.notes").alias("warrant_notes"),
+            
+            # Target person info
+            F.col("p.person_id"),
+            F.col("p.display_name"),
+            F.col("p.first_name"),
+            F.col("p.last_name"),
+            F.col("p.alias"),
+            F.col("p.dob"),
+            F.col("p.age"),
+            F.col("p.ssn_last4"),
+            F.col("p.known_addresses"),
+            F.col("p.criminal_history"),
+            F.col("p.role").alias("person_role"),
+            # Supervision info
+            F.col("p.supervision_status"),
+            F.col("p.supervision_type"),
+            F.col("p.supervision_start"),
+            F.col("p.supervision_end"),
+            F.col("p.probation_officer"),
+            F.col("p.probation_officer_phone"),
+            F.col("p.supervision_conditions"),
+            F.col("p.compliance_status"),
+            F.col("p.violation_notes"),
+            
+            # Case info
+            F.col("w.case_id"),
+            F.col("c.case_type"),
+            F.col("c.city").alias("case_city"),
+            F.col("c.state").alias("case_state"),
+            F.col("c.address").alias("case_address"),
+            F.col("c.incident_time_bucket"),
+            F.col("c.estimated_loss"),
+            F.col("c.narrative").alias("case_narrative"),
+            
+            # Evidence summary
+            F.coalesce(F.col("ea.evidence_count"), F.lit(0)).alias("evidence_count"),
+            F.coalesce(F.col("ea.total_evidence_score"), F.lit(0.0)).alias("total_evidence_score"),
+            F.col("ea.evidence_items")
+        )
+    )
+
+
+@dp.materialized_view(
+    name="suspects_on_supervision",
+    comment="All persons currently on probation/parole for quick lookup"
+)
+def suspects_on_supervision():
+    """
+    Filter persons who are currently on probation or parole.
+    Useful for identifying supervision violations.
+    """
+    persons = dp.read("persons_silver")
+    
+    return (
+        persons
+        .filter(F.col("supervision_status").isNotNull())
+        .select(
+            F.col("person_id"),
+            F.col("display_name"),
+            F.col("alias"),
+            F.col("role"),
+            F.col("known_addresses"),
+            F.col("criminal_history"),
+            F.col("supervision_status"),
+            F.col("supervision_type"),
+            F.col("supervision_start"),
+            F.col("supervision_end"),
+            F.col("probation_officer"),
+            F.col("probation_officer_phone"),
+            F.col("supervision_conditions"),
+            F.col("last_checkin"),
+            F.col("compliance_status"),
+            F.col("violation_notes"),
+            # Computed fields
+            F.when(F.col("compliance_status").isin("violation_suspected", "violation_confirmed"), True)
+             .otherwise(False).alias("has_violation"),
+            F.when(F.to_date(F.col("supervision_end")) < F.current_date(), True)
+             .otherwise(False).alias("supervision_expired")
         )
     )
