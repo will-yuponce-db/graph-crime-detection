@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Box,
   Paper,
@@ -188,21 +188,25 @@ const GraphExplorer: React.FC = () => {
   });
 
   // Track container dimensions with ResizeObserver for proper graph sizing on load
-  useEffect(() => {
+  // Using useLayoutEffect to measure synchronously before paint
+  useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    // Set initial dimensions
+    // Set initial dimensions synchronously
+    const rect = container.getBoundingClientRect();
     setContainerDimensions({
-      width: container.clientWidth,
-      height: container.clientHeight,
+      width: rect.width,
+      height: rect.height,
     });
 
     // Observe for resize changes
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
-        setContainerDimensions({ width, height });
+        if (width > 0 && height > 0) {
+          setContainerDimensions({ width, height });
+        }
       }
     });
 
@@ -211,7 +215,7 @@ const GraphExplorer: React.FC = () => {
     return () => {
       resizeObserver.disconnect();
     };
-  }, []);
+  }, [loading]); // Re-run when loading changes (container appears after loading)
 
   // Graph view mode: 'persons' (default) or 'devices'
   const [graphViewMode, setGraphViewMode] = useState<'persons' | 'devices'>('persons');
@@ -1289,11 +1293,12 @@ const GraphExplorer: React.FC = () => {
             pointerEvents: 'none',
           }}
         />
+        {containerDimensions.width > 0 && containerDimensions.height > 0 && (
         <ForceGraph2D
           ref={graphRef}
           graphData={filteredGraphData}
-          width={containerDimensions.width || 800}
-          height={containerDimensions.height || 600}
+          width={containerDimensions.width}
+          height={containerDimensions.height}
           backgroundColor="transparent"
           nodeRelSize={1}
           nodeVal={(node) => (node as GraphNode).size}
@@ -1738,6 +1743,7 @@ const GraphExplorer: React.FC = () => {
             }
           }}
         />
+        )}
 
         {/* Header */}
         <Paper
