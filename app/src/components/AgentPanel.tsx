@@ -248,7 +248,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({ open, onClose }) => {
     {
       role: 'assistant',
       content:
-        'Investigation Copilot ready. Ask a question like: “Show me suspects tied to DC and highlight the top entities.”',
+        'AI Detective ready. Ask a question like: “Show me suspects tied to DC and highlight the top entities.”',
       ts: Date.now(),
     },
   ]);
@@ -506,7 +506,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({ open, onClose }) => {
                 color: theme.palette.mode === 'dark' ? theme.palette.accent.purple : 'text.primary',
               }}
             >
-              INVESTIGATION COPILOT
+              AI DETECTIVE
             </Typography>
             <Chip
               label="AI"

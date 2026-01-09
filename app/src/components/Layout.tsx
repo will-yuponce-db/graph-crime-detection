@@ -219,7 +219,7 @@ const Layout: React.FC = () => {
               },
             }}
           >
-            COPILOT
+            AI DETECTIVE
           </Button>
 
           <ThemeToggle />

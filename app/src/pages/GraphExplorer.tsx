@@ -25,13 +25,11 @@ import {
 import {
   Hub,
   ArrowForward,
-  Cloud,
   Close,
   Phone,
   LocationOn,
   Warning,
   History,
-  Download,
   People,
   Call,
   Map as MapIcon,
@@ -39,6 +37,8 @@ import {
   DeviceHub,
   Link as LinkIcon,
   LinkOff,
+  Cloud,
+  Download,
   Add,
   ExpandMore,
   Search,
@@ -191,6 +191,7 @@ const GraphExplorer: React.FC = () => {
   // Create link dialog
   const [createLinkOpen, setCreateLinkOpen] = useState(false);
   const [linkInitialDevice, setLinkInitialDevice] = useState<string | undefined>(undefined);
+  const [linkInitialPerson, setLinkInitialPerson] = useState<string | undefined>(undefined);
 
   // AI Insights state
   const [relationshipInsight, setRelationshipInsight] = useState<Insight | null>(null);
@@ -262,6 +263,23 @@ const GraphExplorer: React.FC = () => {
     return matchingIds;
   }, [globalSearch, graphData.nodes, suspects]);
 
+  const compactToggleSx = {
+    '& .MuiToggleButton-root': {
+      border: 1,
+      borderColor: 'border.main',
+      color: 'text.secondary',
+      fontSize: '0.7rem',
+      px: 1.1,
+      py: 0.4,
+      minHeight: 32,
+      textTransform: 'none',
+      '&.Mui-selected': {
+        borderColor: 'transparent',
+        boxShadow: 'none',
+      },
+    },
+  };
+
   const toggleSection = (section: string) => {
     setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
   };
@@ -298,7 +316,6 @@ const GraphExplorer: React.FC = () => {
       setNetworkInsightLoading(false);
     }
   }, [cityFilter]);
-  const [linkInitialPerson, setLinkInitialPerson] = useState<string | undefined>(undefined);
 
   // Track zoom level for label scaling (use ref to avoid re-renders)
   const zoomLevelRef = useRef(1);
@@ -381,6 +398,58 @@ const GraphExplorer: React.FC = () => {
       return next;
     });
   }, []);
+
+  // Open create link dialog
+  const handleOpenCreateLink = useCallback((deviceId?: string, personId?: string) => {
+    setLinkInitialDevice(deviceId);
+    setLinkInitialPerson(personId);
+    setCreateLinkOpen(true);
+  }, []);
+
+  // Close create link dialog
+  const handleCloseCreateLink = useCallback(() => {
+    setCreateLinkOpen(false);
+    setLinkInitialDevice(undefined);
+    setLinkInitialPerson(undefined);
+  }, []);
+
+  // Handle link created - refresh data
+  const handleLinkCreated = useCallback(() => {
+    setEntitiesData(null); // Will trigger re-fetch
+  }, []);
+
+  // Export suspects to CSV
+  const exportSuspectsCSV = () => {
+    const headers = [
+      'Name',
+      'Alias',
+      'Threat Level',
+      'Risk Score',
+      'Linked Devices',
+      'Linked Cities',
+      'Criminal History',
+    ];
+    const rows = suspects.map((s) => [
+      s.name,
+      s.alias || '',
+      s.threatLevel,
+      s.totalScore?.toFixed(2) || '',
+      s.linkedDevices?.map((d) => d.deviceId).join('; ') || '',
+      s.linkedCities?.join('; ') || '',
+      s.criminalHistory || '',
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map((row) => row.map((cell) => `"${cell}"`).join(',')),
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `suspects_export_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+  };
 
   const clearColocationSelection = useCallback(() => {
     setColocationEntityIds(new Set());
@@ -724,25 +793,6 @@ const GraphExplorer: React.FC = () => {
     );
   }, [entitiesData]);
 
-  // Open create link dialog
-  const handleOpenCreateLink = useCallback((deviceId?: string, personId?: string) => {
-    setLinkInitialDevice(deviceId);
-    setLinkInitialPerson(personId);
-    setCreateLinkOpen(true);
-  }, []);
-
-  // Close create link dialog
-  const handleCloseCreateLink = useCallback(() => {
-    setCreateLinkOpen(false);
-    setLinkInitialDevice(undefined);
-    setLinkInitialPerson(undefined);
-  }, []);
-
-  // Handle link created - refresh data
-  const handleLinkCreated = useCallback(() => {
-    setEntitiesData(null); // Will trigger re-fetch
-  }, []);
-
   // Handle single click with delay to distinguish from double-click
   const handleCardClick = useCallback((suspectId: string) => {
     if (clickTimeoutRef.current) {
@@ -854,39 +904,6 @@ const GraphExplorer: React.FC = () => {
       }
     };
   }, []);
-
-  // Export suspects to CSV
-  const exportSuspectsCSV = () => {
-    const headers = [
-      'Name',
-      'Alias',
-      'Threat Level',
-      'Risk Score',
-      'Linked Devices',
-      'Linked Cities',
-      'Criminal History',
-    ];
-    const rows = suspects.map((s) => [
-      s.name,
-      s.alias || '',
-      s.threatLevel,
-      s.totalScore?.toFixed(2) || '',
-      s.linkedDevices?.map(d => d.deviceId).join('; ') || '',
-      s.linkedCities?.join('; ') || '',
-      s.criminalHistory || '',
-    ]);
-
-    const csvContent = [
-      headers.join(','),
-      ...rows.map((row) => row.map((cell) => `"${cell}"`).join(',')),
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `suspects_export_${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
-  };
 
   // Fetch graph data from API with progressive loading
   useEffect(() => {
@@ -1709,327 +1726,293 @@ const GraphExplorer: React.FC = () => {
             overflowX: 'auto',
           }}
         >
-          <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1} sx={{ minWidth: 'fit-content' }}>
-            <Stack direction="row" alignItems="center" spacing={2}>
-              <Avatar sx={{ bgcolor: theme.palette.accent.orange, width: 36, height: 36 }}>
-                <Hub sx={{ fontSize: 20 }} />
-              </Avatar>
-              <Box>
-                <Typography
-                  variant="subtitle1"
-                  sx={{ color: 'text.primary', fontWeight: 700, lineHeight: 1.2 }}
-                >
-                  Network Analysis
+          <Stack spacing={1.25} sx={{ minWidth: 'fit-content' }}>
+            <Stack
+              direction="row"
+              justifyContent="space-between"
+              alignItems="center"
+              flexWrap="wrap"
+              rowGap={1}
+              columnGap={1.5}
+            >
+              <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" rowGap={0.5}>
+                <Typography variant="subtitle2" sx={{ color: 'text.primary', fontWeight: 700 }}>
+                  Graph filters
                 </Typography>
-                <Stack direction="row" alignItems="center" spacing={1}>
-                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                    Suspect relationships across jurisdictions
-                  </Typography>
-                  {cityFilter && (
-                    <Chip
-                      label={`City: ${cityFilter}`}
-                      size="small"
-                      sx={{
-                        height: 18,
-                        fontSize: '0.6rem',
-                        bgcolor: `${theme.palette.accent.blue}20`,
-                        color: theme.palette.accent.blue,
-                      }}
-                    />
-                  )}
-                  {focusedEntityIds.size > 0 && (
-                    <Chip
-                      label={`🎯 Focused: ${focusedEntityIds.size}`}
-                      size="small"
-                      onDelete={() => {
-                        setFocusedEntityIds(new Set());
-                        setSelectedPersonIds(new Set());
-                        setColocationEntityIds(new Set());
-                      }}
-                      sx={{
-                        height: 20,
-                        fontSize: '0.6rem',
-                        bgcolor: `${theme.palette.accent.purple}30`,
+                {cityFilter && (
+                  <Chip
+                    label={`City ${cityFilter}`}
+                    size="small"
+                    sx={{
+                      height: 20,
+                      fontSize: '0.7rem',
+                      bgcolor: `${theme.palette.accent.blue}18`,
+                      color: theme.palette.accent.blue,
+                    }}
+                  />
+                )}
+                {focusedEntityIds.size > 0 && (
+                  <Chip
+                    label={`Focus ${focusedEntityIds.size}`}
+                    size="small"
+                    onDelete={() => {
+                      setFocusedEntityIds(new Set());
+                      setSelectedPersonIds(new Set());
+                      setColocationEntityIds(new Set());
+                    }}
+                    sx={{
+                      height: 20,
+                      fontSize: '0.7rem',
+                      bgcolor: `${theme.palette.accent.purple}24`,
+                      color: theme.palette.accent.purple,
+                      fontWeight: 600,
+                      '& .MuiChip-deleteIcon': {
                         color: theme.palette.accent.purple,
-                        fontWeight: 600,
-                        '& .MuiChip-deleteIcon': {
+                        fontSize: 14,
+                        '&:hover': { color: theme.palette.accent.red },
+                      },
+                    }}
+                  />
+                )}
+              </Stack>
+
+              <Stack
+                direction="row"
+                spacing={1}
+                alignItems="center"
+                flexWrap="wrap"
+                rowGap={0.75}
+                justifyContent="flex-end"
+              >
+                <Stack direction="row" spacing={0.75} alignItems="center">
+                  <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', letterSpacing: 0.6 }}>
+                    View
+                  </Typography>
+                  <ToggleButtonGroup
+                    value={graphViewMode}
+                    exclusive
+                    onChange={handleViewModeToggle}
+                    size="small"
+                    sx={compactToggleSx}
+                  >
+                    <ToggleButton
+                      value="persons"
+                      sx={{
+                        '&.Mui-selected': {
+                          bgcolor: `${theme.palette.accent.purple}20`,
                           color: theme.palette.accent.purple,
-                          fontSize: 14,
-                          '&:hover': { color: theme.palette.accent.red },
+                          '&:hover': { bgcolor: `${theme.palette.accent.purple}30` },
                         },
                       }}
-                    />
-                  )}
-                  {USE_DATABRICKS && (
-                    <Chip
-                      icon={<Cloud sx={{ fontSize: 12 }} />}
-                      label="Databricks"
-                      size="small"
+                    >
+                      Persons
+                    </ToggleButton>
+                    <ToggleButton
+                      value="devices"
                       sx={{
-                        height: 18,
-                        fontSize: '0.6rem',
-                        bgcolor: `${theme.palette.accent.orange}20`,
-                        color: theme.palette.accent.orange,
-                        '& .MuiChip-icon': { color: theme.palette.accent.orange },
+                        '&.Mui-selected': {
+                          bgcolor: `${theme.palette.accent.green}20`,
+                          color: theme.palette.accent.green,
+                          '&:hover': { bgcolor: `${theme.palette.accent.green}30` },
+                        },
                       }}
-                    />
-                  )}
+                    >
+                      Devices
+                      {entitiesData && (
+                        <Chip
+                          label={`${entitiesData.stats.unlinkedDevices} unlinked`}
+                          size="small"
+                          sx={{
+                            ml: 0.5,
+                            height: 16,
+                            fontSize: '0.6rem',
+                            bgcolor:
+                              entitiesData.stats.unlinkedDevices > 0
+                                ? `${theme.palette.warning.main}28`
+                                : `${theme.palette.success.main}24`,
+                            color:
+                              entitiesData.stats.unlinkedDevices > 0
+                                ? theme.palette.warning.main
+                                : theme.palette.success.main,
+                          }}
+                        />
+                      )}
+                    </ToggleButton>
+                  </ToggleButtonGroup>
                 </Stack>
-              </Box>
+
+                <Stack direction="row" spacing={0.75} alignItems="center">
+                  <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', letterSpacing: 0.6 }}>
+                    Nodes
+                  </Typography>
+                  <ToggleButtonGroup
+                    value={visibleNodes}
+                    onChange={handleNodeToggle}
+                    size="small"
+                    sx={compactToggleSx}
+                  >
+                    <Tooltip title="Show/Hide persons of interest">
+                      <ToggleButton
+                        value="suspects"
+                        sx={{
+                          '&.Mui-selected': {
+                            bgcolor: `${theme.palette.accent.red}20`,
+                            color: theme.palette.accent.red,
+                            '&:hover': { bgcolor: `${theme.palette.accent.red}30` },
+                          },
+                        }}
+                      >
+                        Suspects
+                      </ToggleButton>
+                    </Tooltip>
+                    <Tooltip title="Show/Hide associates (other persons linked to network)">
+                      <ToggleButton
+                        value="associates"
+                        sx={{
+                          '&.Mui-selected': {
+                            bgcolor: 'rgba(107, 114, 128, 0.2)',
+                            color: '#9ca3af',
+                            '&:hover': { bgcolor: 'rgba(107, 114, 128, 0.3)' },
+                          },
+                        }}
+                      >
+                        Associates
+                      </ToggleButton>
+                    </Tooltip>
+                    <Tooltip title="Show/Hide devices linked to persons">
+                      <ToggleButton
+                        value="devices"
+                        sx={{
+                          '&.Mui-selected': {
+                            bgcolor: 'rgba(139, 92, 246, 0.2)',
+                            color: '#8b5cf6',
+                            '&:hover': { bgcolor: 'rgba(139, 92, 246, 0.3)' },
+                          },
+                        }}
+                      >
+                        Devices
+                      </ToggleButton>
+                    </Tooltip>
+                  </ToggleButtonGroup>
+                </Stack>
+
+                <Stack direction="row" spacing={0.75} alignItems="center">
+                  <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem', letterSpacing: 0.6 }}>
+                    Edges
+                  </Typography>
+                  <ToggleButtonGroup
+                    value={visibleEdges}
+                    onChange={handleEdgeToggle}
+                    size="small"
+                    sx={compactToggleSx}
+                  >
+                    <Tooltip title="Co-location (device proximity)">
+                      <ToggleButton
+                        value="colocation"
+                        sx={{
+                          '&.Mui-selected': {
+                            bgcolor: `${theme.palette.accent.yellow}20`,
+                            color: theme.palette.accent.yellow,
+                            '&:hover': { bgcolor: `${theme.palette.accent.yellow}30` },
+                          },
+                        }}
+                      >
+                        Co-location
+                      </ToggleButton>
+                    </Tooltip>
+                    <Tooltip title="Social connections (calls, messages)">
+                      <ToggleButton
+                        value="social"
+                        sx={{
+                          '&.Mui-selected': {
+                            bgcolor: `${theme.palette.accent.purple}20`,
+                            color: theme.palette.accent.purple,
+                            '&:hover': { bgcolor: `${theme.palette.accent.purple}30` },
+                          },
+                        }}
+                      >
+                        Social
+                      </ToggleButton>
+                    </Tooltip>
+                    <Tooltip title="Device ownership links">
+                      <ToggleButton
+                        value="device"
+                        sx={{
+                          '&.Mui-selected': {
+                            bgcolor: 'rgba(6, 182, 212, 0.2)',
+                            color: '#06b6d4',
+                            '&:hover': { bgcolor: 'rgba(6, 182, 212, 0.3)' },
+                          },
+                        }}
+                      >
+                        Device
+                      </ToggleButton>
+                    </Tooltip>
+                  </ToggleButtonGroup>
+                </Stack>
+              </Stack>
             </Stack>
 
-            {/* View Mode Toggle - Persons vs Devices */}
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>
-                VIEW
-              </Typography>
-              <ToggleButtonGroup
-                value={graphViewMode}
-                exclusive
-                onChange={handleViewModeToggle}
-                size="small"
-                sx={{
-                  '& .MuiToggleButton-root': {
-                    border: 1,
-                    borderColor: 'border.main',
-                    color: 'text.secondary',
-                    fontSize: '0.7rem',
-                    px: 1.5,
-                    py: 0.5,
-                    textTransform: 'none',
-                    '&.Mui-selected': {
-                      borderColor: 'transparent',
-                    },
-                  },
-                }}
-              >
-                <ToggleButton
-                  value="persons"
-                  sx={{
-                    '&.Mui-selected': {
-                      bgcolor: `${theme.palette.accent.purple}20`,
-                      color: theme.palette.accent.purple,
-                      '&:hover': { bgcolor: `${theme.palette.accent.purple}30` },
-                    },
-                  }}
-                >
-                  <People sx={{ fontSize: 16, mr: 0.5 }} />
-                  Persons
-                </ToggleButton>
-                <ToggleButton
-                  value="devices"
-                  sx={{
-                    '&.Mui-selected': {
-                      bgcolor: `${theme.palette.accent.green}20`,
-                      color: theme.palette.accent.green,
-                      '&:hover': { bgcolor: `${theme.palette.accent.green}30` },
-                    },
-                  }}
-                >
-                  <DeviceHub sx={{ fontSize: 16, mr: 0.5 }} />
-                  Devices
-                  {entitiesData && (
-                    <Chip
-                      label={`${entitiesData.stats.unlinkedDevices} unlinked`}
-                      size="small"
-                      sx={{
-                        ml: 0.5,
-                        height: 16,
-                        fontSize: '0.6rem',
-                        bgcolor: entitiesData.stats.unlinkedDevices > 0
-                          ? `${theme.palette.warning.main}30`
-                          : `${theme.palette.success.main}30`,
-                        color: entitiesData.stats.unlinkedDevices > 0
-                          ? theme.palette.warning.main
-                          : theme.palette.success.main,
-                      }}
-                    />
-                  )}
-                </ToggleButton>
-              </ToggleButtonGroup>
-              {graphViewMode === 'devices' && (
-                <Button
-                  size="small"
-                  startIcon={<Add sx={{ fontSize: 14 }} />}
-                  onClick={() => handleOpenCreateLink()}
-                  sx={{
-                    fontSize: '0.7rem',
-                    textTransform: 'none',
-                    color: theme.palette.accent.purple,
-                  }}
-                >
-                  Link
-                </Button>
-              )}
-            </Stack>
-
-            <Divider orientation="vertical" flexItem sx={{ mx: 1, borderColor: 'border.main' }} />
-
-            {/* Node Type Toggles */}
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>
-                NODES
-              </Typography>
-              <ToggleButtonGroup
-                value={visibleNodes}
-                onChange={handleNodeToggle}
-                size="small"
-                sx={{
-                  '& .MuiToggleButton-root': {
-                    border: 1,
-                    borderColor: 'border.main',
-                    color: 'text.secondary',
-                    fontSize: '0.7rem',
-                    px: 1.5,
-                    py: 0.5,
-                    textTransform: 'none',
-                    '&.Mui-selected': {
-                      borderColor: 'transparent',
-                    },
-                  },
-                }}
-              >
-                <Tooltip title="Show/Hide Persons of Interest">
-                  <ToggleButton
-                    value="suspects"
-                    sx={{
-                      '&.Mui-selected': {
-                        bgcolor: `${theme.palette.accent.red}20`,
-                        color: theme.palette.accent.red,
-                        '&:hover': { bgcolor: `${theme.palette.accent.red}30` },
-                      },
-                    }}
-                  >
-                    <People sx={{ fontSize: 16, mr: 0.5 }} />
-                    Suspects
-                  </ToggleButton>
-                </Tooltip>
-                <Tooltip title="Show/Hide Associates (other persons linked to network)">
-                  <ToggleButton
-                    value="associates"
-                    sx={{
-                      '&.Mui-selected': {
-                        bgcolor: 'rgba(107, 114, 128, 0.2)',
-                        color: '#9ca3af',
-                        '&:hover': { bgcolor: 'rgba(107, 114, 128, 0.3)' },
-                      },
-                    }}
-                  >
-                    <People sx={{ fontSize: 16, mr: 0.5 }} />
-                    Associates
-                  </ToggleButton>
-                </Tooltip>
-                <Tooltip title="Show/Hide Devices (phones linked to persons)">
-                  <ToggleButton
-                    value="devices"
-                    sx={{
-                      '&.Mui-selected': {
-                        bgcolor: 'rgba(139, 92, 246, 0.2)',
-                        color: '#8b5cf6',
-                        '&:hover': { bgcolor: 'rgba(139, 92, 246, 0.3)' },
-                      },
-                    }}
-                  >
-                    <Phone sx={{ fontSize: 16, mr: 0.5 }} />
-                    Devices
-                  </ToggleButton>
-                </Tooltip>
-              </ToggleButtonGroup>
-            </Stack>
-
-            <Divider orientation="vertical" flexItem sx={{ mx: 1, borderColor: 'border.main' }} />
-
-            {/* Edge Type Toggles */}
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>
-                EDGES
-              </Typography>
-              <ToggleButtonGroup
-                value={visibleEdges}
-                onChange={handleEdgeToggle}
-                size="small"
-                sx={{
-                  '& .MuiToggleButton-root': {
-                    border: 1,
-                    borderColor: 'border.main',
-                    color: 'text.secondary',
-                    fontSize: '0.7rem',
-                    px: 1.5,
-                    py: 0.5,
-                    textTransform: 'none',
-                    '&.Mui-selected': {
-                      borderColor: 'transparent',
-                    },
-                  },
-                }}
-              >
-                <Tooltip title="Co-location (Device Proximity)">
-                  <ToggleButton
-                    value="colocation"
-                    sx={{
-                      '&.Mui-selected': {
-                        bgcolor: `${theme.palette.accent.yellow}20`,
-                        color: theme.palette.accent.yellow,
-                        '&:hover': { bgcolor: `${theme.palette.accent.yellow}30` },
-                      },
-                    }}
-                  >
-                    <People sx={{ fontSize: 16, mr: 0.5 }} />
-                    Co-location
-                  </ToggleButton>
-                </Tooltip>
-                <Tooltip title="Social Connections (Calls, Messages)">
-                  <ToggleButton
-                    value="social"
-                    sx={{
-                      '&.Mui-selected': {
-                        bgcolor: `${theme.palette.accent.purple}20`,
-                        color: theme.palette.accent.purple,
-                        '&:hover': { bgcolor: `${theme.palette.accent.purple}30` },
-                      },
-                    }}
-                  >
-                    <Call sx={{ fontSize: 16, mr: 0.5 }} />
-                    Social
-                  </ToggleButton>
-                </Tooltip>
-                <Tooltip title="Device Ownership Links">
-                  <ToggleButton
-                    value="device"
-                    sx={{
-                      '&.Mui-selected': {
-                        bgcolor: 'rgba(6, 182, 212, 0.2)',
-                        color: '#06b6d4',
-                        '&:hover': { bgcolor: 'rgba(6, 182, 212, 0.3)' },
-                      },
-                    }}
-                  >
-                    <LinkIcon sx={{ fontSize: 16, mr: 0.5 }} />
-                    Devices
-                  </ToggleButton>
-                </Tooltip>
-              </ToggleButtonGroup>
-            </Stack>
-
-            <Stack direction="row" spacing={1}>
+        <Stack
+          direction="row"
+          alignItems="center"
+          justifyContent="space-between"
+          flexWrap="wrap"
+          rowGap={0.75}
+          columnGap={1}
+        >
+          <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>
+            Quick actions
+          </Typography>
+          <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" rowGap={0.5}>
+            {graphViewMode === 'devices' && (
               <Button
-                variant="outlined"
                 size="small"
-                startIcon={<Download sx={{ fontSize: 14 }} />}
-                onClick={exportSuspectsCSV}
+                startIcon={<Add sx={{ fontSize: 14 }} />}
+                onClick={() => handleOpenCreateLink()}
                 sx={{
-                  borderColor: 'border.main',
-                  color: 'text.secondary',
                   fontSize: '0.75rem',
-                  '&:hover': {
-                    borderColor: theme.palette.accent.orange,
-                    color: theme.palette.accent.orange,
-                  },
+                  textTransform: 'none',
+                  color: theme.palette.accent.purple,
                 }}
               >
-                Export
+                Link device
               </Button>
-            </Stack>
+            )}
+            <Button
+              variant="text"
+              size="small"
+              startIcon={<Download sx={{ fontSize: 14 }} />}
+              onClick={exportSuspectsCSV}
+              sx={{
+                color: 'text.secondary',
+                fontSize: '0.75rem',
+                px: 1,
+                '&:hover': {
+                  color: theme.palette.accent.orange,
+                  bgcolor: `${theme.palette.accent.orange}10`,
+                },
+              }}
+            >
+              Export CSV
+            </Button>
+            {USE_DATABRICKS && (
+              <Chip
+                icon={<Cloud sx={{ fontSize: 12 }} />}
+                label="Databricks"
+                size="small"
+                sx={{
+                  height: 20,
+                  fontSize: '0.65rem',
+                  bgcolor: `${theme.palette.accent.orange}18`,
+                  color: theme.palette.accent.orange,
+                  '& .MuiChip-icon': { color: theme.palette.accent.orange },
+                }}
+              />
+            )}
+          </Stack>
+        </Stack>
+
           </Stack>
         </Paper>
 
