@@ -263,6 +263,21 @@ const GraphExplorer: React.FC = () => {
   // Global search filter (searches all node types: persons, devices, locations)
   const [globalSearch, setGlobalSearch] = useState('');
 
+  // Case context (when navigating from Case view)
+  const [caseContext, setCaseContext] = useState<{
+    caseId: string | null;
+    caseNumber: string | null;
+    caseStatus: string | null;
+    caseTitle: string | null;
+  }>({ caseId: null, caseNumber: null, caseStatus: null, caseTitle: null });
+
+  // Toggle to show only linked entities (when coming from case view)
+  const [showLinkedOnly, setShowLinkedOnly] = useState(false);
+
+  // Entity detail modal (for both person and device)
+  const [entityDetailOpen, setEntityDetailOpen] = useState(false);
+  const [entityDetailNode, setEntityDetailNode] = useState<GraphNode | null>(null);
+
   // Computed set of node IDs matching the current search (any type)
   const searchMatchIds = useMemo(() => {
     if (!globalSearch.trim()) return new Set<string>();
@@ -374,7 +389,26 @@ const GraphExplorer: React.FC = () => {
   useEffect(() => {
     const city = searchParams.get('city');
     const entityIdsParam = searchParams.get('entityIds');
+    const caseId = searchParams.get('caseId');
+    const caseNumber = searchParams.get('caseNumber');
+    const caseStatus = searchParams.get('caseStatus');
+    const caseTitle = searchParams.get('caseTitle');
+    const showLinkedOnlyParam = searchParams.get('showLinkedOnly');
+    
     setCityFilter(city || null);
+    
+    // Set case context if coming from case view
+    setCaseContext({
+      caseId: caseId || null,
+      caseNumber: caseNumber || null,
+      caseStatus: caseStatus || null,
+      caseTitle: caseTitle || null,
+    });
+    
+    // Auto-enable show linked only when coming from a case
+    if (showLinkedOnlyParam === 'true' && entityIdsParam) {
+      setShowLinkedOnly(true);
+    }
 
     if (entityIdsParam) {
       const ids = entityIdsParam
@@ -382,6 +416,9 @@ const GraphExplorer: React.FC = () => {
         .map((s) => s.trim())
         .filter(Boolean);
       setFocusedEntityIds(new Set(ids));
+      // Auto-select linked entities for co-location comparison
+      setColocationEntityIds(new Set(ids));
+      setSelectedPersonIds(new Set(ids));
     } else {
       setFocusedEntityIds(new Set());
     }
@@ -649,11 +686,12 @@ const GraphExplorer: React.FC = () => {
     setFocusedEntityIds(linkedIds); // This triggers the filter to hide non-focused nodes
   }, [selectedPersonIds, getReachablePersonIds]);
 
-  // Handle focusLinked param - expand selection to linked persons when triggered via agent
+  // Handle focusLinked param - expand selection to linked persons when triggered via agent or case navigation
   const [, setSearchParamsNav] = useSearchParams();
   useEffect(() => {
     const focusLinkedParam = searchParams.get('focusLinked');
     const entityIdsParam = searchParams.get('entityIds');
+    const showLinkedOnlyParam = searchParams.get('showLinkedOnly');
     
     if (focusLinkedParam === 'true' && entityIdsParam && graphData.nodes.length > 0) {
       const seedIds = entityIdsParam
@@ -667,6 +705,11 @@ const GraphExplorer: React.FC = () => {
         setSelectedPersonIds(linkedIds);
         setColocationEntityIds(linkedIds);
         setFocusedEntityIds(linkedIds);
+        
+        // Enable showLinkedOnly to filter the graph to only show connected entities
+        if (showLinkedOnlyParam === 'true') {
+          setShowLinkedOnly(true);
+        }
         
         // Clear the focusLinked param to prevent re-expansion on every render
         const next = new URLSearchParams(searchParams.toString());
@@ -703,11 +746,13 @@ const GraphExplorer: React.FC = () => {
         })
       : graphData.nodes;
 
-    // When focused entities exist, filter to only show them
-    if (focusedEntityIds.size > 0) {
+    // When showLinkedOnly is enabled (from case view), filter to only show linked entities
+    if (showLinkedOnly && focusedEntityIds.size > 0) {
       cityFilteredNodes = cityFilteredNodes.filter((node) => {
-        // Always include focused persons
+        // Always include focused/linked persons
         if (node.type === 'person' && focusedEntityIds.has(node.id)) return true;
+        // Also include devices owned by focused persons
+        if (node.type === 'device' && node.ownerId && focusedEntityIds.has(node.ownerId)) return true;
         // Hide everything else when focusing
         return false;
       });
@@ -758,7 +803,7 @@ const GraphExplorer: React.FC = () => {
       nodes: filteredNodes,
       links: freshLinks,
     };
-  }, [graphData, visibleEdges, visibleNodes, cityFilter, focusedEntityIds]);
+  }, [graphData, visibleEdges, visibleNodes, cityFilter, focusedEntityIds, showLinkedOnly]);
 
   // Handle edge toggle
   const handleEdgeToggle = (_event: React.MouseEvent<HTMLElement>, newEdges: string[]) => {
@@ -1304,6 +1349,131 @@ const GraphExplorer: React.FC = () => {
             pointerEvents: 'none',
           }}
         />
+        
+        {/* Case Context Header */}
+        {caseContext.caseId && (
+          <Paper
+            elevation={0}
+            sx={{
+              position: 'absolute',
+              top: 16,
+              left: 16,
+              right: 16,
+              zIndex: 10,
+              p: 2,
+              bgcolor: theme.palette.mode === 'dark' ? 'rgba(26, 26, 46, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+              backdropFilter: 'blur(8px)',
+              border: 1,
+              borderColor: 'border.main',
+              borderRadius: 2,
+            }}
+          >
+            <Stack direction="row" alignItems="center" justifyContent="space-between">
+              <Stack direction="row" alignItems="center" spacing={2}>
+                <Box>
+                  <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>
+                    VIEWING NETWORK FOR CASE
+                  </Typography>
+                  <Typography variant="h6" sx={{ color: 'text.primary', fontWeight: 700, lineHeight: 1.2 }}>
+                    {caseContext.caseNumber || caseContext.caseId}
+                  </Typography>
+                  {caseContext.caseTitle && (
+                    <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.25 }}>
+                      {caseContext.caseTitle}
+                    </Typography>
+                  )}
+                </Box>
+                {caseContext.caseStatus && (
+                  <Chip
+                    label={caseContext.caseStatus === 'investigating' ? 'Investigating' : 
+                           caseContext.caseStatus === 'review' ? 'Under Review' : 
+                           caseContext.caseStatus === 'adjudicated' ? 'Adjudicated' : caseContext.caseStatus}
+                    size="small"
+                    sx={{
+                      height: 24,
+                      bgcolor: caseContext.caseStatus === 'investigating' ? '#3b82f620' :
+                               caseContext.caseStatus === 'review' ? '#f9731620' :
+                               caseContext.caseStatus === 'adjudicated' ? '#22c55e20' : '#6b728020',
+                      color: caseContext.caseStatus === 'investigating' ? '#3b82f6' :
+                             caseContext.caseStatus === 'review' ? '#f97316' :
+                             caseContext.caseStatus === 'adjudicated' ? '#22c55e' : '#6b7280',
+                      fontWeight: 600,
+                      fontSize: '0.7rem',
+                    }}
+                  />
+                )}
+              </Stack>
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Chip
+                  label={showLinkedOnly ? 'Showing Linked Entities' : 'Showing All Entities'}
+                  size="small"
+                  onClick={() => setShowLinkedOnly(!showLinkedOnly)}
+                  sx={{
+                    height: 24,
+                    cursor: 'pointer',
+                    bgcolor: showLinkedOnly ? `${theme.palette.accent.orange}20` : 'background.default',
+                    color: showLinkedOnly ? theme.palette.accent.orange : 'text.secondary',
+                    '&:hover': {
+                      bgcolor: showLinkedOnly ? `${theme.palette.accent.orange}30` : 'action.hover',
+                    },
+                    fontSize: '0.7rem',
+                  }}
+                />
+                <Tooltip title="Back to case">
+                  <IconButton
+                    size="small"
+                    onClick={() => navigate(`/evidence-card?case_id=${caseContext.caseId}`)}
+                    sx={{ color: 'text.secondary' }}
+                  >
+                    <ArrowForward sx={{ transform: 'rotate(180deg)' }} />
+                  </IconButton>
+                </Tooltip>
+              </Stack>
+            </Stack>
+            {focusedEntityIds.size > 0 && (
+              <Box sx={{ mt: 1.5, pt: 1.5, borderTop: 1, borderColor: 'border.main' }}>
+                <Typography variant="caption" sx={{ color: 'text.secondary', mb: 1, display: 'block' }}>
+                  LINKED ENTITIES ({focusedEntityIds.size})
+                </Typography>
+                <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                  {Array.from(focusedEntityIds).slice(0, 8).map((id) => {
+                    const name = suspectNameById.get(id) || id;
+                    return (
+                      <Chip
+                        key={id}
+                        label={name}
+                        size="small"
+                        onClick={() => {
+                          setSelectedPersonIds(new Set([id]));
+                          const suspect = suspects.find((s) => s.id === id);
+                          if (suspect) {
+                            setProfileSuspect(suspect);
+                            setProfileOpen(true);
+                          }
+                        }}
+                        sx={{
+                          height: 22,
+                          cursor: 'pointer',
+                          bgcolor: selectedPersonIds.has(id) ? `${theme.palette.accent.red}20` : 'background.default',
+                          color: selectedPersonIds.has(id) ? theme.palette.accent.red : 'text.primary',
+                          '&:hover': { bgcolor: `${theme.palette.accent.red}15` },
+                          fontSize: '0.7rem',
+                        }}
+                      />
+                    );
+                  })}
+                  {focusedEntityIds.size > 8 && (
+                    <Chip
+                      label={`+${focusedEntityIds.size - 8} more`}
+                      size="small"
+                      sx={{ height: 22, fontSize: '0.7rem', bgcolor: 'background.default' }}
+                    />
+                  )}
+                </Stack>
+              </Box>
+            )}
+          </Paper>
+        )}
         {containerDimensions.width > 0 && containerDimensions.height > 0 && (
         <ForceGraph2D
           ref={graphRef}
@@ -1333,6 +1503,25 @@ const GraphExplorer: React.FC = () => {
               if (event.shiftKey || event.metaKey || event.ctrlKey) {
                 toggleColocationEntity(n.id);
               }
+            } else if (n.type === 'device') {
+              // For devices, open the entity detail modal
+              setEntityDetailNode(n);
+              setEntityDetailOpen(true);
+            }
+          }}
+          onNodeRightClick={(node, event) => {
+            event.preventDefault();
+            const n = node as GraphNode;
+            // Right-click opens entity detail modal for any node type
+            if (n.type === 'person') {
+              const suspect = suspects.find((s) => s.id === n.id);
+              if (suspect) {
+                setProfileSuspect(suspect);
+                setProfileOpen(true);
+              }
+            } else {
+              setEntityDetailNode(n);
+              setEntityDetailOpen(true);
             }
           }}
           onZoom={({ k }) => {
@@ -1709,22 +1898,29 @@ const GraphExplorer: React.FC = () => {
             ctx.lineWidth = l.width;
             ctx.stroke();
 
-            // Label badge for important connections (only CO_LOCATED between people and FLED_TO)
-            if ((l.type === 'CO_LOCATED' && l.count) || l.type === 'FLED_TO') {
-              const label = l.type === 'CO_LOCATED' ? `${l.count}× co-loc` : 'FLED TO';
+            // Label badge for important connections (CO_LOCATED, FLED_TO, and SOCIAL)
+            const isSocial = l.type === 'SOCIAL' || l.type === 'CONTACTED';
+            if ((l.type === 'CO_LOCATED' && l.count) || l.type === 'FLED_TO' || isSocial) {
+              const label = l.type === 'CO_LOCATED' 
+                ? `${l.count}× co-loc` 
+                : l.type === 'FLED_TO' 
+                  ? 'FLED TO' 
+                  : l.type === 'CONTACTED'
+                    ? 'call'
+                    : 'social';
 
               // Scale everything inversely with zoom for consistent screen size
               // Use a base size that we divide by zoom
               const scale = 1 / zoom;
-              const baseFontSize = 9;
+              const baseFontSize = isSocial ? 8 : 9;
               const fontSize = baseFontSize * scale;
 
               ctx.font = `600 ${fontSize}px "SF Pro Display", system-ui, sans-serif`;
               const textWidth = ctx.measureText(label).width;
 
               // Padding and dimensions in screen-space (scaled)
-              const paddingX = 8 * scale;
-              const paddingY = 5 * scale;
+              const paddingX = (isSocial ? 6 : 8) * scale;
+              const paddingY = (isSocial ? 4 : 5) * scale;
               const badgeWidth = textWidth + paddingX * 2;
               const badgeHeight = fontSize + paddingY * 2;
               const borderRadius = Math.min(badgeHeight / 2, 10 * scale);
@@ -1738,16 +1934,26 @@ const GraphExplorer: React.FC = () => {
                 badgeHeight,
                 borderRadius
               );
-              ctx.fillStyle = 'rgba(26, 26, 46, 0.95)';
+              ctx.fillStyle = isSocial 
+                ? 'rgba(167, 139, 250, 0.15)' 
+                : 'rgba(26, 26, 46, 0.95)';
               ctx.fill();
 
               // Badge border
-              ctx.strokeStyle = l.type === 'FLED_TO' ? '#fb923c' : '#fbbf24';
-              ctx.lineWidth = 1.5 * scale;
+              ctx.strokeStyle = l.type === 'FLED_TO' 
+                ? '#fb923c' 
+                : isSocial 
+                  ? '#a78bfa' 
+                  : '#fbbf24';
+              ctx.lineWidth = (isSocial ? 1 : 1.5) * scale;
               ctx.stroke();
 
               // Badge text
-              ctx.fillStyle = l.type === 'FLED_TO' ? '#fdba74' : '#fde047';
+              ctx.fillStyle = l.type === 'FLED_TO' 
+                ? '#fdba74' 
+                : isSocial 
+                  ? '#c4b5fd'
+                  : '#fde047';
               ctx.textAlign = 'center';
               ctx.textBaseline = 'middle';
               ctx.fillText(label, midX, midY);
@@ -3465,7 +3671,7 @@ const GraphExplorer: React.FC = () => {
 
               {/* Criminal History */}
               {profileSuspect.criminalHistory && (
-                <Paper sx={{ p: 2, bgcolor: 'background.default' }}>
+                <Paper sx={{ p: 2, mb: 2, bgcolor: 'background.default' }}>
                   <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
                     <History sx={{ color: theme.palette.accent.red, fontSize: 18 }} />
                     <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
@@ -3475,6 +3681,57 @@ const GraphExplorer: React.FC = () => {
                   <Typography variant="body2" sx={{ color: 'text.secondary' }}>
                     {profileSuspect.criminalHistory}
                   </Typography>
+                </Paper>
+              )}
+
+              {/* AI Link Reasoning - shown when viewing from a case context */}
+              {caseContext.caseId && focusedEntityIds.has(profileSuspect.id) && (
+                <Paper sx={{ p: 2, bgcolor: `${theme.palette.accent.orange}08`, border: 1, borderColor: `${theme.palette.accent.orange}30` }}>
+                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
+                    <Hub sx={{ color: theme.palette.accent.orange, fontSize: 18 }} />
+                    <Typography variant="subtitle2" sx={{ fontWeight: 600, color: theme.palette.accent.orange }}>
+                      Why Linked to Case {caseContext.caseNumber}
+                    </Typography>
+                  </Stack>
+                  <Stack spacing={1}>
+                    <Stack direction="row" spacing={1} alignItems="flex-start">
+                      <LocationOn sx={{ color: theme.palette.accent.blue, fontSize: 16, mt: 0.25 }} />
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                          Geo-Spatial Evidence
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                          Co-located with other case entities at crime scene area within investigation timeframe
+                        </Typography>
+                      </Box>
+                    </Stack>
+                    {profileSuspect.linkedCities && profileSuspect.linkedCities.includes(caseContext.caseTitle?.split(',')[0] || '') && (
+                      <Stack direction="row" spacing={1} alignItems="flex-start">
+                        <People sx={{ color: theme.palette.accent.purple, fontSize: 16, mt: 0.25 }} />
+                        <Box>
+                          <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                            Social Network
+                          </Typography>
+                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                            Connected to other suspects through phone calls and messages
+                          </Typography>
+                        </Box>
+                      </Stack>
+                    )}
+                    {profileSuspect.linkedDevices && profileSuspect.linkedDevices.length > 0 && (
+                      <Stack direction="row" spacing={1} alignItems="flex-start">
+                        <Phone sx={{ color: '#06b6d4', fontSize: 16, mt: 0.25 }} />
+                        <Box>
+                          <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                            Device Activity
+                          </Typography>
+                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                            Device signals detected near crime scene during incident window
+                          </Typography>
+                        </Box>
+                      </Stack>
+                    )}
+                  </Stack>
                 </Paper>
               )}
             </DialogContent>
@@ -3512,6 +3769,228 @@ const GraphExplorer: React.FC = () => {
         initialDeviceId={linkInitialDevice}
         initialPersonId={linkInitialPerson}
       />
+
+      {/* Entity Detail Modal (for devices and general entity info) */}
+      <Dialog
+        open={entityDetailOpen}
+        onClose={() => setEntityDetailOpen(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            bgcolor: 'background.paper',
+            border: 1,
+            borderColor: 'border.main',
+          },
+        }}
+      >
+        {entityDetailNode && (
+          <>
+            <DialogTitle sx={{ pb: 1 }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Stack direction="row" alignItems="center" spacing={2}>
+                  <Avatar
+                    sx={{
+                      bgcolor: entityDetailNode.type === 'device' 
+                        ? (entityDetailNode.isBurner ? theme.palette.accent.red : '#06b6d4')
+                        : theme.palette.accent.purple,
+                      width: 48,
+                      height: 48,
+                      fontSize: 18,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {entityDetailNode.type === 'device' ? (
+                      <Phone sx={{ fontSize: 24 }} />
+                    ) : (
+                      entityDetailNode.name.split(' ').map((n) => n[0]).join('')
+                    )}
+                  </Avatar>
+                  <Box>
+                    <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                      {entityDetailNode.name}
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                      {entityDetailNode.type === 'device' ? 'Mobile Device' : 'Entity'}
+                      {entityDetailNode.isBurner && (
+                        <Chip
+                          label="BURNER"
+                          size="small"
+                          sx={{
+                            ml: 1,
+                            height: 18,
+                            fontSize: '0.6rem',
+                            bgcolor: `${theme.palette.accent.red}20`,
+                            color: theme.palette.accent.red,
+                            fontWeight: 700,
+                          }}
+                        />
+                      )}
+                    </Typography>
+                  </Box>
+                </Stack>
+                <IconButton onClick={() => setEntityDetailOpen(false)}>
+                  <Close />
+                </IconButton>
+              </Stack>
+            </DialogTitle>
+            <DialogContent>
+              <Divider sx={{ mb: 2 }} />
+
+              {/* Device Details */}
+              {entityDetailNode.type === 'device' && (
+                <>
+                  <Paper sx={{ p: 2, mb: 2, bgcolor: 'background.default' }}>
+                    <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                      <DeviceHub sx={{ color: '#06b6d4', fontSize: 18 }} />
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                        Device Information
+                      </Typography>
+                    </Stack>
+                    <Stack spacing={1}>
+                      <Stack direction="row" justifyContent="space-between">
+                        <Typography variant="body2" sx={{ color: 'text.secondary' }}>Device ID</Typography>
+                        <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>{entityDetailNode.id}</Typography>
+                      </Stack>
+                      {entityDetailNode.relationship && (
+                        <Stack direction="row" justifyContent="space-between">
+                          <Typography variant="body2" sx={{ color: 'text.secondary' }}>Relationship</Typography>
+                          <Chip 
+                            label={entityDetailNode.relationship.replace('_', ' ')} 
+                            size="small" 
+                            sx={{ height: 20, fontSize: '0.7rem', textTransform: 'capitalize' }}
+                          />
+                        </Stack>
+                      )}
+                    </Stack>
+                  </Paper>
+
+                  {/* Owner Information */}
+                  {entityDetailNode.ownerId && (
+                    <Paper sx={{ p: 2, mb: 2, bgcolor: 'background.default' }}>
+                      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                        <People sx={{ color: theme.palette.accent.purple, fontSize: 18 }} />
+                        <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                          Linked Owner
+                        </Typography>
+                      </Stack>
+                      <Stack
+                        direction="row"
+                        alignItems="center"
+                        spacing={1}
+                        sx={{
+                          p: 1,
+                          bgcolor: 'action.hover',
+                          borderRadius: 1,
+                          cursor: 'pointer',
+                          '&:hover': { bgcolor: 'action.selected' },
+                        }}
+                        onClick={() => {
+                          const owner = suspects.find((s) => s.id === entityDetailNode.ownerId);
+                          if (owner) {
+                            setEntityDetailOpen(false);
+                            setProfileSuspect(owner);
+                            setProfileOpen(true);
+                          }
+                        }}
+                      >
+                        <Avatar sx={{ width: 28, height: 28, bgcolor: theme.palette.accent.red, fontSize: 12 }}>
+                          {(suspectNameById.get(entityDetailNode.ownerId) || 'U').charAt(0)}
+                        </Avatar>
+                        <Box sx={{ flex: 1 }}>
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                            {suspectNameById.get(entityDetailNode.ownerId) || entityDetailNode.ownerId}
+                          </Typography>
+                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                            Click to view profile
+                          </Typography>
+                        </Box>
+                        <ArrowForward sx={{ fontSize: 16, color: 'text.secondary' }} />
+                      </Stack>
+                    </Paper>
+                  )}
+                </>
+              )}
+
+              {/* AI Link Reasoning for devices - shown when viewing from a case context */}
+              {caseContext.caseId && (
+                <Paper sx={{ p: 2, bgcolor: `${theme.palette.accent.orange}08`, border: 1, borderColor: `${theme.palette.accent.orange}30` }}>
+                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
+                    <Hub sx={{ color: theme.palette.accent.orange, fontSize: 18 }} />
+                    <Typography variant="subtitle2" sx={{ fontWeight: 600, color: theme.palette.accent.orange }}>
+                      Why Linked to Case {caseContext.caseNumber}
+                    </Typography>
+                  </Stack>
+                  <Stack spacing={1}>
+                    <Stack direction="row" spacing={1} alignItems="flex-start">
+                      <LocationOn sx={{ color: theme.palette.accent.blue, fontSize: 16, mt: 0.25 }} />
+                      <Box>
+                        <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                          Device Signal Detected
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                          This device was detected near the crime scene during the investigation timeframe
+                        </Typography>
+                      </Box>
+                    </Stack>
+                    {entityDetailNode.ownerId && focusedEntityIds.has(entityDetailNode.ownerId) && (
+                      <Stack direction="row" spacing={1} alignItems="flex-start">
+                        <LinkIcon sx={{ color: '#06b6d4', fontSize: 16, mt: 0.25 }} />
+                        <Box>
+                          <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                            Owner Connection
+                          </Typography>
+                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                            Device is linked to {suspectNameById.get(entityDetailNode.ownerId) || 'a person'} who is connected to this case
+                          </Typography>
+                        </Box>
+                      </Stack>
+                    )}
+                    {entityDetailNode.isBurner && (
+                      <Stack direction="row" spacing={1} alignItems="flex-start">
+                        <Warning sx={{ color: theme.palette.accent.red, fontSize: 16, mt: 0.25 }} />
+                        <Box>
+                          <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                            Burner Phone Flag
+                          </Typography>
+                          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                            Device identified as potential burner phone based on usage patterns
+                          </Typography>
+                        </Box>
+                      </Stack>
+                    )}
+                  </Stack>
+                </Paper>
+              )}
+            </DialogContent>
+            <DialogActions sx={{ p: 2 }}>
+              <Button
+                variant="outlined"
+                onClick={() => setEntityDetailOpen(false)}
+                sx={{ borderColor: 'border.main', color: 'text.secondary' }}
+              >
+                Close
+              </Button>
+              {entityDetailNode.type === 'device' && !entityDetailNode.ownerId && (
+                <Button
+                  variant="contained"
+                  startIcon={<LinkIcon />}
+                  onClick={() => {
+                    setEntityDetailOpen(false);
+                    handleOpenCreateLink(entityDetailNode.id);
+                  }}
+                  sx={{
+                    bgcolor: '#06b6d4',
+                    '&:hover': { bgcolor: '#0891b2' },
+                  }}
+                >
+                  Link to Person
+                </Button>
+              )}
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
     </Box>
   );
 };

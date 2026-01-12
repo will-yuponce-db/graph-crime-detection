@@ -537,6 +537,21 @@ const CaseView: React.FC = () => {
               <Typography variant="body2" sx={{ color: 'text.primary', fontWeight: 600 }}>
                 {caseData.caseNumber}
               </Typography>
+              {caseData.title && (
+                <Typography
+                  variant="caption"
+                  sx={{
+                    color: 'text.primary',
+                    display: 'block',
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {caseData.title}
+                </Typography>
+              )}
               <Typography
                 variant="caption"
                 sx={{ color: 'text.secondary', display: 'block', lineHeight: 1.3 }}
@@ -883,182 +898,409 @@ const CaseView: React.FC = () => {
                 bgcolor: 'background.default',
                 borderBottom: 1,
                 borderColor: 'border.main',
+                pb: 2,
               }}
             >
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Stack direction="row" alignItems="center" spacing={2}>
-                  <Avatar
-                    sx={{ bgcolor: PRIORITY_COLORS[selectedCase.priority], width: 40, height: 40 }}
+              <Stack spacing={1.5}>
+                {/* Row 1: Crime Type (Most Important) */}
+                <Box sx={{ textAlign: 'center' }}>
+                  <Typography
+                    variant="h4"
+                    sx={{
+                      color: 'text.primary',
+                      fontWeight: 800,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.06em',
+                      lineHeight: 1.2,
+                    }}
                   >
-                    <Description />
-                  </Avatar>
-                  <Box>
-                    <Typography variant="h6" sx={{ color: 'text.primary' }}>
-                      {selectedCase.caseNumber}
+                    {selectedCase.title || 'Unknown Crime Type'}
+                  </Typography>
+                </Box>
+
+                {/* Row 2: Estimated Loss (2nd Most Important) */}
+                {selectedCase.estimatedLoss && (
+                  <Box
+                    sx={{
+                      textAlign: 'center',
+                      py: 1.5,
+                      px: 3,
+                      bgcolor: `${theme.palette.accent.red}15`,
+                      borderRadius: 2,
+                      border: `2px solid ${theme.palette.accent.red}40`,
+                    }}
+                  >
+                    <Typography
+                      variant="caption"
+                      sx={{
+                        color: theme.palette.accent.red,
+                        fontWeight: 600,
+                        letterSpacing: '0.1em',
+                        display: 'block',
+                        mb: 0.5,
+                      }}
+                    >
+                      ESTIMATED LOSS
                     </Typography>
-                    <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                      {selectedCase.title}
+                    <Typography
+                      variant="h3"
+                      sx={{
+                        color: theme.palette.accent.red,
+                        fontWeight: 800,
+                      }}
+                    >
+                      ${selectedCase.estimatedLoss.toLocaleString()}
                     </Typography>
                   </Box>
-                </Stack>
-                <Stack direction="row" spacing={1}>
-                  <Chip
-                    label={selectedCase.priority.toUpperCase()}
-                    sx={{
-                      bgcolor: `${PRIORITY_COLORS[selectedCase.priority]}20`,
-                      color: PRIORITY_COLORS[selectedCase.priority],
-                      fontWeight: 700,
-                    }}
-                  />
-                  <Chip
-                    label={STATUS_CONFIG[selectedCase.status].label}
-                    sx={{
-                      bgcolor: STATUS_CONFIG[selectedCase.status].bgColor,
-                      color: STATUS_CONFIG[selectedCase.status].color,
-                    }}
-                  />
+                )}
+
+                {/* Row 3: Case Number & Meta Info */}
+                <Stack
+                  direction="row"
+                  justifyContent="space-between"
+                  alignItems="center"
+                  sx={{ pt: 1 }}
+                >
+                  <Stack direction="row" alignItems="center" spacing={1.5}>
+                    <Avatar
+                      sx={{ bgcolor: PRIORITY_COLORS[selectedCase.priority], width: 36, height: 36 }}
+                    >
+                      <Description sx={{ fontSize: 18 }} />
+                    </Avatar>
+                    <Typography variant="body1" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                      {selectedCase.caseNumber}
+                    </Typography>
+                  </Stack>
+                  <Stack direction="row" spacing={1}>
+                    <Chip
+                      label={selectedCase.priority.toUpperCase()}
+                      sx={{
+                        bgcolor: `${PRIORITY_COLORS[selectedCase.priority]}20`,
+                        color: PRIORITY_COLORS[selectedCase.priority],
+                        fontWeight: 700,
+                      }}
+                    />
+                    <Chip
+                      label={STATUS_CONFIG[selectedCase.status].label}
+                      sx={{
+                        bgcolor: STATUS_CONFIG[selectedCase.status].bgColor,
+                        color: STATUS_CONFIG[selectedCase.status].color,
+                      }}
+                    />
+                  </Stack>
                 </Stack>
               </Stack>
             </DialogTitle>
             <DialogContent sx={{ mt: 2 }}>
               <Stack spacing={3}>
-                {/* Location & Details */}
-                <Stack direction="row" spacing={4} flexWrap="wrap" useFlexGap>
-                  <Box>
-                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                      LOCATION
-                    </Typography>
-                    <Typography variant="body1" sx={{ color: 'text.primary' }}>
-                      {selectedCase.neighborhood}, {selectedCase.city}, {selectedCase.state}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ minWidth: 180 }}>
+                {/* 3rd: AI Case Intelligence */}
+                <Box
+                  sx={{
+                    bgcolor: `${theme.palette.accent.purple}08`,
+                    border: `1px solid ${theme.palette.accent.purple}30`,
+                    borderRadius: 2,
+                    p: 2,
+                  }}
+                >
+                  <Stack
+                    direction="row"
+                    alignItems="center"
+                    justifyContent="space-between"
+                    sx={{ mb: 1 }}
+                  >
                     <Typography
-                      variant="caption"
-                      sx={{ color: 'text.secondary', display: 'block', mb: 0.5 }}
-                    >
-                      ASSIGNED TO
-                    </Typography>
-                    {assignees.length > 0 ? (
-                      <Autocomplete
-                        size="small"
-                        fullWidth
-                        options={assignees}
-                        value={
-                          assignees.find((a) => a.id === selectedCase.assigneeId) ||
-                          assignees.find((a) => a.name === 'Analyst Team') ||
-                          assignees[0] ||
-                          null
-                        }
-                        onChange={(_, value) => {
-                          const fallbackId =
-                            assignees.find((a) => a.name === 'Analyst Team')?.id ||
-                            assignees[0]?.id ||
-                            '';
-                          handleAssigneeChange(selectedCase.id, value?.id || fallbackId);
-                        }}
-                        getOptionLabel={(option) => option?.name || ''}
-                        isOptionEqualToValue={(option, value) => option.id === value.id}
-                        renderInput={(params) => (
-                          <TextField
-                            {...params}
-                            placeholder="Search assignees"
-                            sx={{ '& .MuiInputBase-input': { py: 0.75, fontSize: '0.875rem' } }}
-                          />
-                        )}
-                        renderOption={(props, option) => (
-                          <Box component="li" {...props} key={option.id}>
-                            <Stack direction="row" alignItems="center" spacing={1}>
-                              <Avatar
-                                sx={{
-                                  width: 20,
-                                  height: 20,
-                                  fontSize: '0.7rem',
-                                  bgcolor: theme.palette.accent.blue,
-                                }}
-                              >
-                                {option.name.charAt(0)}
-                              </Avatar>
-                              <Typography variant="body2">{option.name}</Typography>
-                            </Stack>
-                          </Box>
-                        )}
-                      />
-                    ) : (
-                      <Typography variant="body1" sx={{ color: 'text.primary' }}>
-                        {selectedCase.assignedTo || 'Unassigned'}
-                      </Typography>
-                    )}
-                  </Box>
-                  <Box>
-                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                      CREATED
-                    </Typography>
-                    <Typography variant="body1" sx={{ color: 'text.primary' }}>
-                      {new Date(selectedCase.createdAt).toLocaleDateString()}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ minWidth: 180 }}>
-                    <Typography
-                      variant="caption"
-                      sx={{ color: 'text.secondary', display: 'block', mb: 0.5 }}
-                    >
-                      PRIORITY
-                    </Typography>
-                    <TextField
-                      select
-                      size="small"
-                      value={selectedCase.priority}
-                      onChange={(e) =>
-                        handlePriorityChange(selectedCase.id, e.target.value as CasePriority)
-                      }
-                      fullWidth
+                      variant="subtitle1"
                       sx={{
-                        '& .MuiSelect-select': { py: 0.75, fontWeight: 600 },
+                        color: theme.palette.accent.purple,
+                        fontWeight: 700,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1,
                       }}
                     >
-                      {PRIORITY_OPTIONS.map((p) => (
-                        <MenuItem key={p} value={p}>
-                          <Stack direction="row" alignItems="center" spacing={1}>
-                            <Box
-                              sx={{
-                                width: 10,
-                                height: 10,
-                                borderRadius: '50%',
-                                bgcolor: PRIORITY_COLORS[p],
-                              }}
-                            />
-                            <Typography variant="body2">{p}</Typography>
-                          </Stack>
-                        </MenuItem>
-                      ))}
-                    </TextField>
-                  </Box>
-                  {selectedCase.estimatedLoss && (
+                      🤖 AI CASE INTELLIGENCE
+                    </Typography>
+                    <AIInsightButton
+                      label="Analyze Case"
+                      onClick={() => handleGenerateCaseInsight(selectedCase.id)}
+                      loading={caseInsightLoading}
+                      size="small"
+                    />
+                  </Stack>
+
+                  {(caseInsight || caseInsightLoading || caseInsightError) && (
+                    <AIInsightCard
+                      insight={caseInsight}
+                      loading={caseInsightLoading}
+                      error={caseInsightError}
+                      onRefresh={() => handleGenerateCaseInsight(selectedCase.id)}
+                      onDismiss={() => {
+                        setCaseInsight(null);
+                        setCaseInsightError(null);
+                      }}
+                      defaultExpanded={true}
+                    />
+                  )}
+
+                  {!caseInsight && !caseInsightLoading && !caseInsightError && (
+                    <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                      Generate an AI-powered executive summary of this case with risk assessment and
+                      recommendations.
+                    </Typography>
+                  )}
+                </Box>
+
+                {/* 4th: Change Status */}
+                <Box>
+                  <Typography
+                    variant="caption"
+                    sx={{ color: 'text.secondary', mb: 1, display: 'block', fontWeight: 600 }}
+                  >
+                    CHANGE STATUS
+                  </Typography>
+                  <Stack direction="row" spacing={1}>
+                    {(['investigating', 'review', 'adjudicated'] as CaseStatus[]).map((status) => (
+                      <Button
+                        key={status}
+                        variant="outlined"
+                        size="small"
+                        startIcon={React.cloneElement(STATUS_CONFIG[status].icon, {
+                          sx: { fontSize: 16 },
+                        })}
+                        onClick={() => {
+                          handleStatusChange(selectedCase.id, status);
+                          setSelectedCase((prev) => (prev ? { ...prev, status } : null));
+                        }}
+                        sx={{
+                          flex: 1,
+                          py: 1,
+                          bgcolor:
+                            selectedCase.status === status
+                              ? STATUS_CONFIG[status].color
+                              : 'transparent',
+                          borderColor: STATUS_CONFIG[status].color,
+                          color:
+                            selectedCase.status === status ? '#fff' : STATUS_CONFIG[status].color,
+                          '&:hover': {
+                            bgcolor:
+                              selectedCase.status === status
+                                ? STATUS_CONFIG[status].color
+                                : `${STATUS_CONFIG[status].color}20`,
+                            borderColor: STATUS_CONFIG[status].color,
+                          },
+                        }}
+                      >
+                        {STATUS_CONFIG[status].label}
+                      </Button>
+                    ))}
+                  </Stack>
+                </Box>
+
+                {/* Details: Location & Meta */}
+                <Box>
+                  <Typography
+                    variant="caption"
+                    sx={{ color: 'text.secondary', mb: 1, display: 'block', fontWeight: 600 }}
+                  >
+                    CASE DETAILS
+                  </Typography>
+                  <Stack direction="row" spacing={4} flexWrap="wrap" useFlexGap>
                     <Box>
                       <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                        EST. LOSS
+                        LOCATION
                       </Typography>
-                      <Typography variant="body1" sx={{ color: theme.palette.accent.red }}>
-                        ${selectedCase.estimatedLoss.toLocaleString()}
+                      <Typography variant="body1" sx={{ color: 'text.primary' }}>
+                        {selectedCase.neighborhood}, {selectedCase.city}, {selectedCase.state}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ minWidth: 180 }}>
+                      <Typography
+                        variant="caption"
+                        sx={{ color: 'text.secondary', display: 'block', mb: 0.5 }}
+                      >
+                        ASSIGNED TO
+                      </Typography>
+                      {assignees.length > 0 ? (
+                        <Autocomplete
+                          size="small"
+                          fullWidth
+                          options={assignees}
+                          value={
+                            assignees.find((a) => a.id === selectedCase.assigneeId) ||
+                            assignees.find((a) => a.name === 'Analyst Team') ||
+                            assignees[0] ||
+                            null
+                          }
+                          onChange={(_, value) => {
+                            const fallbackId =
+                              assignees.find((a) => a.name === 'Analyst Team')?.id ||
+                              assignees[0]?.id ||
+                              '';
+                            handleAssigneeChange(selectedCase.id, value?.id || fallbackId);
+                          }}
+                          getOptionLabel={(option) => option?.name || ''}
+                          isOptionEqualToValue={(option, value) => option.id === value.id}
+                          renderInput={(params) => (
+                            <TextField
+                              {...params}
+                              placeholder="Search assignees"
+                              sx={{ '& .MuiInputBase-input': { py: 0.75, fontSize: '0.875rem' } }}
+                            />
+                          )}
+                          renderOption={(props, option) => (
+                            <Box component="li" {...props} key={option.id}>
+                              <Stack direction="row" alignItems="center" spacing={1}>
+                                <Avatar
+                                  sx={{
+                                    width: 20,
+                                    height: 20,
+                                    fontSize: '0.7rem',
+                                    bgcolor: theme.palette.accent.blue,
+                                  }}
+                                >
+                                  {option.name.charAt(0)}
+                                </Avatar>
+                                <Typography variant="body2">{option.name}</Typography>
+                              </Stack>
+                            </Box>
+                          )}
+                        />
+                      ) : (
+                        <Typography variant="body1" sx={{ color: 'text.primary' }}>
+                          {selectedCase.assignedTo || 'Unassigned'}
+                        </Typography>
+                      )}
+                    </Box>
+                    <Box>
+                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                        CREATED
+                      </Typography>
+                      <Typography variant="body1" sx={{ color: 'text.primary' }}>
+                        {new Date(selectedCase.createdAt).toLocaleDateString()}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ minWidth: 180 }}>
+                      <Typography
+                        variant="caption"
+                        sx={{ color: 'text.secondary', display: 'block', mb: 0.5 }}
+                      >
+                        PRIORITY
+                      </Typography>
+                      <TextField
+                        select
+                        size="small"
+                        value={selectedCase.priority}
+                        onChange={(e) =>
+                          handlePriorityChange(selectedCase.id, e.target.value as CasePriority)
+                        }
+                        fullWidth
+                        sx={{
+                          '& .MuiSelect-select': { py: 0.75, fontWeight: 600 },
+                        }}
+                      >
+                        {PRIORITY_OPTIONS.map((p) => (
+                          <MenuItem key={p} value={p}>
+                            <Stack direction="row" alignItems="center" spacing={1}>
+                              <Box
+                                sx={{
+                                  width: 10,
+                                  height: 10,
+                                  borderRadius: '50%',
+                                  bgcolor: PRIORITY_COLORS[p],
+                                }}
+                              />
+                              <Typography variant="body2">{p}</Typography>
+                            </Stack>
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                    </Box>
+                  </Stack>
+
+                  {/* Description */}
+                  {selectedCase.description && (
+                    <Box sx={{ mt: 2 }}>
+                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                        DESCRIPTION
+                      </Typography>
+                      <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
+                        {selectedCase.description}
                       </Typography>
                     </Box>
                   )}
-                </Stack>
+                </Box>
 
-                {/* Description */}
-                {selectedCase.description && (
-                  <Box>
-                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                      DESCRIPTION
-                    </Typography>
-                    <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-                      {selectedCase.description}
-                    </Typography>
-                  </Box>
-                )}
+                {/* KPIs / Stats */}
+                <Box>
+                  <Typography
+                    variant="caption"
+                    sx={{ color: 'text.secondary', mb: 1, display: 'block', fontWeight: 600 }}
+                  >
+                    KEY METRICS
+                  </Typography>
+                  <Stack direction="row" spacing={2}>
+                    <Card
+                      sx={{
+                        flex: 1,
+                        bgcolor: 'background.default',
+                        border: 1,
+                        borderColor: 'border.main',
+                      }}
+                    >
+                      <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                        <Person sx={{ color: theme.palette.accent.red, fontSize: 32 }} />
+                        <Typography variant="h4" sx={{ color: 'text.primary', fontWeight: 700 }}>
+                          {typeof selectedCase.suspectCount === 'number'
+                            ? selectedCase.suspectCount
+                            : selectedCase.persons?.length || 0}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                          Suspects
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                    <Card
+                      sx={{
+                        flex: 1,
+                        bgcolor: 'background.default',
+                        border: 1,
+                        borderColor: 'border.main',
+                      }}
+                    >
+                      <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                        <Devices sx={{ color: theme.palette.accent.orange, fontSize: 32 }} />
+                        <Typography variant="h4" sx={{ color: 'text.primary', fontWeight: 700 }}>
+                          {typeof selectedCase.deviceCount === 'number'
+                            ? selectedCase.deviceCount
+                            : selectedCase.devices?.length || 0}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                          Devices
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                    <Card
+                      sx={{
+                        flex: 1,
+                        bgcolor: 'background.default',
+                        border: 1,
+                        borderColor: 'border.main',
+                      }}
+                    >
+                      <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                        <LocationOn sx={{ color: theme.palette.accent.blue, fontSize: 32 }} />
+                        <Typography variant="h4" sx={{ color: 'text.primary', fontWeight: 700 }}>
+                          1
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                          Locations
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Stack>
+                </Box>
 
-                {/* Linked entities + geo evidence */}
+                {/* Linked entities (LAST) */}
                 <Box>
                   <Stack
                     direction="row"
@@ -1066,7 +1308,10 @@ const CaseView: React.FC = () => {
                     justifyContent="space-between"
                     sx={{ mb: 1 }}
                   >
-                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                    <Typography
+                      variant="caption"
+                      sx={{ color: 'text.secondary', fontWeight: 600 }}
+                    >
                       LINKED ENTITIES
                     </Typography>
                     {linkedEntitiesLoading && (
@@ -1186,156 +1431,6 @@ const CaseView: React.FC = () => {
                     ))}
                   </Stack>
                 </Box>
-
-                {/* Stats */}
-                <Stack direction="row" spacing={2}>
-                  <Card
-                    sx={{
-                      flex: 1,
-                      bgcolor: 'background.default',
-                      border: 1,
-                      borderColor: 'border.main',
-                    }}
-                  >
-                    <CardContent sx={{ textAlign: 'center', py: 2 }}>
-                      <Person sx={{ color: theme.palette.accent.red, fontSize: 32 }} />
-                      <Typography variant="h4" sx={{ color: 'text.primary', fontWeight: 700 }}>
-                        {typeof selectedCase.suspectCount === 'number'
-                          ? selectedCase.suspectCount
-                          : selectedCase.persons?.length || 0}
-                      </Typography>
-                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                        Suspects
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                  <Card
-                    sx={{
-                      flex: 1,
-                      bgcolor: 'background.default',
-                      border: 1,
-                      borderColor: 'border.main',
-                    }}
-                  >
-                    <CardContent sx={{ textAlign: 'center', py: 2 }}>
-                      <Devices sx={{ color: theme.palette.accent.orange, fontSize: 32 }} />
-                      <Typography variant="h4" sx={{ color: 'text.primary', fontWeight: 700 }}>
-                        {typeof selectedCase.deviceCount === 'number'
-                          ? selectedCase.deviceCount
-                          : selectedCase.devices?.length || 0}
-                      </Typography>
-                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                        Devices
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                  <Card
-                    sx={{
-                      flex: 1,
-                      bgcolor: 'background.default',
-                      border: 1,
-                      borderColor: 'border.main',
-                    }}
-                  >
-                    <CardContent sx={{ textAlign: 'center', py: 2 }}>
-                      <LocationOn sx={{ color: theme.palette.accent.blue, fontSize: 32 }} />
-                      <Typography variant="h4" sx={{ color: 'text.primary', fontWeight: 700 }}>
-                        1
-                      </Typography>
-                      <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                        Locations
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                </Stack>
-
-                {/* AI Case Intelligence */}
-                <Box>
-                  <Stack
-                    direction="row"
-                    alignItems="center"
-                    justifyContent="space-between"
-                    sx={{ mb: 1 }}
-                  >
-                    <Typography
-                      variant="overline"
-                      sx={{
-                        color: theme.palette.accent.purple,
-                        letterSpacing: 2,
-                        fontSize: '0.65rem',
-                      }}
-                    >
-                      🤖 AI CASE INTELLIGENCE
-                    </Typography>
-                    <AIInsightButton
-                      label="Analyze Case"
-                      onClick={() => handleGenerateCaseInsight(selectedCase.id)}
-                      loading={caseInsightLoading}
-                      size="small"
-                    />
-                  </Stack>
-
-                  {(caseInsight || caseInsightLoading || caseInsightError) && (
-                    <AIInsightCard
-                      insight={caseInsight}
-                      loading={caseInsightLoading}
-                      error={caseInsightError}
-                      onRefresh={() => handleGenerateCaseInsight(selectedCase.id)}
-                      onDismiss={() => {
-                        setCaseInsight(null);
-                        setCaseInsightError(null);
-                      }}
-                      defaultExpanded={true}
-                    />
-                  )}
-
-                  {!caseInsight && !caseInsightLoading && !caseInsightError && (
-                    <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                      Generate an AI-powered executive summary of this case with risk assessment and
-                      recommendations.
-                    </Typography>
-                  )}
-                </Box>
-
-                {/* Status Actions */}
-                <Box>
-                  <Typography
-                    variant="caption"
-                    sx={{ color: 'text.secondary', mb: 1, display: 'block' }}
-                  >
-                    CHANGE STATUS
-                  </Typography>
-                  <Stack direction="row" spacing={1}>
-                    {(['investigating', 'review', 'adjudicated'] as CaseStatus[]).map((status) => (
-                      <Button
-                        key={status}
-                        variant="outlined"
-                        size="small"
-                        onClick={() => {
-                          handleStatusChange(selectedCase.id, status);
-                          setSelectedCase((prev) => (prev ? { ...prev, status } : null));
-                        }}
-                        sx={{
-                          bgcolor:
-                            selectedCase.status === status
-                              ? STATUS_CONFIG[status].color
-                              : 'transparent',
-                          borderColor: STATUS_CONFIG[status].color,
-                          color:
-                            selectedCase.status === status ? '#fff' : STATUS_CONFIG[status].color,
-                          '&:hover': {
-                            bgcolor:
-                              selectedCase.status === status
-                                ? STATUS_CONFIG[status].color
-                                : `${STATUS_CONFIG[status].color}20`,
-                          },
-                        }}
-                      >
-                        {STATUS_CONFIG[status].label}
-                      </Button>
-                    ))}
-                  </Stack>
-                </Box>
               </Stack>
             </DialogContent>
             <DialogActions sx={{ p: 2, borderTop: 1, borderColor: 'border.main' }}>
@@ -1360,8 +1455,13 @@ const CaseView: React.FC = () => {
                       : (selectedCase.persons || []).map((p) => p.id).slice(0, 12);
                   const params = new URLSearchParams();
                   params.set('caseId', selectedCase.id);
+                  params.set('caseNumber', selectedCase.caseNumber);
+                  params.set('caseStatus', selectedCase.status);
+                  params.set('caseTitle', selectedCase.title);
                   if (selectedCase.city) params.set('city', selectedCase.city);
                   if (ids.length > 0) params.set('entityIds', ids.join(','));
+                  params.set('showLinkedOnly', 'true'); // Focus on linked entities
+                  params.set('focusLinked', 'true'); // Auto-expand to all connected entities
                   navigate(`/graph-explorer?${params.toString()}`);
                 }}
                 sx={{

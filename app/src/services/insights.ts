@@ -7,6 +7,35 @@
 
 const API_BASE = '/api/demo';
 
+/**
+ * Detect if a string looks like raw JSON and sanitize it.
+ * Returns a user-friendly error message if the content is JSON.
+ */
+function sanitizeAgentResponse(content: string): string {
+  if (!content || typeof content !== 'string') {
+    return 'Could not generate summary. Please try again.';
+  }
+
+  const trimmed = content.trim();
+
+  // Check if the response looks like JSON (starts with { or [)
+  if (
+    (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+    (trimmed.startsWith('[') && trimmed.endsWith(']'))
+  ) {
+    try {
+      JSON.parse(trimmed);
+      // If it parses successfully, it's raw JSON - return error message
+      return 'Could not generate summary. Please try again.';
+    } catch {
+      // Not valid JSON, return as-is
+      return content;
+    }
+  }
+
+  return content;
+}
+
 // ============== Types ==============
 
 export type InsightType =
@@ -88,7 +117,24 @@ export async function generateInsight(
     throw new Error(data.error || 'Failed to generate insight');
   }
 
-  return data.insight;
+  // Sanitize text fields in the insight to handle raw JSON responses
+  const insight = data.insight;
+  if (insight) {
+    if (insight.summary) {
+      insight.summary = sanitizeAgentResponse(insight.summary);
+    }
+    if (insight.title) {
+      insight.title = sanitizeAgentResponse(insight.title);
+    }
+    if (Array.isArray(insight.keyFindings)) {
+      insight.keyFindings = insight.keyFindings.map((f: string) => sanitizeAgentResponse(f));
+    }
+    if (Array.isArray(insight.recommendations)) {
+      insight.recommendations = insight.recommendations.map((r: string) => sanitizeAgentResponse(r));
+    }
+  }
+
+  return insight;
 }
 
 /**
@@ -245,7 +291,7 @@ export async function askInsightFollowup(
   }
 
   return {
-    answer: data.answer,
+    answer: sanitizeAgentResponse(data.answer),
     timestamp: data.timestamp,
   };
 }

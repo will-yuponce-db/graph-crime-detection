@@ -160,43 +160,6 @@ const PRIORITY_COLORS: Record<string, string> = {
   critical: '#ef4444',
 };
 
-// Tower icon - centroid/crosshair style to indicate interaction center
-const towerIcon = L.divIcon({
-  className: 'tower-icon',
-  html: `<div style="
-    width: 16px;
-    height: 16px;
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  ">
-    <div style="
-      width: 8px;
-      height: 8px;
-      background: #22c55e;
-      border-radius: 50%;
-      border: 2px solid rgba(255,255,255,0.9);
-      box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.3), 0 0 8px rgba(34, 197, 94, 0.5);
-    "></div>
-    <div style="
-      position: absolute;
-      width: 16px;
-      height: 2px;
-      background: rgba(34, 197, 94, 0.6);
-      border-radius: 1px;
-    "></div>
-    <div style="
-      position: absolute;
-      width: 2px;
-      height: 16px;
-      background: rgba(34, 197, 94, 0.6);
-      border-radius: 1px;
-    "></div>
-  </div>`,
-  iconSize: [20, 20],
-  iconAnchor: [10, 10],
-});
 
 // Case icon
 const caseIcon = L.divIcon({
@@ -243,7 +206,7 @@ const HeatmapDashboard: React.FC = () => {
   const [playbackSpeed, setPlaybackSpeed] = useState(1); // 0.5x, 1x, 2x, 5x
   const [showDevices, setShowDevices] = useState(true);
   const [showDeviceLabels, setShowDeviceLabels] = useState(false);
-  const [showHexHeatmap, setShowHexHeatmap] = useState(true);
+  const [showHexHeatmap, setShowHexHeatmap] = useState(false);
   const [navExpanded, setNavExpanded] = useState(false);
   const [mapCenter, setMapCenter] = useState<[number, number]>([38.9076, -77.0723]);
   const [mapZoom, setMapZoom] = useState(13);
@@ -1194,28 +1157,6 @@ const HeatmapDashboard: React.FC = () => {
               );
             })}
 
-          {/* Cell Towers */}
-          {towers.map((tower) => (
-            <React.Fragment key={tower.id}>
-              <CircleMarker
-                center={[tower.latitude, tower.longitude]}
-                radius={18}
-                pathOptions={{
-                  color: '#22c55e15',
-                  fillColor: '#22c55e08',
-                  fillOpacity: 0.5,
-                  weight: 1,
-                }}
-              />
-              <Marker position={[tower.latitude, tower.longitude]} icon={towerIcon}>
-                <Popup>
-                  <strong>{tower.name}</strong>
-                  <br />
-                  {tower.city}
-                </Popup>
-              </Marker>
-            </React.Fragment>
-          ))}
 
           {/* Devices */}
           {showDevices &&
@@ -2209,12 +2150,6 @@ const HeatmapDashboard: React.FC = () => {
         >
           <Stack direction="row" spacing={1.5} alignItems="center">
             <Stack direction="row" alignItems="center" spacing={0.75}>
-              <Box sx={{ fontSize: 12, opacity: 0.85 }}>📡</Box>
-              <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
-                Tower
-              </Typography>
-            </Stack>
-            <Stack direction="row" alignItems="center" spacing={0.75}>
               <Box
                 sx={{
                   width: 8,
@@ -2892,7 +2827,14 @@ const HeatmapDashboard: React.FC = () => {
                           </Stack>
                           <Typography
                             variant="caption"
-                            sx={{ color: 'text.primary', display: 'block', mb: 0.5 }}
+                            sx={{
+                              color: 'text.primary',
+                              display: 'block',
+                              mb: 0.5,
+                              fontWeight: 700,
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.04em',
+                            }}
                           >
                             {c.title}
                           </Typography>
