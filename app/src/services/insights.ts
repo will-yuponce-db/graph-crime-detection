@@ -44,7 +44,9 @@ export type InsightType =
   | 'case_summary'
   | 'handoff_analysis'
   | 'timeline_narration'
-  | 'network_patterns';
+  | 'network_patterns'
+  | 'comparative_analysis'
+  | 'link_suggestion_analysis';
 
 export type ConfidenceLevel = 'High' | 'Medium' | 'Low';
 export type RiskLevel = 'Critical' | 'High' | 'Medium' | 'Low' | 'None';
@@ -57,7 +59,6 @@ export interface Insight {
   recommendations: string[];
   confidence: ConfidenceLevel;
   riskLevel: RiskLevel;
-  dataContext?: Record<string, unknown>;
   generatedAt: string;
 }
 
@@ -89,13 +90,23 @@ export interface NetworkPatternsContext {
   city?: string | null;
 }
 
+export interface ComparativeAnalysisContext {
+  entityIds: string[]; // Exactly 2 entities to compare
+}
+
+export interface LinkSuggestionAnalysisContext {
+  suggestionIds?: string[]; // Specific suggestions, or all if empty
+}
+
 export type InsightContext =
   | HotspotAnomalyContext
   | EntityRelationshipsContext
   | CaseSummaryContext
   | HandoffAnalysisContext
   | TimelineNarrationContext
-  | NetworkPatternsContext;
+  | NetworkPatternsContext
+  | ComparativeAnalysisContext
+  | LinkSuggestionAnalysisContext;
 
 // ============== API Functions ==============
 
@@ -191,6 +202,23 @@ export async function analyzeNetworkPatterns(city?: string | null): Promise<Insi
   return generateInsight('network_patterns', { city });
 }
 
+/**
+ * Compare two entities' patterns and connections
+ */
+export async function compareEntities(entityIds: string[]): Promise<Insight> {
+  if (entityIds.length !== 2) {
+    throw new Error('Comparative analysis requires exactly 2 entities');
+  }
+  return generateInsight('comparative_analysis', { entityIds });
+}
+
+/**
+ * Analyze pending link suggestions
+ */
+export async function analyzeLinkSuggestions(suggestionIds?: string[]): Promise<Insight> {
+  return generateInsight('link_suggestion_analysis', { suggestionIds });
+}
+
 // ============== Utility Functions ==============
 
 /**
@@ -210,6 +238,10 @@ export function getInsightIcon(type: InsightType): string {
       return 'Timeline';
     case 'network_patterns':
       return 'AccountTree';
+    case 'comparative_analysis':
+      return 'CompareArrows';
+    case 'link_suggestion_analysis':
+      return 'Link';
     default:
       return 'AutoAwesome';
   }

@@ -22,7 +22,10 @@ const ALLOWED_QUERY_KEYS = [
   'edges',
   'nodes',
   'focusLinked',
+  'runAnalysis',
+  'showLinkedOnly',
 ];
+
 
 function buildSystemPrompt({ maxActions }) {
   return [
@@ -43,7 +46,9 @@ function buildSystemPrompt({ maxActions }) {
     `- To open a case in Case View, navigate to /evidence-card with searchParams { "case_id": "<CASE_ID>" }.`,
     `- To jump the map to a case, navigate to /heatmap with searchParams { "case": "<CASE_ID>" }.`,
     `- To clamp the Heatmap time window, set searchParams { "startHour": "<0-71>", "endHour": "<0-71>" } (use setSearchParams on /heatmap).`,
+    `- To clamp the time window around a case, use the case's "hour" field from casesTop: set startHour = max(0, hour - 2) and endHour = min(71, hour + 2).`,
     `- To focus entities in Graph Explorer, navigate to /graph-explorer with searchParams { "entityIds": "id1,id2,..." } and optional { "city": "..." }.`,
+    `- To view a case's network in Graph Explorer, navigate to /graph-explorer with searchParams { "caseId": "<CASE_ID>", "showLinkedOnly": "true" }. The page will auto-fetch and focus the case's linked entities.`,
     ``,
     `Guidance behavior:`,
     `- If the user asks something ambiguous, ask ONE short clarifying question in assistantMessage and return no actions.`,
@@ -80,9 +85,18 @@ function buildSystemPrompt({ maxActions }) {
     `- Navigates to Graph Explorer if not already there.`,
     `- Example: "show me everyone connected to Marcus" → focusLinkedSuspects with Marcus's entity ID.`,
     ``,
+    ``,
     `Heuristics:`,
     `- If the user references a specific case ID like CASE_TN_005 (sometimes written as caseCASE_TN_005), navigate to /evidence-card with case_id set.`,
-    `- If the user asks to “open” or “view” a case, do the same.`,
+    `- If the user asks to "open", "view", or "focus" on a case, navigate to /evidence-card with case_id set.`,
+    `- If the user says "focus case" or "focus on this case" without specifying which case, and there's a case_id in the current URL, use that case ID to navigate to /graph-explorer with showLinkedOnly=true.`,
+    `- If the user says "focus case" without a case in the URL, look up the highest-priority case from casesTop and navigate to it.`,
+    `- If the user asks to view a case in the "network", "graph", "network analyzer", or "graph explorer", navigate to /graph-explorer with { "caseId": "<CASE_ID>", "showLinkedOnly": "true" } to focus on that case's linked entities.`,
+    `- If the user asks to "clamp time", "focus time window", "set time around", or view activity "around the case time" (±2 hours), look up the case in casesTop to get its "hour" field, then setSearchParams with startHour = max(0, hour - 2) and endHour = min(71, hour + 2).`,
+    `- If the user asks to go to the "heatmap", "map", or "hotspots", navigate to /heatmap.`,
+    `- If the user asks to go to the "network", "graph", or "graph explorer", navigate to /graph-explorer.`,
+    `- If the user asks to go to "cases", "case view", or "evidence card", navigate to /evidence-card.`,
+    `- If the user asks to "show connected" or "show linked" entities, use focusLinkedSuspects with the current entityIds from URL.`,
     ``,
     `If you cannot confidently choose actions, return an empty actions list and ask a short follow-up question in assistantMessage.`,
   ].join('\n');

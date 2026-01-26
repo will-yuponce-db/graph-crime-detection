@@ -42,6 +42,7 @@ import {
   Add,
   ExpandMore,
   Search,
+  Timeline,
 } from '@mui/icons-material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import ForceGraph2D, { type ForceGraphMethods } from 'react-force-graph-2d';
@@ -56,6 +57,7 @@ import {
   type SocialLogEntry,
   fetchEntitiesWithLinkStatus,
   type EntitiesWithLinkStatusResponse,
+  fetchCaseDetail,
 } from '../services/api';
 import HandoffAlerts from '../components/HandoffAlerts';
 import LinkSuggestionsPanel from '../components/LinkSuggestionsPanel';
@@ -424,6 +426,54 @@ const GraphExplorer: React.FC = () => {
     }
   }, [searchParams]);
 
+  // Auto-fetch case linked entities when navigating with caseId but no entityIds
+  // This supports the agent navigating to network analyzer with just a caseId
+  useEffect(() => {
+    const caseId = searchParams.get('caseId');
+    const entityIdsParam = searchParams.get('entityIds');
+    
+    // Only fetch if we have a caseId but no entityIds
+    if (!caseId || entityIdsParam) return;
+    
+    let cancelled = false;
+    
+    (async () => {
+      try {
+        const detail = await fetchCaseDetail(caseId);
+        if (cancelled) return;
+        
+        // Extract entity IDs from linked entities
+        const ids = (detail.linkedEntities || [])
+          .map((e) => e.id)
+          .filter(Boolean)
+          .slice(0, 12);
+        
+        if (ids.length > 0) {
+          setFocusedEntityIds(new Set(ids));
+          setColocationEntityIds(new Set(ids));
+          setSelectedPersonIds(new Set(ids));
+          setShowLinkedOnly(true); // Focus on linked entities
+          
+          // Update case context with more details if available
+          if (detail.case) {
+            setCaseContext({
+              caseId: detail.case.id || caseId,
+              caseNumber: detail.case.caseNumber || null,
+              caseStatus: detail.case.status || null,
+              caseTitle: detail.case.title || null,
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch case linked entities:', err);
+      }
+    })();
+    
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams]);
+
   // Seed the co-location selection from deep-linked focused entity IDs (only if the user hasn't started selecting yet)
   useEffect(() => {
     if (colocationEntityIds.size > 0) return;
@@ -473,6 +523,22 @@ const GraphExplorer: React.FC = () => {
     
     return linkedPersonIds;
   }, [entitiesData, graphData.nodes, graphData.links]);
+
+  // Compute which selected people have trackable devices vs those without
+  const selectedPersonTrackability = useMemo(() => {
+    const withDevices: string[] = [];
+    const withoutDevices: string[] = [];
+    
+    for (const personId of selectedPersonIds) {
+      if (personsWithDeviceLinks.has(personId)) {
+        withDevices.push(personId);
+      } else {
+        withoutDevices.push(personId);
+      }
+    }
+    
+    return { withDevices, withoutDevices };
+  }, [selectedPersonIds, personsWithDeviceLinks]);
 
   const toggleColocationEntity = useCallback((entityId: string) => {
     setColocationEntityIds((prev) => {
@@ -683,7 +749,8 @@ const GraphExplorer: React.FC = () => {
     const linkedIds = getReachablePersonIds(sourceIds);
     setSelectedPersonIds(linkedIds);
     setColocationEntityIds(linkedIds);
-    setFocusedEntityIds(linkedIds); // This triggers the filter to hide non-focused nodes
+    setFocusedEntityIds(linkedIds);
+    setShowLinkedOnly(true); // Enable filtering to hide non-focused nodes
   }, [selectedPersonIds, getReachablePersonIds]);
 
   // Handle focusLinked param - expand selection to linked persons when triggered via agent or case navigation
@@ -837,10 +904,13 @@ const GraphExplorer: React.FC = () => {
     }
   };
 
-  // Fetch entities with link status when switching to device view or opening profile modal
+  // Fetch entities with link status when needed:
+  // - In device view mode
+  // - When profile modal is open (to show linked devices)
+  // - When people are selected (to determine trackability for location history)
   useEffect(() => {
-    // Trigger fetch when in device view OR when profile modal is open (to show linked devices)
-    if (graphViewMode !== 'devices' && !profileOpen) return;
+    const needsData = graphViewMode === 'devices' || profileOpen || selectedPersonIds.size > 0;
+    if (!needsData) return;
     if (entitiesData) return; // Already loaded
 
     let cancelled = false;
@@ -862,7 +932,7 @@ const GraphExplorer: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [graphViewMode, entitiesData, profileOpen]);
+  }, [graphViewMode, entitiesData, profileOpen, selectedPersonIds.size]);
 
   // Update suspects with linked devices when entitiesData changes
   useEffect(() => {
@@ -1130,6 +1200,37 @@ const GraphExplorer: React.FC = () => {
     const suspectRings = Math.ceil(suspectNodes.length / 12);
     const associateBaseRadius = 80 + suspectRings * 60 + 40; // Start just outside suspect rings
 
+    // Color palette for non-suspect associates - distinct, visually pleasing colors
+    const associateColors = [
+      '#10b981', // Emerald
+      '#3b82f6', // Blue
+      '#f97316', // Orange
+      '#ec4899', // Pink
+      '#14b8a6', // Teal
+      '#8b5cf6', // Violet
+      '#eab308', // Yellow
+      '#06b6d4', // Cyan
+      '#84cc16', // Lime
+      '#f43f5e', // Rose
+      '#6366f1', // Indigo
+      '#22d3ee', // Sky
+      '#a855f7', // Purple
+      '#fb923c', // Amber
+      '#2dd4bf', // Turquoise
+      '#4ade80', // Green
+    ];
+
+    // Simple hash function to get consistent color per associate ID
+    const getAssociateColor = (id: string) => {
+      // Use a hash of the ID for consistent colors across renders
+      let hash = 0;
+      for (let i = 0; i < id.length; i++) {
+        hash = ((hash << 5) - hash) + id.charCodeAt(i);
+        hash = hash & hash; // Convert to 32bit integer
+      }
+      return associateColors[Math.abs(hash) % associateColors.length];
+    };
+
     if (associateNodes.length > 0) {
       const associatesPerRing = 14;
       associateNodes.forEach((assoc, i) => {
@@ -1147,7 +1248,7 @@ const GraphExplorer: React.FC = () => {
           name: assoc.name,
           alias: assoc.alias || assoc.id.slice(-4),
           type: 'person',
-          color: '#6b7280', // Gray for non-suspects
+          color: getAssociateColor(assoc.id), // Random color per associate
           size: 5,
           isSuspect: false,
           linkedCities: assoc.linkedCities,
@@ -3378,31 +3479,41 @@ const GraphExplorer: React.FC = () => {
         >
           {/* Selection indicator */}
           {selectedPersonIds.size > 0 && (
-            <Stack
-              direction="row"
-              alignItems="center"
-              justifyContent="space-between"
-              sx={{ mb: 1.5 }}
-            >
-              <Chip
-                icon={<People sx={{ fontSize: 14 }} />}
-                label={`${selectedPersonIds.size} selected`}
-                size="small"
-                onDelete={clearPersonSelection}
-                deleteIcon={<Clear sx={{ fontSize: 14 }} />}
-                sx={{
-                  height: 26,
-                  bgcolor: `${theme.palette.accent.blue}12`,
-                  color: theme.palette.accent.blue,
-                  borderRadius: '6px',
-                  '& .MuiChip-label': { fontSize: '0.75rem', fontWeight: 500 },
-                  '& .MuiChip-icon': { color: theme.palette.accent.blue },
-                  '& .MuiChip-deleteIcon': {
+            <Stack spacing={0.75} sx={{ mb: 1.5 }}>
+              <Stack
+                direction="row"
+                alignItems="center"
+                justifyContent="space-between"
+              >
+                <Chip
+                  icon={<People sx={{ fontSize: 14 }} />}
+                  label={`${selectedPersonIds.size} selected`}
+                  size="small"
+                  onDelete={clearPersonSelection}
+                  deleteIcon={<Clear sx={{ fontSize: 14 }} />}
+                  sx={{
+                    height: 26,
+                    bgcolor: `${theme.palette.accent.blue}12`,
                     color: theme.palette.accent.blue,
-                    '&:hover': { color: theme.palette.accent.red },
-                  },
-                }}
-              />
+                    borderRadius: '6px',
+                    '& .MuiChip-label': { fontSize: '0.75rem', fontWeight: 500 },
+                    '& .MuiChip-icon': { color: theme.palette.accent.blue },
+                    '& .MuiChip-deleteIcon': {
+                      color: theme.palette.accent.blue,
+                      '&:hover': { color: theme.palette.accent.red },
+                    },
+                  }}
+                />
+              </Stack>
+              {/* Device tracking status */}
+              {selectedPersonTrackability.withoutDevices.length > 0 && (
+                <Stack direction="row" spacing={0.5} alignItems="center">
+                  <Warning sx={{ fontSize: 12, color: theme.palette.accent.orange }} />
+                  <Typography variant="caption" sx={{ color: theme.palette.accent.orange, fontSize: '0.65rem' }}>
+                    {selectedPersonTrackability.withoutDevices.length} without linked devices
+                  </Typography>
+                </Stack>
+              )}
             </Stack>
           )}
 
@@ -3432,33 +3543,58 @@ const GraphExplorer: React.FC = () => {
               Focus Linked Suspects
             </Button>
 
-            <Button
-              variant="contained"
-              fullWidth
-              size="small"
-              startIcon={<MapIcon sx={{ fontSize: 16 }} />}
-              disabled={selectedPersonIds.size === 0}
-              onClick={() => {
-                const entityIds = Array.from(selectedPersonIds).join(',');
-                navigate(`/heatmap?entityIds=${encodeURIComponent(entityIds)}`);
-              }}
-              sx={{
-                py: 1,
-                bgcolor: theme.palette.accent.blue,
-                color: '#fff',
-                fontWeight: 600,
-                fontSize: '0.8rem',
-                borderRadius: 1.5,
-                textTransform: 'none',
-                '&:hover': { bgcolor: '#2563eb' },
-                '&.Mui-disabled': {
-                  bgcolor: theme.palette.mode === 'dark' ? '#27272a' : '#e5e7eb',
-                  color: theme.palette.mode === 'dark' ? '#52525b' : '#9ca3af',
-                },
-              }}
+            <Tooltip
+              title={
+                selectedPersonIds.size === 0
+                  ? 'Select people to track'
+                  : selectedPersonTrackability.withDevices.length === 0
+                    ? 'None of the selected people have linked devices to track'
+                    : selectedPersonTrackability.withoutDevices.length > 0
+                      ? `${selectedPersonTrackability.withoutDevices.length} of ${selectedPersonIds.size} selected won't be tracked (no linked devices)`
+                      : ''
+              }
+              arrow
+              placement="top"
             >
-              View Location History
-            </Button>
+              <span style={{ width: '100%' }}>
+                <Button
+                  variant="contained"
+                  fullWidth
+                  size="small"
+                  startIcon={<MapIcon sx={{ fontSize: 16 }} />}
+                  disabled={selectedPersonIds.size === 0 || selectedPersonTrackability.withDevices.length === 0}
+                  onClick={() => {
+                    // Only navigate with people who have linked devices
+                    const entityIds = selectedPersonTrackability.withDevices.join(',');
+                    navigate(`/heatmap?entityIds=${encodeURIComponent(entityIds)}`);
+                  }}
+                  sx={{
+                    py: 1,
+                    bgcolor: selectedPersonTrackability.withoutDevices.length > 0 && selectedPersonTrackability.withDevices.length > 0
+                      ? theme.palette.accent.orange // Warning color when partial tracking
+                      : theme.palette.accent.blue,
+                    color: '#fff',
+                    fontWeight: 600,
+                    fontSize: '0.8rem',
+                    borderRadius: 1.5,
+                    textTransform: 'none',
+                    '&:hover': {
+                      bgcolor: selectedPersonTrackability.withoutDevices.length > 0 && selectedPersonTrackability.withDevices.length > 0
+                        ? '#ea580c'
+                        : '#2563eb',
+                    },
+                    '&.Mui-disabled': {
+                      bgcolor: theme.palette.mode === 'dark' ? '#27272a' : '#e5e7eb',
+                      color: theme.palette.mode === 'dark' ? '#52525b' : '#9ca3af',
+                    },
+                  }}
+                >
+                  {selectedPersonTrackability.withDevices.length > 0 && selectedPersonTrackability.withDevices.length < selectedPersonIds.size
+                    ? `Track ${selectedPersonTrackability.withDevices.length} of ${selectedPersonIds.size}`
+                    : 'View Location History'}
+                </Button>
+              </span>
+            </Tooltip>
 
             <Button
               variant="outlined"
@@ -3735,7 +3871,7 @@ const GraphExplorer: React.FC = () => {
                 </Paper>
               )}
             </DialogContent>
-            <DialogActions sx={{ p: 2 }}>
+            <DialogActions sx={{ p: 2, gap: 1 }}>
               <Button
                 variant="outlined"
                 onClick={() => setProfileOpen(false)}
@@ -3743,6 +3879,35 @@ const GraphExplorer: React.FC = () => {
               >
                 Close
               </Button>
+              <Tooltip 
+                title={
+                  profileSuspect.linkedDevices && profileSuspect.linkedDevices.length > 0
+                    ? "Track this person's device movements on the map"
+                    : "No linked devices - cannot track location"
+                }
+              >
+                <span>
+                  <Button
+                    variant="contained"
+                    startIcon={<Timeline />}
+                    disabled={!profileSuspect.linkedDevices || profileSuspect.linkedDevices.length === 0}
+                    onClick={() => {
+                      setProfileOpen(false);
+                      navigate(`/heatmap?entityIds=${encodeURIComponent(profileSuspect.id)}`);
+                    }}
+                    sx={{
+                      bgcolor: theme.palette.accent.blue,
+                      '&:hover': { bgcolor: '#2563eb' },
+                      '&.Mui-disabled': {
+                        bgcolor: 'action.disabledBackground',
+                        color: 'text.disabled',
+                      },
+                    }}
+                  >
+                    Start Trail
+                  </Button>
+                </span>
+              </Tooltip>
               <Button
                 variant="contained"
                 onClick={() => {
@@ -3963,7 +4128,7 @@ const GraphExplorer: React.FC = () => {
                 </Paper>
               )}
             </DialogContent>
-            <DialogActions sx={{ p: 2 }}>
+            <DialogActions sx={{ p: 2, gap: 1 }}>
               <Button
                 variant="outlined"
                 onClick={() => setEntityDetailOpen(false)}
@@ -3971,6 +4136,24 @@ const GraphExplorer: React.FC = () => {
               >
                 Close
               </Button>
+              {entityDetailNode.type === 'device' && (
+                <Button
+                  variant="contained"
+                  startIcon={<Timeline />}
+                  onClick={() => {
+                    setEntityDetailOpen(false);
+                    // Track by owner if available, otherwise track by device ID directly
+                    const trackId = entityDetailNode.ownerId || entityDetailNode.id;
+                    navigate(`/heatmap?entityIds=${encodeURIComponent(trackId)}`);
+                  }}
+                  sx={{
+                    bgcolor: theme.palette.accent.blue,
+                    '&:hover': { bgcolor: '#2563eb' },
+                  }}
+                >
+                  Start Trail
+                </Button>
+              )}
               {entityDetailNode.type === 'device' && !entityDetailNode.ownerId && (
                 <Button
                   variant="contained"

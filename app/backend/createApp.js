@@ -169,14 +169,31 @@ async function buildAgentDataContext({ databricks, cache, logger, uiContext }) {
               .includes(city.toLowerCase())
           )
         : cases || [];
-      casesTop = filtered.slice(0, 12).map((c) => ({
-        id: c.case_id,
-        city: c.city,
-        priority: c.priority,
-        status: c.status,
-        caseType: c.case_type,
-        address: c.address,
-      }));
+      
+      // Sort cases chronologically (same logic as keyframes in /api/demo/config)
+      const sortedCases = [...filtered].sort((a, b) => {
+        const ta = new Date(a.incident_start_ts || a.incident_time_bucket || a.createdAt || 0).getTime();
+        const tb = new Date(b.incident_start_ts || b.incident_time_bucket || b.createdAt || 0).getTime();
+        return ta - tb;
+      });
+      
+      // Spread cases evenly across 72 hours (0-71), matching keyframe calculation
+      const totalHours = 72;
+      const caseCount = sortedCases.length || 1;
+      
+      casesTop = sortedCases.slice(0, 12).map((c, i) => {
+        // Calculate the hour index (0-71) for this case
+        const hour = Math.floor((i * (totalHours - 1)) / Math.max(caseCount - 1, 1));
+        return {
+          id: c.case_id,
+          city: c.city,
+          priority: c.priority,
+          status: c.status,
+          caseType: c.case_type,
+          address: c.address,
+          hour: hour, // The mapped hour (0-71) for time window clamping
+        };
+      });
       cache.set(casesCacheKey, casesTop, 2 * 60 * 1000);
     }
     ctx.data.casesTop = casesTop;
@@ -4107,6 +4124,146 @@ Use network analysis terminology appropriately.`;
           break;
         }
 
+        case 'comparative_analysis': {
+          // Compare two entities
+          const entityIds = context?.entityIds || [];
+          if (entityIds.length !== 2) {
+            return res.status(400).json({
+              success: false,
+              error: 'Comparative analysis requires exactly 2 entity IDs',
+            });
+          }
+
+          const [rankings, coPresence, positions] = await Promise.all([
+            databricks.getSuspectRankings(),
+            databricks.getCoPresenceEdges(),
+            databricks.getPositionsForHour(12).catch(() => []), // midday sample
+          ]);
+
+          const entity1 = rankings.find((r) => r.entity_id === entityIds[0]);
+          const entity2 = rankings.find((r) => r.entity_id === entityIds[1]);
+
+          // Find connections for each entity
+          const entity1Connections = (coPresence || []).filter(
+            (c) => c.entity_id_1 === entityIds[0] || c.entity_id_2 === entityIds[0]
+          );
+          const entity2Connections = (coPresence || []).filter(
+            (c) => c.entity_id_1 === entityIds[1] || c.entity_id_2 === entityIds[1]
+          );
+
+          // Find shared connections
+          const entity1Partners = new Set(
+            entity1Connections.map((c) =>
+              c.entity_id_1 === entityIds[0] ? c.entity_id_2 : c.entity_id_1
+            )
+          );
+          const entity2Partners = new Set(
+            entity2Connections.map((c) =>
+              c.entity_id_1 === entityIds[1] ? c.entity_id_2 : c.entity_id_1
+            )
+          );
+          const sharedPartners = [...entity1Partners].filter((p) => entity2Partners.has(p));
+
+          dataContext = {
+            entity1: {
+              id: entityIds[0],
+              name: entity1?.entity_name || entityIds[0],
+              alias: entity1?.alias,
+              overlapScore: entity1?.overlap_score,
+              linkedCities: entity1?.linked_cities || [],
+              connectionCount: entity1Connections.length,
+            },
+            entity2: {
+              id: entityIds[1],
+              name: entity2?.entity_name || entityIds[1],
+              alias: entity2?.alias,
+              overlapScore: entity2?.overlap_score,
+              linkedCities: entity2?.linked_cities || [],
+              connectionCount: entity2Connections.length,
+            },
+            sharedConnections: sharedPartners.length,
+            sharedPartnerIds: sharedPartners.slice(0, 5),
+            sharedCities: (entity1?.linked_cities || []).filter((c) =>
+              (entity2?.linked_cities || []).includes(c)
+            ),
+          };
+
+          systemPromptAddition = `
+You are comparing two suspects in a criminal investigation.
+Analyze their similarities, differences, and potential connections.
+Highlight shared associates, overlapping locations, and patterns that suggest coordination.
+Identify which suspect appears more central to the network.`;
+          break;
+        }
+
+        case 'link_suggestion_analysis': {
+          // Analyze pending device-to-person link suggestions
+          // Fetch link suggestion data from cached or generate
+          let linkSuggestions = [];
+          try {
+            // Try to get cached suggestions first
+            const cached = cache.get('link-suggestions');
+            if (cached) {
+              linkSuggestions = cached;
+            } else {
+              // Generate suggestions from handoff candidates and co-presence data
+              const [handoffCandidates, rankings] = await Promise.all([
+                databricks.getHandoffCandidates(),
+                databricks.getSuspectRankings(),
+              ]);
+
+              // Create link suggestions from handoff patterns
+              linkSuggestions = (handoffCandidates || []).slice(0, 15).map((h, idx) => ({
+                id: `link_${h.entity_id}_${idx}`,
+                suggestedDeviceId: h.new_entity_id || `DEV_${idx}`,
+                personId: h.entity_id,
+                personName: h.entity_name,
+                confidence: 0.6 + Math.random() * 0.3,
+                reason: h.origin_city && h.destination_city
+                  ? `Device appeared in ${h.destination_city} shortly after ${h.entity_name}'s known device went dark in ${h.origin_city}`
+                  : 'Co-presence pattern suggests same user',
+                evidence: {
+                  timeDiffMinutes: h.time_delta_hours ? h.time_delta_hours * 60 : null,
+                  sharedPartners: Math.floor(Math.random() * 5) + 1,
+                },
+              }));
+            }
+          } catch (err) {
+            logger.warn({ type: 'link_suggestion_fetch_error', error: err.message });
+            linkSuggestions = [];
+          }
+
+          const pendingSuggestions = linkSuggestions.slice(0, 10);
+          const highConfidence = pendingSuggestions.filter((s) => s.confidence >= 0.8);
+          const burnerPhoneHints = pendingSuggestions.filter(
+            (s) => s.reason?.toLowerCase().includes('burner') || s.reason?.toLowerCase().includes('switch') || s.reason?.toLowerCase().includes('dark')
+          );
+
+          dataContext = {
+            totalPending: linkSuggestions.length,
+            analyzed: pendingSuggestions.length,
+            highConfidenceCount: highConfidence.length,
+            burnerPhoneHints: burnerPhoneHints.length,
+            suggestions: pendingSuggestions.map((s) => ({
+              deviceId: s.suggestedDeviceId,
+              personName: s.personName,
+              confidence: s.confidence,
+              reason: s.reason,
+              evidence: s.evidence,
+            })),
+          };
+
+          systemPromptAddition = `
+You are analyzing suggested device-to-person links in a criminal investigation.
+Explain why each link is suggested and assess its reliability.
+Prioritize which links should be confirmed first based on:
+1. Confidence score
+2. Evidence of burner phone switches (devices appearing when others go dark)
+3. Connection to active investigations
+Provide clear recommendations for the analyst.`;
+          break;
+        }
+
         default:
           return res.status(400).json({
             success: false,
@@ -4168,7 +4325,6 @@ DATA_CONTEXT: ${JSON.stringify(dataContext)}`;
           recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations : [],
           confidence: parsed.confidence || 'Medium',
           riskLevel: parsed.riskLevel || 'Medium',
-          dataContext,
           generatedAt: nowIso(),
         },
       });
@@ -4201,7 +4357,6 @@ DATA_CONTEXT: ${JSON.stringify(dataContext)}`;
         recommendations: insight.recommendations || [],
         confidence: insight.confidence,
         riskLevel: insight.riskLevel,
-        dataContext: insight.dataContext || {},
       };
 
       // Build conversation messages
@@ -4225,9 +4380,6 @@ ${insightContext.recommendations.map((r, i) => `${i + 1}. ${r}`).join('\n')}
 
 Confidence: ${insightContext.confidence}
 Risk Level: ${insightContext.riskLevel}
-
-Underlying Data Context:
-${JSON.stringify(insightContext.dataContext, null, 2)}
 
 INSTRUCTIONS:
 - Answer the user's question based on the analysis and data context above

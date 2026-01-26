@@ -12,9 +12,45 @@ const SCHEMA = process.env.DATABRICKS_SCHEMA || 'demo';
 
 let client = null;
 let session = null;
+let sessionCreatedAt = null;
+
+// Session TTL: 8 hours (conservative - Databricks sessions typically expire after 8-24 hours)
+const SESSION_MAX_AGE_MS = 8 * 60 * 60 * 1000;
 
 function escapeSqlLiteral(value) {
   return String(value).replace(/'/g, "''");
+}
+
+/**
+ * Check if the current session is stale and should be reconnected
+ */
+function isSessionStale() {
+  if (!session || !sessionCreatedAt) return true;
+  const age = Date.now() - sessionCreatedAt;
+  return age > SESSION_MAX_AGE_MS;
+}
+
+/**
+ * Force close and clear the current session (for reconnection)
+ */
+async function clearSession() {
+  const hadSession = !!session;
+  try {
+    if (session) {
+      await session.close().catch(() => {}); // Ignore errors on stale session close
+    }
+    if (client) {
+      await client.close().catch(() => {}); // Ignore errors on stale client close
+    }
+  } catch {
+    // Ignore cleanup errors
+  }
+  session = null;
+  client = null;
+  sessionCreatedAt = null;
+  if (hadSession) {
+    logger.info({ type: 'databricks_session', status: 'cleared', reason: 'stale_or_error' });
+  }
 }
 
 /**
@@ -23,8 +59,16 @@ function escapeSqlLiteral(value) {
  * 1. DATABRICKS_TOKEN (PAT or Databricks Apps injected token)
  * 2. Service Principal (CLIENT_ID + CLIENT_SECRET)
  * 3. Databricks Apps native OAuth (when running in Databricks Apps)
+ * 
+ * @param {boolean} forceReconnect - Force a new connection even if one exists
  */
-async function initDatabricks() {
+async function initDatabricks(forceReconnect = false) {
+  // Check if we need to reconnect due to stale session
+  if (isSessionStale() || forceReconnect) {
+    await clearSession();
+  }
+  
+  // Return existing valid session
   if (session) return session;
 
   const host = process.env.DATABRICKS_HOST;
@@ -97,6 +141,8 @@ async function initDatabricks() {
       initialCatalog: CATALOG,
       initialSchema: SCHEMA,
     });
+    
+    sessionCreatedAt = Date.now();
 
     logger.info({
       type: 'databricks_init',
@@ -110,30 +156,87 @@ async function initDatabricks() {
     return session;
   } catch (error) {
     logger.error({ type: 'databricks_init', status: 'failed', error: error.message, authMethod });
+    // Clear any partial state on failure
+    await clearSession();
     throw error;
   }
 }
 
 /**
+ * Check if an error indicates a stale/expired session that should be retried
+ */
+function isRetryableError(error) {
+  const msg = (error?.message || '').toLowerCase();
+  return (
+    msg.includes('session') ||
+    msg.includes('expired') ||
+    msg.includes('token') ||
+    msg.includes('unauthorized') ||
+    msg.includes('authentication') ||
+    msg.includes('invalid') ||
+    msg.includes('closed') ||
+    msg.includes('timeout') ||
+    msg.includes('connection') ||
+    msg.includes('econnreset') ||
+    msg.includes('enotfound') ||
+    msg.includes('socket')
+  );
+}
+
+/**
  * Execute a SQL query against Databricks
+ * Automatically retries with a fresh session on connection/auth errors
  */
 async function executeQuery(sql, params = []) {
-  const sess = await initDatabricks();
-  if (!sess) {
-    throw new Error('Databricks not connected');
+  let lastError = null;
+  const maxRetries = 2;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const sess = await initDatabricks(attempt > 0); // Force reconnect on retry
+      if (!sess) {
+        throw new Error('Databricks not connected');
+      }
+
+      const operation = await sess.executeStatement(sql, {
+        runAsync: true,
+        // Allow larger batches for complete data fetches
+        // UI will paginate to load progressively
+        maxRows: 100000,
+      });
+
+      const result = await operation.fetchAll();
+      await operation.close();
+
+      return result;
+    } catch (error) {
+      lastError = error;
+      
+      if (attempt < maxRetries - 1 && isRetryableError(error)) {
+        logger.warn({
+          type: 'databricks_query',
+          status: 'retry',
+          attempt: attempt + 1,
+          error: error.message,
+          sql: sql.substring(0, 100),
+        });
+        // Clear the stale session before retry
+        await clearSession();
+        // Brief delay before retry
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } else {
+        logger.error({
+          type: 'databricks_query',
+          status: 'failed',
+          attempt: attempt + 1,
+          error: error.message,
+          sql: sql.substring(0, 100),
+        });
+      }
+    }
   }
-
-  const operation = await sess.executeStatement(sql, {
-    runAsync: true,
-    // Allow larger batches for complete data fetches
-    // UI will paginate to load progressively
-    maxRows: 100000,
-  });
-
-  const result = await operation.fetchAll();
-  await operation.close();
-
-  return result;
+  
+  throw lastError;
 }
 
 /**
@@ -405,6 +508,7 @@ async function closeDatabricks() {
     await client.close();
     client = null;
   }
+  sessionCreatedAt = null;
   logger.info({ type: 'databricks_close', status: 'closed' });
 }
 

@@ -11,6 +11,7 @@ import {
   CircularProgress,
   Paper,
   useTheme,
+  Collapse,
 } from '@mui/material';
 import { Close, OpenInFull, Send, SmartToy, FiberManualRecord, DragIndicator } from '@mui/icons-material';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
@@ -248,7 +249,7 @@ const AgentPanel: React.FC<AgentPanelProps> = ({ open, onClose }) => {
     {
       role: 'assistant',
       content:
-        'AI Detective ready. Ask a question like: “Show me suspects tied to DC and highlight the top entities.”',
+        'AI Detective ready. I can help you:\n\n• **Navigate** – open cases, view in network graph\n• **Filter data** – focus on specific cities, time windows\n• **Focus entities** – show connected suspects\n\nTry: "Open case CASE_TN_005" or "Focus on this case in graph"',
       ts: Date.now(),
     },
   ]);
@@ -268,35 +269,50 @@ const AgentPanel: React.FC<AgentPanelProps> = ({ open, onClose }) => {
   const suggestedPrompts = useMemo(() => {
     const path = location.pathname;
     const city = searchParams.get('city');
-    const hour = searchParams.get('hour');
     const entityIds = searchParams.get('entityIds');
+    const entityIdList = entityIds ? entityIds.split(',').filter(Boolean) : [];
     const caseId =
       searchParams.get('case_id') || searchParams.get('caseId') || searchParams.get('case');
 
     if (path === '/' || path === '/heatmap') {
       return [
-        city && hour
-          ? `Show hotspots in ${city} at hour ${hour}`
-          : 'Show hotspots in DC at hour 18',
-        'Continue investigation in Network Analysis for the top entities',
-        caseId ? `Open case ${caseId}` : 'Open case CASE_TN_005',
+        city ? `Filter to ${city}` : 'Show hotspots in DC',
+        'Open case CASE_TN_005',
+        'Go to Network Graph',
       ];
     }
     if (path === '/graph-explorer') {
+      if (entityIdList.length >= 1) {
+        return [
+          'Show everyone connected',
+          'Open in Case View',
+          city ? `Filter to ${city}` : 'Filter to DC',
+        ];
+      }
       return [
-        city
-          ? `Focus entities in ${city} and show only co-location edges`
-          : 'Show only co-location edges',
-        entityIds
-          ? 'Generate an evidence summary for these focused entities'
-          : 'Select the top 5 suspects and generate a summary',
-        'Take me to Case View for the most linked case',
+        'Open case CASE_TN_005',
+        city ? `Filter to ${city}` : 'Filter to DC',
+        'Go to Heatmap',
+      ];
+    }
+    if (path === '/evidence-card') {
+      if (caseId) {
+        return [
+          `View ${caseId} in network`,
+          `View ${caseId} on map`,
+          'Go to Network Graph',
+        ];
+      }
+      return [
+        'Open case CASE_TN_005',
+        'Go to Network Graph',
+        'Go to Heatmap',
       ];
     }
     return [
       'Open case CASE_TN_005',
-      'Generate an evidence summary for top suspects',
-      'Go to Network Analysis and focus DC entities',
+      'Go to Network Graph',
+      'Go to Heatmap',
     ];
   }, [location.pathname, searchParams]);
 
@@ -366,6 +382,15 @@ const AgentPanel: React.FC<AgentPanelProps> = ({ open, onClose }) => {
           actionsToRun = [
             { type: 'navigate', path: '/evidence-card', searchParams: { case_id: caseId } },
           ];
+        } else if (/focus\s*(on\s*)?(the\s*)?(this\s*)?case/i.test(text)) {
+          // User wants to focus on a case - check if there's one in the URL
+          const currentCaseId = searchParams.get('case_id') || searchParams.get('caseId') || searchParams.get('case');
+          if (currentCaseId) {
+            // Navigate to graph explorer with this case
+            actionsToRun = [
+              { type: 'navigate', path: '/graph-explorer', searchParams: { caseId: currentCaseId, showLinkedOnly: 'true' } },
+            ];
+          }
         }
       }
 

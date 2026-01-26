@@ -8,6 +8,44 @@ export const USE_DATABRICKS = true;
 
 const API_BASE = '/api/demo';
 
+// ============== Retry Logic ==============
+
+const DEFAULT_RETRIES = 2;
+const RETRY_DELAY_MS = 1000;
+
+/**
+ * Wrapper around fetch that retries on failure
+ * Helps avoid "naked UIs" when transient errors occur
+ */
+async function fetchWithRetry(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  retries = DEFAULT_RETRIES
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(input, init);
+      // Retry on server errors (5xx) but not client errors (4xx)
+      if (res.status >= 500 && attempt < retries) {
+        console.warn(`[API] Server error ${res.status}, retrying (attempt ${attempt + 1}/${retries})...`);
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+        continue;
+      }
+      return res;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt < retries) {
+        console.warn(`[API] Fetch failed, retrying (attempt ${attempt + 1}/${retries}):`, lastError.message);
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+      }
+    }
+  }
+
+  throw lastError ?? new Error('Fetch failed after retries');
+}
+
 // ============== Types ==============
 
 export interface CellTower {
@@ -183,7 +221,7 @@ export async function createCase(input: {
   estimatedLoss?: number | string;
   assigneeId?: string;
 }): Promise<CaseData> {
-  const res = await fetch(`${API_BASE}/cases`, {
+  const res = await fetchWithRetry(`${API_BASE}/cases`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
@@ -371,7 +409,7 @@ export async function fetchConfig(): Promise<{
   timeRange: { min: number; max: number };
   totalHours: number;
 }> {
-  const res = await fetch(`${API_BASE}/config`);
+  const res = await fetchWithRetry(`${API_BASE}/config`);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data;
@@ -384,7 +422,7 @@ export async function fetchPositions(
   hour: number,
   options?: { signal?: AbortSignal }
 ): Promise<DevicePosition[]> {
-  const res = await fetch(`${API_BASE}/positions/${hour}`, { signal: options?.signal });
+  const res = await fetchWithRetry(`${API_BASE}/positions/${hour}`, { signal: options?.signal });
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.positions;
@@ -406,7 +444,7 @@ export async function fetchPositionsBulk(options?: {
   if (options?.limit) params.set('limit', String(options.limit));
 
   const url = `${API_BASE}/positions/bulk?${params}`;
-  const res = await fetch(url, { signal: options?.signal });
+  const res = await fetchWithRetry(url, { signal: options?.signal });
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return {
@@ -429,7 +467,7 @@ export async function fetchHotspots(
   const url = params.toString()
     ? `${API_BASE}/hotspots/${hour}?${params.toString()}`
     : `${API_BASE}/hotspots/${hour}`;
-  const res = await fetch(url, { signal: options?.signal });
+  const res = await fetchWithRetry(url, { signal: options?.signal });
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.hotspots;
@@ -453,7 +491,7 @@ export async function fetchCases(options?: {
   if (options?.enriched !== undefined) params.set('enriched', String(options.enriched));
 
   const url = params.toString() ? `${API_BASE}/cases?${params}` : `${API_BASE}/cases`;
-  const res = await fetch(url);
+  const res = await fetchWithRetry(url);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.cases;
@@ -475,7 +513,7 @@ export async function fetchCasesPaginated(options?: {
   if (options?.status) params.set('status', options.status);
 
   const url = params.toString() ? `${API_BASE}/cases?${params}` : `${API_BASE}/cases`;
-  const res = await fetch(url);
+  const res = await fetchWithRetry(url);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return { cases: data.cases, pagination: data.pagination };
@@ -487,7 +525,7 @@ export async function fetchCasesPaginated(options?: {
 export async function fetchCaseDetail(
   caseId: string
 ): Promise<{ case: CaseData; linkedEntities: CaseLinkedEntity[] }> {
-  const res = await fetch(`${API_BASE}/cases/${encodeURIComponent(caseId)}/detail`);
+  const res = await fetchWithRetry(`${API_BASE}/cases/${encodeURIComponent(caseId)}/detail`);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return { case: data.case, linkedEntities: data.linkedEntities || [] };
@@ -511,7 +549,7 @@ export async function fetchSuspects(options?: {
   if (options?.minScore) params.set('minScore', String(options.minScore));
 
   const url = `${API_BASE}/persons?${params}`;
-  const res = await fetch(url);
+  const res = await fetchWithRetry(url);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   const persons = Array.isArray(data.persons) ? data.persons : [];
@@ -537,7 +575,7 @@ export async function fetchSuspectsPaginated(options?: {
   if (options?.minScore) params.set('minScore', String(options.minScore));
 
   const url = `${API_BASE}/persons?${params}`;
-  const res = await fetch(url);
+  const res = await fetchWithRetry(url);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   const persons = Array.isArray(data.persons) ? data.persons : [];
@@ -573,7 +611,7 @@ export async function fetchGraphData(options?: {
   if (options?.minScore) params.set('minScore', String(options.minScore));
 
   const url = params.toString() ? `${API_BASE}/graph-data?${params}` : `${API_BASE}/graph-data`;
-  const res = await fetch(url);
+  const res = await fetchWithRetry(url);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return { nodes: data.nodes, links: data.links, stats: data.stats };
@@ -583,7 +621,7 @@ export async function fetchGraphData(options?: {
  * Fetch relationships
  */
 export async function fetchRelationships(): Promise<Relationship[]> {
-  const res = await fetch(`${API_BASE}/relationships`);
+  const res = await fetchWithRetry(`${API_BASE}/relationships`);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.relationships;
@@ -598,7 +636,7 @@ export async function fetchEvidenceCard(input: {
   personIds: string[];
 }): Promise<EvidenceCard> {
   // Backend currently supports personIds. caseId is reserved for future use.
-  const res = await fetch(`${API_BASE}/evidence-card`, {
+  const res = await fetchWithRetry(`${API_BASE}/evidence-card`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ personIds: input.personIds || [] }),
@@ -613,7 +651,7 @@ export async function fetchEvidenceCard(input: {
  * Update case status
  */
 export async function updateCaseStatus(caseId: string, status: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/cases/${caseId}/status`, {
+  const res = await fetchWithRetry(`${API_BASE}/cases/${caseId}/status`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status }),
@@ -626,7 +664,7 @@ export async function updateCaseStatus(caseId: string, status: string): Promise<
  * Update case priority
  */
 export async function updateCasePriority(caseId: string, priority: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/cases/${caseId}/priority`, {
+  const res = await fetchWithRetry(`${API_BASE}/cases/${caseId}/priority`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ priority }),
@@ -661,7 +699,7 @@ export async function mergeCases(
  * Fetch devices
  */
 export async function fetchDevices(): Promise<Array<{ owner_id: string; name: string }>> {
-  const res = await fetch(`${API_BASE}/devices`);
+  const res = await fetchWithRetry(`${API_BASE}/devices`);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.devices;
@@ -678,7 +716,7 @@ export async function updateEntityName(
   entityId: string,
   name: string
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/${entityType}/${entityId}/name`, {
+  const res = await fetchWithRetry(`${API_BASE}/${entityType}/${entityId}/name`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
@@ -698,7 +736,7 @@ export async function updateEntityProperties(
   entityId: string,
   properties: Record<string, unknown>
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/${entityType}/${entityId}/properties`, {
+  const res = await fetchWithRetry(`${API_BASE}/${entityType}/${entityId}/properties`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ properties }),
@@ -713,7 +751,7 @@ export async function updateEntityProperties(
  * Fetch all assignees
  */
 export async function fetchAssignees(activeOnly = true): Promise<Assignee[]> {
-  const res = await fetch(`${API_BASE}/assignees${activeOnly ? '?active=true' : ''}`);
+  const res = await fetchWithRetry(`${API_BASE}/assignees${activeOnly ? '?active=true' : ''}`);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.assignees;
@@ -723,7 +761,7 @@ export async function fetchAssignees(activeOnly = true): Promise<Assignee[]> {
  * Fetch a single assignee by ID
  */
 export async function fetchAssignee(assigneeId: string): Promise<Assignee> {
-  const res = await fetch(`${API_BASE}/assignees/${assigneeId}`);
+  const res = await fetchWithRetry(`${API_BASE}/assignees/${assigneeId}`);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.assignee;
@@ -737,7 +775,7 @@ export async function createAssignee(
   role?: string,
   email?: string
 ): Promise<Assignee> {
-  const res = await fetch(`${API_BASE}/assignees`, {
+  const res = await fetchWithRetry(`${API_BASE}/assignees`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, role, email }),
@@ -754,7 +792,7 @@ export async function updateAssignee(
   assigneeId: string,
   updates: { name?: string; role?: string; email?: string; active?: boolean }
 ): Promise<Assignee> {
-  const res = await fetch(`${API_BASE}/assignees/${assigneeId}`, {
+  const res = await fetchWithRetry(`${API_BASE}/assignees/${assigneeId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),
@@ -768,7 +806,7 @@ export async function updateAssignee(
  * Delete (deactivate) an assignee
  */
 export async function deleteAssignee(assigneeId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/assignees/${assigneeId}`, {
+  const res = await fetchWithRetry(`${API_BASE}/assignees/${assigneeId}`, {
     method: 'DELETE',
   });
   const data = await res.json();
@@ -782,7 +820,7 @@ export async function assignCase(
   caseId: string,
   assigneeId: string
 ): Promise<{ caseId: string; assignee: Assignee }> {
-  const res = await fetch(`${API_BASE}/cases/${caseId}/assignee`, {
+  const res = await fetchWithRetry(`${API_BASE}/cases/${caseId}/assignee`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ assigneeId }),
@@ -798,7 +836,7 @@ export async function assignCase(
 export async function getCaseAssignee(
   caseId: string
 ): Promise<{ assignee: Assignee; isDefault: boolean }> {
-  const res = await fetch(`${API_BASE}/cases/${caseId}/assignee`);
+  const res = await fetchWithRetry(`${API_BASE}/cases/${caseId}/assignee`);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return { assignee: data.assignee, isDefault: data.isDefault };
@@ -808,7 +846,7 @@ export async function getCaseAssignee(
  * Unassign a case (revert to default)
  */
 export async function unassignCase(caseId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/cases/${caseId}/assignee`, {
+  const res = await fetchWithRetry(`${API_BASE}/cases/${caseId}/assignee`, {
     method: 'DELETE',
   });
   const data = await res.json();
@@ -846,7 +884,7 @@ export async function fetchEntityTitles(
   const url = entityType
     ? `${API_BASE}/entity-titles?type=${entityType}`
     : `${API_BASE}/entity-titles`;
-  const res = await fetch(url);
+  const res = await fetchWithRetry(url);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.titles;
@@ -859,7 +897,7 @@ export async function fetchEntityTitle(
   entityType: EntityType,
   entityId: string
 ): Promise<EntityTitleResponse> {
-  const res = await fetch(`${API_BASE}/entity-titles/${entityType}/${entityId}`);
+  const res = await fetchWithRetry(`${API_BASE}/entity-titles/${entityType}/${entityId}`);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data;
@@ -874,7 +912,7 @@ export async function setEntityTitle(
   title: string,
   notes?: string
 ): Promise<EntityTitleResponse> {
-  const res = await fetch(`${API_BASE}/entity-titles/${entityType}/${entityId}`, {
+  const res = await fetchWithRetry(`${API_BASE}/entity-titles/${entityType}/${entityId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title, notes }),
@@ -892,7 +930,7 @@ export async function updateEntityTitle(
   entityId: string,
   updates: { title?: string; notes?: string }
 ): Promise<EntityTitleResponse> {
-  const res = await fetch(`${API_BASE}/entity-titles/${entityType}/${entityId}`, {
+  const res = await fetchWithRetry(`${API_BASE}/entity-titles/${entityType}/${entityId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),
@@ -906,7 +944,7 @@ export async function updateEntityTitle(
  * Remove a custom title for an entity (reverts to original name)
  */
 export async function deleteEntityTitle(entityType: EntityType, entityId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/entity-titles/${entityType}/${entityId}`, {
+  const res = await fetchWithRetry(`${API_BASE}/entity-titles/${entityType}/${entityId}`, {
     method: 'DELETE',
   });
   const data = await res.json();
@@ -922,7 +960,7 @@ export async function setEntityTitlesBulk(
   updated: Array<{ type: EntityType; id: string; title: string; isNew: boolean }>;
   errors?: Array<{ id: string; type: EntityType; error: string }>;
 }> {
-  const res = await fetch(`${API_BASE}/entity-titles/bulk`, {
+  const res = await fetchWithRetry(`${API_BASE}/entity-titles/bulk`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ titles }),
@@ -1012,7 +1050,7 @@ export interface EntitiesWithLinkStatusResponse {
  * Fetch all device-person links
  */
 export async function fetchDevicePersonLinks(): Promise<DevicePersonLink[]> {
-  const res = await fetch(`${API_BASE}/device-person-links`);
+  const res = await fetchWithRetry(`${API_BASE}/device-person-links`);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.links || [];
@@ -1030,7 +1068,7 @@ export async function createDevicePersonLink(input: {
   validFrom?: string;
   validTo?: string;
 }): Promise<DevicePersonLink> {
-  const res = await fetch(`${API_BASE}/device-person-links`, {
+  const res = await fetchWithRetry(`${API_BASE}/device-person-links`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
@@ -1052,7 +1090,7 @@ export async function updateDevicePersonLink(
     validTo?: string;
   }
 ): Promise<DevicePersonLink> {
-  const res = await fetch(`${API_BASE}/device-person-links/${encodeURIComponent(linkId)}`, {
+  const res = await fetchWithRetry(`${API_BASE}/device-person-links/${encodeURIComponent(linkId)}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates),
@@ -1066,7 +1104,7 @@ export async function updateDevicePersonLink(
  * Delete a device-person link
  */
 export async function deleteDevicePersonLink(linkId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/device-person-links/${encodeURIComponent(linkId)}`, {
+  const res = await fetchWithRetry(`${API_BASE}/device-person-links/${encodeURIComponent(linkId)}`, {
     method: 'DELETE',
   });
   const data = await res.json();
@@ -1077,7 +1115,7 @@ export async function deleteDevicePersonLink(linkId: string): Promise<void> {
  * Fetch AI-suggested device-person links
  */
 export async function fetchLinkSuggestions(): Promise<LinkSuggestion[]> {
-  const res = await fetch(`${API_BASE}/link-suggestions`);
+  const res = await fetchWithRetry(`${API_BASE}/link-suggestions`);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.suggestions || [];
@@ -1090,7 +1128,7 @@ export async function confirmLinkSuggestion(
   suggestionId: string,
   notes?: string
 ): Promise<DevicePersonLink> {
-  const res = await fetch(`${API_BASE}/link-suggestions/${encodeURIComponent(suggestionId)}/confirm`, {
+  const res = await fetchWithRetry(`${API_BASE}/link-suggestions/${encodeURIComponent(suggestionId)}/confirm`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ notes }),
@@ -1104,7 +1142,7 @@ export async function confirmLinkSuggestion(
  * Reject a suggested link
  */
 export async function rejectLinkSuggestion(suggestionId: string, reason?: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/link-suggestions/${encodeURIComponent(suggestionId)}/reject`, {
+  const res = await fetchWithRetry(`${API_BASE}/link-suggestions/${encodeURIComponent(suggestionId)}/reject`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ reason }),
@@ -1117,7 +1155,7 @@ export async function rejectLinkSuggestion(suggestionId: string, reason?: string
  * Fetch all entities (persons and devices) with their link status
  */
 export async function fetchEntitiesWithLinkStatus(): Promise<EntitiesWithLinkStatusResponse> {
-  const res = await fetch(`${API_BASE}/entities-with-link-status`);
+  const res = await fetchWithRetry(`${API_BASE}/entities-with-link-status`);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return {
@@ -1140,7 +1178,7 @@ export async function fetchEntitiesWithLinkStatus(): Promise<EntitiesWithLinkSta
  * Fetch handoff candidates (suspects crossing jurisdictions)
  */
 export async function fetchHandoffCandidates(): Promise<HandoffCandidate[]> {
-  const res = await fetch(`${API_BASE}/handoff-candidates`);
+  const res = await fetchWithRetry(`${API_BASE}/handoff-candidates`);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.candidates || [];
@@ -1158,7 +1196,7 @@ export async function fetchDevicesPaginated(options?: {
   if (options?.offset) params.set('offset', String(options.offset));
 
   const url = params.toString() ? `${API_BASE}/devices?${params}` : `${API_BASE}/devices`;
-  const res = await fetch(url);
+  const res = await fetchWithRetry(url);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return { devices: data.devices || [], pagination: data.pagination };
@@ -1168,7 +1206,7 @@ export async function fetchDevicesPaginated(options?: {
  * Fetch full evidence for a specific entity
  */
 export async function fetchEntityEvidence(entityId: string): Promise<EntityEvidence> {
-  const res = await fetch(`${API_BASE}/evidence/${encodeURIComponent(entityId)}`);
+  const res = await fetchWithRetry(`${API_BASE}/evidence/${encodeURIComponent(entityId)}`);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.evidence;
@@ -1178,7 +1216,7 @@ export async function fetchEntityEvidence(entityId: string): Promise<EntityEvide
  * Fetch dashboard statistics
  */
 export async function fetchDashboardStats(): Promise<DashboardStats> {
-  const res = await fetch(`${API_BASE}/stats`);
+  const res = await fetchWithRetry(`${API_BASE}/stats`);
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return data.stats;
@@ -1199,7 +1237,7 @@ export async function fetchCoLocationLog(input: {
   timeColumn: string | null;
   entries: CoLocationLogEntry[];
 }> {
-  const res = await fetch(`${API_BASE}/colocation-log`, {
+  const res = await fetchWithRetry(`${API_BASE}/colocation-log`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
@@ -1239,7 +1277,7 @@ export async function fetchSocialLog(input: {
   entries: SocialLogEntry[];
   totalConnections: number;
 }> {
-  const res = await fetch(`${API_BASE}/social-log`, {
+  const res = await fetchWithRetry(`${API_BASE}/social-log`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
@@ -1288,7 +1326,7 @@ export async function fetchDeviceTail(
   deviceId: string,
   options?: { signal?: AbortSignal }
 ): Promise<DeviceTail> {
-  const res = await fetch(`${API_BASE}/device-tail/${encodeURIComponent(deviceId)}`, {
+  const res = await fetchWithRetry(`${API_BASE}/device-tail/${encodeURIComponent(deviceId)}`, {
     signal: options?.signal,
   });
   const data = await res.json();
@@ -1321,7 +1359,7 @@ export async function fetchPositionsEnhanced(
   if (options?.limit) params.set('limit', String(options.limit));
 
   const url = `${API_BASE}/positions/${hour}?${params}`;
-  const res = await fetch(url, { signal: options?.signal });
+  const res = await fetchWithRetry(url, { signal: options?.signal });
   const data = await res.json();
   if (!data.success) throw new Error(data.error);
   return {

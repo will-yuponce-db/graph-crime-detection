@@ -160,14 +160,53 @@ const PRIORITY_COLORS: Record<string, string> = {
   critical: '#ef4444',
 };
 
+// Crime type to emoji mapping
+const CRIME_TYPE_ICONS: Record<string, { emoji: string; label: string }> = {
+  burglary: { emoji: '🏠', label: 'Burglary' },
+  robbery: { emoji: '💰', label: 'Robbery' },
+  assault: { emoji: '👊', label: 'Assault' },
+  fraud: { emoji: '💳', label: 'Fraud' },
+  drug: { emoji: '💊', label: 'Drug Crime' },
+  narcotics: { emoji: '💊', label: 'Narcotics' },
+  theft: { emoji: '🔓', label: 'Theft' },
+  larceny: { emoji: '🔓', label: 'Larceny' },
+  vehicle: { emoji: '🚗', label: 'Vehicle Crime' },
+  'motor vehicle': { emoji: '🚗', label: 'Motor Vehicle' },
+  carjacking: { emoji: '🚗', label: 'Carjacking' },
+  homicide: { emoji: '⚰️', label: 'Homicide' },
+  murder: { emoji: '⚰️', label: 'Murder' },
+  arson: { emoji: '🔥', label: 'Arson' },
+  vandalism: { emoji: '🎨', label: 'Vandalism' },
+  trespass: { emoji: '🚧', label: 'Trespass' },
+  weapons: { emoji: '🔫', label: 'Weapons' },
+  kidnapping: { emoji: '🚨', label: 'Kidnapping' },
+  cybercrime: { emoji: '💻', label: 'Cybercrime' },
+  identity: { emoji: '🪪', label: 'Identity Crime' },
+  extortion: { emoji: '📜', label: 'Extortion' },
+  default: { emoji: '📋', label: 'Case' },
+};
 
-// Case icon
-const caseIcon = L.divIcon({
-  className: 'case-icon',
-  html: '<div style="font-size: 20px; filter: drop-shadow(0 0 4px rgba(249, 115, 22, 0.8));">📋</div>',
-  iconSize: [24, 24],
-  iconAnchor: [12, 12],
-});
+// Get crime type info from description
+const getCrimeTypeInfo = (description: string): { emoji: string; label: string } => {
+  const desc = description.toLowerCase();
+  for (const [key, value] of Object.entries(CRIME_TYPE_ICONS)) {
+    if (key !== 'default' && desc.includes(key)) {
+      return value;
+    }
+  }
+  return CRIME_TYPE_ICONS.default;
+};
+
+// Create dynamic case icon based on crime type
+const createCaseIcon = (crimeType: { emoji: string }, priority: string) => {
+  const color = PRIORITY_COLORS[priority] || PRIORITY_COLORS.medium;
+  return L.divIcon({
+    className: 'case-icon',
+    html: `<div style="font-size: 22px; filter: drop-shadow(0 0 6px ${color});">${crimeType.emoji}</div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  });
+};
 
 // Map controller component
 const MapController: React.FC<{ center: [number, number]; zoom: number }> = ({ center, zoom }) => {
@@ -185,6 +224,37 @@ const formatHour = (hour: number): string => {
   const ampm = h >= 12 ? 'PM' : 'AM';
   const displayHour = h === 0 ? 12 : h > 12 ? h - 12 : h;
   return `Day ${day}, ${displayHour}:00 ${ampm}`;
+};
+
+// Color palette for non-suspect associates - distinct, visually pleasing colors
+const associateColors = [
+  '#10b981', // Emerald
+  '#3b82f6', // Blue
+  '#f97316', // Orange
+  '#ec4899', // Pink
+  '#14b8a6', // Teal
+  '#8b5cf6', // Violet
+  '#eab308', // Yellow
+  '#06b6d4', // Cyan
+  '#84cc16', // Lime
+  '#f43f5e', // Rose
+  '#6366f1', // Indigo
+  '#22d3ee', // Sky
+  '#a855f7', // Purple
+  '#fb923c', // Amber
+  '#2dd4bf', // Turquoise
+  '#4ade80', // Green
+];
+
+// Simple hash function to get consistent color per owner ID
+const getAssociateColor = (id: string | null) => {
+  if (!id) return '#6b7280'; // Gray fallback for null/undefined
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = ((hash << 5) - hash) + id.charCodeAt(i);
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return associateColors[Math.abs(hash) % associateColors.length];
 };
 
 const HeatmapDashboard: React.FC = () => {
@@ -206,6 +276,8 @@ const HeatmapDashboard: React.FC = () => {
   const [playbackSpeed, setPlaybackSpeed] = useState(1); // 0.5x, 1x, 2x, 5x
   const [showDevices, setShowDevices] = useState(true);
   const [showDeviceLabels, setShowDeviceLabels] = useState(false);
+  const [showTrails, setShowTrails] = useState(true);
+  const [showTrailsOnly, setShowTrailsOnly] = useState(false); // When true, only show trailed entity positions
   const [showHexHeatmap, setShowHexHeatmap] = useState(false);
   const [navExpanded, setNavExpanded] = useState(false);
   const [mapCenter, setMapCenter] = useState<[number, number]>([38.9076, -77.0723]);
@@ -227,6 +299,7 @@ const HeatmapDashboard: React.FC = () => {
 
   // UI state
   const [selectedCase, setSelectedCase] = useState<KeyFrame | null>(null);
+  const [casePinned, setCasePinned] = useState(false); // Track if case was manually selected from case bar
   const [caseMenuAnchor, setCaseMenuAnchor] = useState<null | HTMLElement>(null);
   const [selectedHotspotKey, setSelectedHotspotKey] = useState<string | null>(null);
   const [selectedDevice, setSelectedDevice] = useState<DevicePosition | null>(null);
@@ -239,6 +312,104 @@ const HeatmapDashboard: React.FC = () => {
 
   // Entity filter from URL (used when navigating from GraphExplorer to track specific persons)
   const [focusedEntityIds, setFocusedEntityIds] = useState<Set<string>>(new Set());
+
+  // Cache for ALL positions (bulk loaded for smooth playback) - declared early for entityTrails
+  const positionsCacheRef = useRef<Map<number, DevicePosition[]>>(new Map());
+  // Track cache population to trigger entityTrails rebuild
+  const [cacheReady, setCacheReady] = useState(false);
+
+  // Build trails from cached positions for focused entities (clipped to time window)
+  // Also merge in any manually-fetched trails from tailedDevices
+  const entityTrails = useMemo(() => {
+    const trails = new Map<string, DeviceTail>();
+    
+    // First, add any manually-fetched trails from tailedDevices
+    // These have priority since they're specifically fetched for the entity
+    for (const [deviceId, trail] of tailedDevices) {
+      // Extract entity ID (remove 'device_' prefix if present)
+      const entityId = deviceId.startsWith('device_') ? deviceId.slice(7) : deviceId;
+      // Only include if it's a focused entity or if no focus filter is active
+      if (focusedEntityIds.size === 0 || focusedEntityIds.has(entityId) || focusedEntityIds.has(deviceId)) {
+        // Clip trail to time window
+        const [windowStart, windowEnd] = timeWindow;
+        const clippedTrail = trail.trail.filter(p => p.hour >= windowStart && p.hour <= windowEnd);
+        if (clippedTrail.length > 0) {
+          trails.set(entityId, {
+            ...trail,
+            entityId,
+            trail: clippedTrail,
+            totalPoints: clippedTrail.length,
+          });
+        }
+      }
+    }
+    
+    // Then try to build trails from bulk positions cache for any focused entities
+    // that don't already have a trail
+    if (focusedEntityIds.size > 0 && cacheReady) {
+      const [windowStart, windowEnd] = timeWindow;
+      
+      for (const entityId of focusedEntityIds) {
+        // Skip if we already have a trail for this entity from tailedDevices
+        if (trails.has(entityId)) continue;
+        
+        const trailPoints: Array<{ hour: number; lat: number; lng: number; city?: string }> = [];
+        let entityName = `Entity ${entityId}`;
+        let isSuspect = false;
+        let alias: string | null = null;
+        let baseCity = '';
+        let baseLat = 0;
+        let baseLng = 0;
+        
+        // Collect positions only within the time window
+        for (let hour = windowStart; hour <= windowEnd; hour++) {
+          const hourPositions = positionsCacheRef.current.get(hour) || [];
+          const match = hourPositions.find(
+            (p) => p.ownerId === entityId || p.deviceId === entityId || p.deviceId === `device_${entityId}`
+          );
+          
+          if (match) {
+            trailPoints.push({
+              hour,
+              lat: match.lat,
+              lng: match.lng,
+              city: match.towerName || undefined,
+            });
+            // Capture entity info from first match
+            if (trailPoints.length === 1) {
+              entityName = match.ownerName || match.deviceName || entityName;
+              isSuspect = match.isSuspect || false;
+              alias = match.ownerAlias || null;
+              baseCity = match.towerName || '';
+              baseLat = match.lat;
+              baseLng = match.lng;
+            }
+          }
+        }
+        
+        if (trailPoints.length > 0) {
+          trails.set(entityId, {
+            deviceId: `device_${entityId}`,
+            entityId,
+            entityName,
+            alias,
+            isSuspect,
+            threatLevel: isSuspect ? 'High' : 'Low',
+            trail: trailPoints,
+            totalPoints: trailPoints.length,
+            baseLocation: {
+              lat: baseLat,
+              lng: baseLng,
+              city: baseCity,
+              state: '',
+            },
+          });
+        }
+      }
+    }
+    
+    return trails;
+  }, [focusedEntityIds, cacheReady, timeWindow, tailedDevices]);
 
   // AI Insights state
   const [hotspotInsight, setHotspotInsight] = useState<Insight | null>(null);
@@ -474,9 +645,11 @@ const HeatmapDashboard: React.FC = () => {
   });
 
   let filteredPositions = positions.filter((d) => {
-    // Filter by focused entities (from URL deep-link)
-    if (focusedEntityIds.size > 0 && d.ownerId) {
-      if (!focusedEntityIds.has(d.ownerId)) return false;
+    // "Trails Only" mode - only show positions from entities being trailed
+    if (showTrailsOnly && entityTrails.size > 0) {
+      const matchesOwner = d.ownerId && focusedEntityIds.has(d.ownerId);
+      const matchesDevice = focusedEntityIds.has(d.deviceId);
+      if (!matchesOwner && !matchesDevice) return false;
     }
 
     // Filter by search query
@@ -489,76 +662,35 @@ const HeatmapDashboard: React.FC = () => {
     );
   });
 
-  // If tracking is active but no positions match (e.g., missing owner IDs or stale params),
-  // fall back to showing all devices so the map doesn't appear empty.
-  if (focusedEntityIds.size > 0 && filteredPositions.length === 0) {
-    filteredPositions = positions;
-  }
-
-  // When tracking entities (via entityIds query), auto-center on the first match and
-  // automatically load their device tails so the trail is visible immediately.
+  // When entity trails are built, auto-center the map on the first trail's starting position
   useEffect(() => {
-    if (focusedEntityIds.size === 0) {
+    if (entityTrails.size === 0) {
       autoFocusKeyRef.current = null;
-      if (autoTailedDeviceIdsRef.current.size > 0) {
-        setTailedDevices((prev) => {
-          if (prev.size === 0) return prev;
-          const next = new Map(prev);
-          for (const id of autoTailedDeviceIdsRef.current) next.delete(id);
-          return next;
-        });
-        autoTailedDeviceIdsRef.current = new Set();
-      }
       return;
     }
 
-    const trackedPositions = positions.filter(
-      (p) => p.ownerId && focusedEntityIds.has(p.ownerId)
-    );
-
-    if (trackedPositions.length > 0) {
-      const focusKey = trackedPositions
-        .map((p) => p.ownerId || p.deviceId)
-        .filter(Boolean)
-        .sort()
-        .join('|');
-
-      if (autoFocusKeyRef.current !== focusKey) {
-        const { lat, lng } = trackedPositions[0];
-        if (typeof lat === 'number' && typeof lng === 'number') {
-          setMapCenter([lat, lng]);
-          setMapZoom((prev) => (prev < 13 ? 13 : prev));
+    const focusKey = Array.from(entityTrails.keys()).sort().join('|');
+    
+    if (autoFocusKeyRef.current !== focusKey) {
+      // Center on first trail's current position
+      const firstTrail = entityTrails.values().next().value;
+      if (firstTrail && firstTrail.trail.length > 0) {
+        // Find the position by hour, not by array index
+        const currentIdx = firstTrail.trail.findIndex((p: { hour: number }) => p.hour >= currentHour);
+        const effectiveIdx = currentIdx === -1 
+          ? firstTrail.trail.length - 1 // Past the end, use last
+          : currentIdx === 0 && firstTrail.trail[0].hour > currentHour
+            ? 0 // Before start, use first
+            : currentIdx;
+        const pos = firstTrail.trail[effectiveIdx];
+        if (pos && typeof pos.lat === 'number' && typeof pos.lng === 'number') {
+          setMapCenter([pos.lat, pos.lng]);
+          setMapZoom((prev) => (prev < 12 ? 12 : prev));
           autoFocusKeyRef.current = focusKey;
         }
       }
-
-      const targetDeviceIds = new Set(trackedPositions.map((p) => p.deviceId));
-      targetDeviceIds.forEach((deviceId) => {
-        if (
-          deviceId &&
-          !autoTailedDeviceIdsRef.current.has(deviceId) &&
-          !tailedDevices.has(deviceId) &&
-          !tailLoading.has(deviceId)
-        ) {
-          autoTailedDeviceIdsRef.current.add(deviceId);
-          void toggleDeviceTail(deviceId);
-        }
-      });
-
-      const staleIds = [...autoTailedDeviceIdsRef.current].filter(
-        (id) => !targetDeviceIds.has(id)
-      );
-      if (staleIds.length > 0) {
-        setTailedDevices((prev) => {
-          if (prev.size === 0) return prev;
-          const next = new Map(prev);
-          staleIds.forEach((id) => next.delete(id));
-          return next;
-        });
-        staleIds.forEach((id) => autoTailedDeviceIdsRef.current.delete(id));
-      }
     }
-  }, [focusedEntityIds, positions, tailedDevices, tailLoading, toggleDeviceTail, setMapZoom, setMapCenter]);
+  }, [entityTrails, currentHour, setMapZoom, setMapCenter]);
 
   const filteredCases = cases.filter((c) => {
     const cityOk = cityFilterParam
@@ -634,8 +766,7 @@ const HeatmapDashboard: React.FC = () => {
   const hourFetchAbortRef = useRef<AbortController | null>(null);
   const isScrubbingRef = useRef(false);
 
-  // Cache for ALL positions (bulk loaded for smooth playback)
-  const positionsCacheRef = useRef<Map<number, DevicePosition[]>>(new Map());
+  // Cache for hotspots
   const hotspotsCacheRef = useRef<Map<string, Hotspot[]>>(new Map());
 
   const getHotspotCacheKey = useCallback(
@@ -799,6 +930,7 @@ const HeatmapDashboard: React.FC = () => {
             positionsCacheRef.current.set(hour, hourPositions);
           }
         }
+        setCacheReady(true);
         setBulkLoadProgress(100);
         
         // Auto-hide the "Ready" indicator after 3 seconds
@@ -841,6 +973,7 @@ const HeatmapDashboard: React.FC = () => {
         setBulkLoadProgress(Math.round(((i + batchSize) / hoursToLoad.length) * 100));
       }
       
+      setCacheReady(true);
       setBulkLoadProgress(100);
       setTimeout(() => setBulkLoadProgress(null), 3000);
     };
@@ -918,8 +1051,11 @@ const HeatmapDashboard: React.FC = () => {
   const casesAtCurrentHour = keyFrames.filter((kf) => kf.hour === currentHour);
   const isKeyFrame = casesAtCurrentHour.length > 0;
 
-  // Auto-select case when landing on key frame
+  // Auto-select case when landing on key frame (unless a case is manually pinned)
   useEffect(() => {
+    // If a case is pinned from the case bar, don't auto-change selection
+    if (casePinned) return;
+    
     const cases = keyFrames.filter((kf) => kf.hour === currentHour);
     if (cases.length === 1) {
       setSelectedCase(cases[0]);
@@ -928,7 +1064,7 @@ const HeatmapDashboard: React.FC = () => {
     } else {
       setSelectedCase(null);
     }
-  }, [currentHour, keyFrames]);
+  }, [currentHour, keyFrames, casePinned]);
 
   // Keep playhead/scrub within the selected window
   useEffect(() => {
@@ -957,11 +1093,12 @@ const HeatmapDashboard: React.FC = () => {
     };
   }, [isPlaying, playbackSpeed, timeWindow]);
 
-  const jumpToKeyFrame = useCallback((kf: KeyFrame) => {
+  const jumpToKeyFrame = useCallback((kf: KeyFrame, pin = true) => {
     setCurrentHour(kf.hour);
     setMapCenter([kf.lat, kf.lng]);
     setMapZoom(14);
     setSelectedCase(kf);
+    setCasePinned(pin); // Pin the case so it stays selected when navigating away
     setIsPlaying(false);
   }, []);
 
@@ -1044,6 +1181,44 @@ const HeatmapDashboard: React.FC = () => {
     }
   }, [searchParams, parseHourParam, parseWindowParams]);
 
+  // When focused entities are set from URL, automatically fetch their trails
+  // This ensures we get trail data even if the entity isn't in the bulk positions
+  useEffect(() => {
+    if (focusedEntityIds.size === 0) return;
+    if (!cacheReady) return; // Wait for bulk data to load first
+    
+    // Check which focused entities don't have trails from the bulk cache
+    const missingEntities: string[] = [];
+    for (const entityId of focusedEntityIds) {
+      // Check if entity exists in any hour of the positions cache
+      let foundInCache = false;
+      for (const [, hourPositions] of positionsCacheRef.current) {
+        const match = hourPositions.find(
+          (p) => p.ownerId === entityId || p.deviceId === entityId || p.deviceId === `device_${entityId}`
+        );
+        if (match) {
+          foundInCache = true;
+          break;
+        }
+      }
+      // Also check if we already have a manual tail for this entity
+      if (!foundInCache && !tailedDevices.has(`device_${entityId}`) && !tailedDevices.has(entityId)) {
+        missingEntities.push(entityId);
+      }
+    }
+    
+    // Fetch trails for missing entities using the device-tail endpoint
+    if (missingEntities.length > 0) {
+      missingEntities.forEach((entityId) => {
+        // Use device_entityId format since that's what the API expects
+        const deviceId = entityId.startsWith('device_') ? entityId : `device_${entityId}`;
+        if (!tailLoading.has(deviceId) && !tailedDevices.has(deviceId)) {
+          toggleDeviceTail(deviceId);
+        }
+      });
+    }
+  }, [focusedEntityIds, cacheReady, tailedDevices, tailLoading, toggleDeviceTail]);
+
   // If a city filter is provided, recenter the map to a tower in that city (best effort).
   useEffect(() => {
     if (!cityFilterParam) return;
@@ -1111,6 +1286,43 @@ const HeatmapDashboard: React.FC = () => {
         bgcolor: 'background.default',
       }}
     >
+      {/* Global CSS for trail animations */}
+      <style>{`
+        @keyframes trailPulse {
+          0% { transform: scale(1); opacity: 0.8; }
+          50% { transform: scale(1.3); opacity: 0.4; }
+          100% { transform: scale(1); opacity: 0.8; }
+        }
+        .trail-pulse-outer path {
+          animation: trailPulse 1.5s ease-in-out infinite;
+          transform-origin: center;
+        }
+        .leaflet-tooltip-pane .leaflet-tooltip {
+          transition: transform 0.3s ease-out;
+        }
+        /* Reset Leaflet default marker styling for custom trail markers */
+        .trail-waypoint-marker,
+        .trail-current-label,
+        .device-label {
+          background: transparent !important;
+          border: none !important;
+          box-shadow: none !important;
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+        .trail-current-label::before,
+        .trail-current-label::after,
+        .device-label::before,
+        .device-label::after {
+          display: none !important;
+        }
+        .leaflet-marker-icon.trail-current-label,
+        .leaflet-marker-icon.device-label {
+          background: transparent !important;
+          width: auto !important;
+          height: auto !important;
+        }
+      `}</style>
       {/* Map */}
       <Box sx={{ flex: 1, position: 'relative' }}>
         <MapContainer
@@ -1168,6 +1380,12 @@ const HeatmapDashboard: React.FC = () => {
                 d.deviceId.slice(-6);
               const label = rawLabel.length > 24 ? `${rawLabel.slice(0, 21)}...` : rawLabel;
               const isFocusedOwner = d.ownerId ? focusedEntityIds.has(d.ownerId) : false;
+              
+              // Skip rendering device dot for tracked entities when trails are showing
+              // (the trail markers already show the entity's position)
+              if (isFocusedOwner && showTrails && entityTrails.size > 0) {
+                return null;
+              }
 
               return (
                 <React.Fragment key={d.deviceId}>
@@ -1183,112 +1401,138 @@ const HeatmapDashboard: React.FC = () => {
                       }}
                     />
                   )}
+                  {/* Suspect double ring - outer glow */}
+                  {d.isSuspect && !isFocusedOwner && (
+                    <CircleMarker
+                      center={[d.lat, d.lng]}
+                      radius={16}
+                      pathOptions={{
+                        color: '#ef444440',
+                        fillColor: '#ef444420',
+                        fillOpacity: 0.25,
+                        weight: 4,
+                      }}
+                    />
+                  )}
+                  {/* Suspect double ring - solid accent ring */}
+                  {d.isSuspect && !isFocusedOwner && (
+                    <CircleMarker
+                      center={[d.lat, d.lng]}
+                      radius={11}
+                      pathOptions={{
+                        color: '#f97316',
+                        fillColor: 'transparent',
+                        fillOpacity: 0,
+                        weight: 2.5,
+                      }}
+                    />
+                  )}
                   <CircleMarker
                     center={[d.lat, d.lng]}
                     radius={d.isSuspect || isFocusedOwner ? 7 : 5}
                     pathOptions={{
-                      color: isFocusedOwner ? '#06b6d4' : d.isSuspect ? '#ef4444' : '#6b7280',
-                      fillColor: isFocusedOwner ? '#06b6d4' : d.isSuspect ? '#ef4444' : '#6b7280',
+                      color: isFocusedOwner ? '#06b6d4' : d.isSuspect ? '#ef4444' : getAssociateColor(d.ownerId),
+                      fillColor: isFocusedOwner ? '#06b6d4' : d.isSuspect ? '#ef4444' : getAssociateColor(d.ownerId),
                       fillOpacity: 0.9,
                       weight: d.isSuspect || isFocusedOwner ? 2.5 : 1.5,
                     }}
                   >
-                    <Tooltip direction="top" offset={[0, -5]} opacity={0.95}>
+                    <Popup>
                       <div
                         style={{
-                          padding: '4px 8px',
-                          minWidth: '140px',
+                          padding: '4px',
+                          minWidth: '160px',
                           fontFamily: 'system-ui, -apple-system, sans-serif',
                         }}
                       >
+                        {/* Header */}
                         <div
                           style={{
                             fontWeight: 700,
-                            fontSize: '13px',
-                            marginBottom: '4px',
-                            color: isFocusedOwner ? '#06b6d4' : d.isSuspect ? '#ef4444' : '#6b7280',
+                            fontSize: '12px',
+                            marginBottom: '6px',
+                            color: isFocusedOwner ? '#06b6d4' : d.isSuspect ? '#ef4444' : getAssociateColor(d.ownerId),
                           }}
                         >
                           {isFocusedOwner
-                            ? '🎯 TRACKED ENTITY'
+                            ? '🎯 TRACKED'
                             : d.isSuspect
-                              ? '⚠️ PERSON OF INTEREST'
+                              ? '⚠️ SUSPECT'
                               : '👤 Associate'}
                         </div>
-                        <div style={{ fontWeight: 600, fontSize: '12px', marginBottom: '2px' }}>
+                        
+                        {/* Name */}
+                        <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '2px' }}>
                           {d.ownerAlias ? `"${d.ownerAlias}"` : d.ownerName || 'Unknown'}
                         </div>
                         {d.ownerAlias && d.ownerName && (
-                          <div style={{ fontSize: '11px', color: '#666', marginBottom: '2px' }}>
+                          <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>
                             {d.ownerName}
                           </div>
                         )}
-                        <div style={{ fontSize: '10px', color: '#888' }}>
-                          {d.deviceName}
+                        
+                        {/* Device info */}
+                        <div style={{ fontSize: '10px', color: '#888', marginBottom: '4px' }}>
+                          📱 {d.deviceName}
                           {d.isBurner && (
                             <span style={{ color: '#a855f7', fontWeight: 600, marginLeft: '4px' }}>
                               🔥 BURNER
                             </span>
                           )}
                         </div>
+                        
                         {d.deviceType && d.deviceType !== 'mobile' && (
-                          <div style={{ fontSize: '9px', color: '#666', textTransform: 'uppercase' }}>
+                          <div style={{ fontSize: '9px', color: '#666', textTransform: 'uppercase', marginBottom: '4px' }}>
                             {d.deviceType}
                           </div>
                         )}
+                        
                         {d.towerName && (
-                          <div
-                            style={{
-                              fontSize: '10px',
-                              color: '#888',
-                              marginTop: '4px',
-                              borderTop: '1px solid #eee',
-                              paddingTop: '4px',
-                            }}
-                          >
+                          <div style={{ fontSize: '10px', color: '#888', marginBottom: '6px' }}>
                             📡 {d.towerName}
                           </div>
                         )}
+                        
+                        {/* Action button - Start/Stop Trail */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const trackId = d.ownerId || d.deviceId;
+                            const isCurrentlyTracked = focusedEntityIds.has(trackId);
+                            const newParams = new URLSearchParams(searchParams);
+                            const currentIds = (newParams.get('entityIds') || '').split(',').filter(Boolean);
+                            
+                            if (isCurrentlyTracked) {
+                              // Remove from tracking
+                              const newIds = currentIds.filter(id => id !== trackId);
+                              if (newIds.length > 0) {
+                                newParams.set('entityIds', newIds.join(','));
+                              } else {
+                                newParams.delete('entityIds');
+                              }
+                            } else {
+                              // Add to tracking
+                              const newIds = [...new Set([...currentIds, trackId])];
+                              newParams.set('entityIds', newIds.join(','));
+                            }
+                            navigate(`?${newParams.toString()}`, { replace: true });
+                          }}
+                          style={{
+                            width: '100%',
+                            marginTop: '4px',
+                            padding: '6px 12px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            border: 'none',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            background: focusedEntityIds.has(d.ownerId || d.deviceId) ? '#ef4444' : '#3b82f6',
+                            color: 'white',
+                          }}
+                        >
+                          {focusedEntityIds.has(d.ownerId || d.deviceId) ? '🛑 Stop Trail' : '📍 Start Trail'}
+                        </button>
                       </div>
-                    </Tooltip>
-                    <Popup>
-                      <strong>{d.deviceName}</strong>
-                      {d.isBurner && <span style={{ color: '#a855f7', marginLeft: '4px' }}>🔥 Burner</span>}
-                      <br />
-                      {d.ownerAlias ? `"${d.ownerAlias}"` : d.ownerName || 'Unknown owner'}
-                      {d.isSuspect && (
-                        <>
-                          <br />
-                          <span style={{ color: '#ef4444' }}>⚠️ Person of Interest</span>
-                        </>
-                      )}
-                      <br />
-                      <button
-                        onClick={() => toggleDeviceTail(d.deviceId)}
-                        disabled={tailLoading.has(d.deviceId)}
-                        style={{
-                          marginTop: '8px',
-                          padding: '4px 12px',
-                          fontSize: '11px',
-                          fontWeight: 600,
-                          border: 'none',
-                          borderRadius: '4px',
-                          cursor: tailLoading.has(d.deviceId) ? 'wait' : 'pointer',
-                          background: tailedDevices.has(d.deviceId) ? '#ef4444' : '#3b82f6',
-                          color: 'white',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                        }}
-                      >
-                        {tailLoading.has(d.deviceId) ? (
-                          '⏳ Loading...'
-                        ) : tailedDevices.has(d.deviceId) ? (
-                          '🛑 Stop Tail'
-                        ) : (
-                          '📍 Start Tail'
-                        )}
-                      </button>
                     </Popup>
                   </CircleMarker>
                   {showDeviceLabels && (
@@ -1300,7 +1544,6 @@ const HeatmapDashboard: React.FC = () => {
                           font-size: 10px;
                           font-weight: 600;
                           color: ${d.isSuspect ? '#fef2f2' : '#e0f2fe'};
-                          text-shadow: 0 1px 2px rgba(0,0,0,0.8), 0 0 4px rgba(0,0,0,0.5);
                           white-space: nowrap;
                           pointer-events: none;
                         ">${label}</div>`,
@@ -1314,186 +1557,170 @@ const HeatmapDashboard: React.FC = () => {
               );
           })}
 
-          {/* Device Tails (tracking trails) */}
-          {Array.from(tailedDevices.entries()).map(([deviceId, tail]) => {
-            // Show trail up to current hour for animated feel
-            const trailUpToNow = tail.trail.slice(0, currentHour + 1);
-            if (trailUpToNow.length < 2) return null;
+          {/* Entity Trails (from tracked entities) - Connect-the-dots style */}
+          {showTrails && Array.from(entityTrails.entries()).map(([entityId, tail]) => {
+            if (tail.trail.length < 1) return null;
 
-            const positions: [number, number][] = trailUpToNow.map((p) => [p.lat, p.lng]);
+            // Full trail path (all positions within window)
+            const allPositions: [number, number][] = tail.trail.map((p) => [p.lat, p.lng]);
+            // Find current index based on actual hour values in trail (accounts for time window)
+            const currentIndex = tail.trail.findIndex((p) => p.hour >= currentHour);
+            const effectiveIndex = currentIndex === -1 
+              ? tail.trail.length - 1 // Past the end, show all
+              : currentIndex === 0 && tail.trail[0].hour > currentHour
+                ? 0 // Before the start, show first point
+                : currentIndex;
+            // Trail up to current time (traveled path)
+            const traveledPositions: [number, number][] = allPositions.slice(0, effectiveIndex + 1);
+            
             const tailColor = tail.isSuspect ? '#ef4444' : '#3b82f6';
+            const currentPosition = allPositions[effectiveIndex] || allPositions[0];
 
             return (
-              <React.Fragment key={`tail-${deviceId}`}>
-                {/* Main trail line */}
-                <Polyline
-                  positions={positions}
-                  pathOptions={{
-                    color: tailColor,
-                    weight: 3,
-                    opacity: 0.7,
-                    dashArray: '8, 4',
-                    lineCap: 'round',
-                    lineJoin: 'round',
-                  }}
-                >
-                  <Tooltip sticky>
-                    <div style={{ fontFamily: 'system-ui', fontSize: '12px' }}>
-                      <strong>🔍 Tracking: {tail.entityName}</strong>
-                      {tail.alias && <div style={{ color: '#666' }}>"{tail.alias}"</div>}
-                      <div style={{ marginTop: '4px', color: '#888', fontSize: '10px' }}>
-                        {trailUpToNow.length} positions tracked
-                      </div>
-                    </div>
-                  </Tooltip>
-                </Polyline>
-
-                {/* Trail start marker (first position) */}
-                <CircleMarker
-                  center={positions[0]}
-                  radius={6}
-                  pathOptions={{
-                    color: tailColor,
-                    fillColor: '#22c55e',
-                    fillOpacity: 1,
-                    weight: 2,
-                  }}
-                >
-                  <Tooltip direction="top" offset={[0, -8]}>
-                    <div style={{ fontFamily: 'system-ui', fontSize: '11px' }}>
-                      <strong>▶ Trail Start</strong>
-                      <br />
-                      {formatHour(0)}
-                    </div>
-                  </Tooltip>
-                </CircleMarker>
-
-                {/* Current position highlight (end of trail) */}
-                {positions.length > 1 && (
-                  <CircleMarker
-                    center={positions[positions.length - 1]}
-                    radius={10}
+              <React.Fragment key={`trail-${entityId}`}>
+                {/* Full trail line (ghost - shows complete path) */}
+                {allPositions.length > 1 && (
+                  <Polyline
+                    positions={allPositions}
                     pathOptions={{
                       color: tailColor,
-                      fillColor: tailColor,
-                      fillOpacity: 0.3,
                       weight: 3,
+                      opacity: 0.25,
+                      lineCap: 'round',
+                      lineJoin: 'round',
                     }}
                   />
                 )}
+
+                {/* Traveled trail line (solid, shows progress) */}
+                {traveledPositions.length > 1 && (
+                  <Polyline
+                    positions={traveledPositions}
+                    pathOptions={{
+                      color: tailColor,
+                      weight: 4,
+                      opacity: 0.9,
+                      lineCap: 'round',
+                      lineJoin: 'round',
+                    }}
+                  >
+                    <Tooltip sticky>
+                      <div style={{ fontFamily: 'system-ui', fontSize: '12px' }}>
+                        <strong>🔍 Tracking: {tail.entityName}</strong>
+                        {tail.alias && <div style={{ color: '#666' }}>"{tail.alias}"</div>}
+                        <div style={{ marginTop: '4px', color: '#888', fontSize: '10px' }}>
+                          Position {effectiveIndex + 1} / {allPositions.length}
+                        </div>
+                      </div>
+                    </Tooltip>
+                  </Polyline>
+                )}
+
+                {/* Numbered waypoint markers - like connect-the-dots */}
+                {allPositions.map((pos, idx) => {
+                  const isVisited = idx <= effectiveIndex;
+                  const isCurrent = idx === effectiveIndex;
+                  const isStart = idx === 0;
+                  const isEnd = idx === allPositions.length - 1;
+                  
+                  // Show every waypoint, or sample for very long trails
+                  const shouldShowNumber = allPositions.length <= 20 || 
+                    idx % Math.ceil(allPositions.length / 20) === 0 ||
+                    isStart || isEnd || isCurrent;
+                  
+                  if (!shouldShowNumber && !isCurrent) return null;
+
+                  return (
+                    <Marker
+                      key={`waypoint-${entityId}-${idx}`}
+                      position={pos}
+                      icon={L.divIcon({
+                        className: 'trail-waypoint-marker',
+                        html: `<div style="
+                          width: ${isCurrent ? '28px' : '22px'};
+                          height: ${isCurrent ? '28px' : '22px'};
+                          border-radius: 50%;
+                          background: ${isCurrent ? tailColor : isVisited ? tailColor : '#94a3b8'};
+                          border: 3px solid ${isCurrent ? '#ffffff' : isVisited ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.5)'};
+                          color: white;
+                          font-size: ${isCurrent ? '11px' : '10px'};
+                          font-weight: 700;
+                          display: flex;
+                          align-items: center;
+                          justify-content: center;
+                          box-shadow: ${isCurrent ? '0 0 12px ' + tailColor + ', 0 2px 8px rgba(0,0,0,0.4)' : '0 2px 4px rgba(0,0,0,0.3)'};
+                          opacity: ${isVisited ? 1 : 0.6};
+                          ${isCurrent ? 'animation: trailPulse 1.5s ease-in-out infinite;' : ''}
+                        ">${idx + 1}</div>`,
+                        iconSize: [isCurrent ? 28 : 22, isCurrent ? 28 : 22],
+                        iconAnchor: [isCurrent ? 14 : 11, isCurrent ? 14 : 11],
+                      })}
+                    >
+                      <Tooltip direction="top" offset={[0, -12]}>
+                        <div style={{ fontFamily: 'system-ui', fontSize: '11px', textAlign: 'center' }}>
+                          <strong style={{ color: tailColor }}>
+                            {isStart ? '▶ Start' : isEnd ? '⏹ End' : `Point ${idx + 1}`}
+                          </strong>
+                          <br />
+                          <span style={{ color: '#666' }}>{formatHour(tail.trail[idx]?.hour ?? idx)}</span>
+                          {tail.trail[idx]?.city && (
+                            <>
+                              <br />
+                              <span style={{ color: '#888', fontSize: '10px' }}>{tail.trail[idx].city}</span>
+                            </>
+                          )}
+                        </div>
+                      </Tooltip>
+                    </Marker>
+                  );
+                })}
+
+                {/* Current position label - permanent tooltip */}
+                <Marker
+                  position={currentPosition}
+                  icon={L.divIcon({
+                    className: 'trail-current-label',
+                    html: `<div style="
+                      background: ${tailColor};
+                      color: white;
+                      padding: 4px 8px;
+                      border-radius: 12px;
+                      font-size: 11px;
+                      font-weight: 600;
+                      white-space: nowrap;
+                      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                      transform: translateY(-40px);
+                    ">📍 ${tail.entityName} • ${formatHour(tail.trail[effectiveIndex]?.hour ?? 0)}</div>`,
+                    iconSize: [0, 0],
+                    iconAnchor: [0, 0],
+                  })}
+                  interactive={false}
+                />
               </React.Fragment>
             );
           })}
 
-          {/* Case marker - ONLY show when on key frame */}
-          {isKeyFrame && selectedCase && (
-            <Marker position={[selectedCase.lat, selectedCase.lng]} icon={caseIcon}>
-              <Popup>
-                <strong>📋 {selectedCase.caseNumber}</strong>
-                <br />
-                {selectedCase.neighborhood}
-                <br />
-                {selectedCase.description}
-              </Popup>
-            </Marker>
-          )}
+          {/* Case marker - show when on key frame OR when case is pinned */}
+          {(isKeyFrame || casePinned) && selectedCase && (() => {
+            const crimeInfo = getCrimeTypeInfo(selectedCase.description);
+            return (
+              <Marker 
+                position={[selectedCase.lat, selectedCase.lng]} 
+                icon={createCaseIcon(crimeInfo, selectedCase.priority)}
+              >
+                <Popup>
+                  <strong>{crimeInfo.emoji} {selectedCase.caseNumber}</strong>
+                  <br />
+                  <span style={{ color: '#6b7280', fontSize: '0.9em' }}>{crimeInfo.label}</span>
+                  <br />
+                  {selectedCase.neighborhood}
+                  <br />
+                  {selectedCase.description}
+                </Popup>
+              </Marker>
+            );
+          })()}
         </MapContainer>
-
-        {/* Active Tails Indicator */}
-        {tailedDevices.size > 0 && (
-          <Paper
-            sx={{
-              position: 'absolute',
-              top: 16,
-              left: 16,
-              p: 1.5,
-              bgcolor: theme.palette.surface.overlay,
-              border: 1,
-              borderColor: 'border.main',
-              borderRadius: 2,
-              backdropFilter: 'blur(8px)',
-              zIndex: (theme) => theme.zIndex.modal + 2,
-              maxWidth: 280,
-            }}
-          >
-            <Stack spacing={1}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Typography
-                  variant="caption"
-                  sx={{
-                    color: theme.palette.accent.blue,
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 0.5,
-                  }}
-                >
-                  <Timeline sx={{ fontSize: 14 }} />
-                  Active Tails ({tailedDevices.size})
-                </Typography>
-                <MuiTooltip title="Clear all tails">
-                  <IconButton
-                    size="small"
-                    onClick={clearAllTails}
-                    sx={{ color: 'text.secondary', '&:hover': { color: '#ef4444' } }}
-                  >
-                    <Clear sx={{ fontSize: 16 }} />
-                  </IconButton>
-                </MuiTooltip>
-              </Box>
-              <Stack spacing={0.5}>
-                {Array.from(tailedDevices.entries()).map(([deviceId, tail]) => (
-                  <Box
-                    key={deviceId}
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      py: 0.5,
-                      px: 1,
-                      bgcolor: tail.isSuspect ? 'rgba(239, 68, 68, 0.1)' : 'rgba(59, 130, 246, 0.1)',
-                      borderRadius: 1,
-                      border: 1,
-                      borderColor: tail.isSuspect ? 'rgba(239, 68, 68, 0.3)' : 'rgba(59, 130, 246, 0.3)',
-                    }}
-                  >
-                    <Box>
-                      <Typography
-                        variant="caption"
-                        sx={{
-                          fontWeight: 600,
-                          color: tail.isSuspect ? '#ef4444' : theme.palette.accent.blue,
-                          fontSize: '11px',
-                        }}
-                      >
-                        {tail.alias ? `"${tail.alias}"` : tail.entityName}
-                      </Typography>
-                      <Typography
-                        variant="caption"
-                        sx={{ display: 'block', color: 'text.secondary', fontSize: '9px' }}
-                      >
-                        {Math.min(currentHour + 1, tail.trail.length)} / {tail.trail.length} positions
-                      </Typography>
-                    </Box>
-                    <IconButton
-                      size="small"
-                      onClick={() => toggleDeviceTail(deviceId)}
-                      sx={{
-                        color: tail.isSuspect ? '#ef4444' : theme.palette.accent.blue,
-                        '&:hover': { bgcolor: 'rgba(0,0,0,0.1)' },
-                        p: 0.5,
-                      }}
-                    >
-                      <Clear sx={{ fontSize: 14 }} />
-                    </IconButton>
-                  </Box>
-                ))}
-              </Stack>
-            </Stack>
-          </Paper>
-        )}
 
         {/* Map Navigation Controls - Collapsible */}
         <Paper
@@ -1680,32 +1907,38 @@ const HeatmapDashboard: React.FC = () => {
                       }}
                     />
                   )}
-                  {focusedEntityIds.size > 0 && (
+                  {Array.from(entityTrails.entries()).map(([entityId, trail]) => (
                     <Chip
+                      key={entityId}
                       icon={<Person sx={{ fontSize: 12 }} />}
-                      label={`Tracking ${focusedEntityIds.size} person${focusedEntityIds.size > 1 ? 's' : ''}`}
+                      label={trail.alias ? `"${trail.alias}"` : trail.entityName}
                       size="small"
                       onDelete={() => {
-                        setFocusedEntityIds(new Set());
-                        // Clear from URL
+                        // Remove this entity from URL
                         const newParams = new URLSearchParams(searchParams);
-                        newParams.delete('entityIds');
+                        const currentIds = (newParams.get('entityIds') || '').split(',').filter(Boolean);
+                        const newIds = currentIds.filter(id => id !== entityId);
+                        if (newIds.length > 0) {
+                          newParams.set('entityIds', newIds.join(','));
+                        } else {
+                          newParams.delete('entityIds');
+                        }
                         navigate(`?${newParams.toString()}`, { replace: true });
                       }}
                       sx={{
                         height: 18,
                         fontSize: '0.6rem',
-                        bgcolor: `${theme.palette.accent.red}20`,
-                        color: theme.palette.accent.red,
-                        '& .MuiChip-icon': { color: theme.palette.accent.red },
+                        bgcolor: trail.isSuspect ? `${theme.palette.accent.red}20` : `${theme.palette.accent.blue}20`,
+                        color: trail.isSuspect ? theme.palette.accent.red : theme.palette.accent.blue,
+                        '& .MuiChip-icon': { color: trail.isSuspect ? theme.palette.accent.red : theme.palette.accent.blue },
                         '& .MuiChip-deleteIcon': {
-                          color: theme.palette.accent.red,
+                          color: trail.isSuspect ? theme.palette.accent.red : theme.palette.accent.blue,
                           fontSize: 14,
                           '&:hover': { color: theme.palette.accent.red },
                         },
                       }}
                     />
-                  )}
+                  ))}
                 </Stack>
                 <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                   {towers.length} cells • {positions.length} entities
@@ -1752,31 +1985,80 @@ const HeatmapDashboard: React.FC = () => {
                 }}
               />
 
-              {isKeyFrame && (
-                <Chip
-                  icon={<Warning />}
-                  label={
-                    casesAtCurrentHour.length > 1
-                      ? `${casesAtCurrentHour.length} CASES`
-                      : selectedCase?.caseNumber || 'KEY FRAME'
-                  }
-                  onClick={handleCaseChipClick}
-                  sx={{
-                    bgcolor: selectedCase
-                      ? `${PRIORITY_COLORS[selectedCase.priority]}20`
-                      : `${theme.palette.accent.yellow}20`,
-                    color: selectedCase
-                      ? PRIORITY_COLORS[selectedCase.priority]
-                      : theme.palette.accent.yellow,
-                    cursor: casesAtCurrentHour.length > 1 ? 'pointer' : 'default',
-                    '& .MuiChip-icon': {
-                      color: selectedCase
-                        ? PRIORITY_COLORS[selectedCase.priority]
-                        : theme.palette.accent.yellow,
-                    },
-                  }}
-                />
+              {entityTrails.size > 0 && (
+                <>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        size="small"
+                        checked={showTrails}
+                        onChange={(e) => setShowTrails(e.target.checked)}
+                      />
+                    }
+                    label="Show trails"
+                    sx={{
+                      m: 0,
+                      '& .MuiFormControlLabel-label': {
+                        fontSize: '0.75rem',
+                        color: 'text.secondary',
+                        userSelect: 'none',
+                      },
+                    }}
+                  />
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        size="small"
+                        checked={showTrailsOnly}
+                        onChange={(e) => setShowTrailsOnly(e.target.checked)}
+                      />
+                    }
+                    label="Trails only"
+                    sx={{
+                      m: 0,
+                      '& .MuiFormControlLabel-label': {
+                        fontSize: '0.75rem',
+                        color: 'text.secondary',
+                        userSelect: 'none',
+                      },
+                    }}
+                  />
+                </>
               )}
+
+              {(isKeyFrame || casePinned) && selectedCase && (() => {
+                const headerCrimeInfo = getCrimeTypeInfo(selectedCase.description);
+                return (
+                  <Chip
+                    icon={
+                      casesAtCurrentHour.length > 1 && !casePinned
+                        ? <Warning />
+                        : <span style={{ fontSize: '1rem' }}>{headerCrimeInfo.emoji}</span>
+                    }
+                    label={
+                      casesAtCurrentHour.length > 1 && !casePinned
+                        ? `${casesAtCurrentHour.length} CASES`
+                        : `${selectedCase.caseNumber}${casePinned && !isKeyFrame ? ' (pinned)' : ''}`
+                    }
+                    onClick={handleCaseChipClick}
+                    onDelete={casePinned ? () => setCasePinned(false) : undefined}
+                    sx={{
+                      bgcolor: `${PRIORITY_COLORS[selectedCase.priority]}20`,
+                      color: PRIORITY_COLORS[selectedCase.priority],
+                      cursor: casesAtCurrentHour.length > 1 ? 'pointer' : 'default',
+                      boxShadow: casePinned ? `0 0 0 2px ${PRIORITY_COLORS[selectedCase.priority]}40` : 'none',
+                      '& .MuiChip-icon': {
+                        color: PRIORITY_COLORS[selectedCase.priority],
+                      },
+                      '& .MuiChip-deleteIcon': {
+                        fontSize: 16,
+                        color: PRIORITY_COLORS[selectedCase.priority],
+                        '&:hover': { color: theme.palette.accent.red },
+                      },
+                    }}
+                  />
+                );
+              })()}
             </Stack>
 
             {/* Case selection menu */}
@@ -1792,35 +2074,38 @@ const HeatmapDashboard: React.FC = () => {
                 },
               }}
             >
-              {casesAtCurrentHour.map((c) => (
-                <MenuItem
-                  key={c.id}
-                  onClick={() => {
-                    setSelectedCase(c);
-                    setCaseMenuAnchor(null);
-                  }}
-                  selected={selectedCase?.id === c.id}
-                  sx={{
-                    color: 'text.primary',
-                    '&:hover': { bgcolor: 'action.hover' },
-                    '&.Mui-selected': { bgcolor: 'action.selected' },
-                  }}
-                >
-                  <ListItemIcon>
-                    {selectedCase?.id === c.id ? (
-                      <CheckCircle sx={{ color: theme.palette.accent.green }} />
-                    ) : (
-                      <Folder sx={{ color: PRIORITY_COLORS[c.priority] }} />
-                    )}
-                  </ListItemIcon>
-                  <ListItemText
-                    primary={c.caseNumber}
-                    secondary={c.neighborhood}
-                    primaryTypographyProps={{ sx: { color: 'text.primary', fontSize: '0.875rem' } }}
-                    secondaryTypographyProps={{ sx: { color: 'text.secondary' } }}
-                  />
-                </MenuItem>
-              ))}
+              {casesAtCurrentHour.map((c) => {
+                const menuCrimeInfo = getCrimeTypeInfo(c.description);
+                return (
+                  <MenuItem
+                    key={c.id}
+                    onClick={() => {
+                      setSelectedCase(c);
+                      setCaseMenuAnchor(null);
+                    }}
+                    selected={selectedCase?.id === c.id}
+                    sx={{
+                      color: 'text.primary',
+                      '&:hover': { bgcolor: 'action.hover' },
+                      '&.Mui-selected': { bgcolor: 'action.selected' },
+                    }}
+                  >
+                    <ListItemIcon>
+                      {selectedCase?.id === c.id ? (
+                        <CheckCircle sx={{ color: theme.palette.accent.green }} />
+                      ) : (
+                        <span style={{ fontSize: '1.25rem' }}>{menuCrimeInfo.emoji}</span>
+                      )}
+                    </ListItemIcon>
+                    <ListItemText
+                      primary={`${c.caseNumber}`}
+                      secondary={`${menuCrimeInfo.label} • ${c.neighborhood}`}
+                      primaryTypographyProps={{ sx: { color: 'text.primary', fontSize: '0.875rem' } }}
+                      secondaryTypographyProps={{ sx: { color: 'text.secondary' } }}
+                    />
+                  </MenuItem>
+                );
+              })}
             </Menu>
           </Stack>
         </Paper>
@@ -1841,8 +2126,154 @@ const HeatmapDashboard: React.FC = () => {
             pointerEvents: 'auto',
           }}
         >
-        <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 1 }}>
-          <Typography variant="body2" sx={{ minWidth: 90, color: 'text.secondary' }}>
+          <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 1 }}>
+            <Stack direction="row" alignItems="center" sx={{ minWidth: 140 }}>
+              <IconButton
+                onClick={() => {
+                  setScrubHour(null);
+                  isScrubbingRef.current = false;
+                  setIsPlaying(false);
+                  setCurrentHour((h) => Math.max(timeWindow[0], h - 1));
+                }}
+                sx={{ color: 'text.secondary' }}
+              >
+                <SkipPrevious />
+              </IconButton>
+              <IconButton
+                onClick={() => setIsPlaying(!isPlaying)}
+                sx={{ color: theme.palette.accent.orange }}
+              >
+                {isPlaying ? <Pause /> : <PlayArrow />}
+              </IconButton>
+              <IconButton
+                onClick={() => {
+                  setScrubHour(null);
+                  isScrubbingRef.current = false;
+                  setIsPlaying(false);
+                  setCurrentHour((h) => Math.min(timeWindow[1], h + 1));
+                }}
+                sx={{ color: 'text.secondary' }}
+              >
+                <SkipNext />
+              </IconButton>
+            </Stack>
+
+            <Box sx={{ flex: 1 }}>
+              <Slider
+                value={scrubHour ?? currentHour}
+                onChange={(_, v) => {
+                  if (!isScrubbingRef.current) {
+                    isScrubbingRef.current = true;
+                    setIsPlaying(false);
+                  }
+                setScrubHour(clampHourToWindow(v as number));
+                }}
+                onChangeCommitted={(_, v) => {
+                  isScrubbingRef.current = false;
+                  setIsPlaying(false);
+                  setScrubHour(null);
+                  // Commit the hour -> triggers one fetch (no spam while dragging)
+                setCurrentHour(clampHourToWindow(v as number));
+                }}
+                min={0}
+                max={71}
+                marks={keyFrames.map((kf) => ({ value: kf.hour, label: '' }))}
+                sx={{
+                  color: (isKeyFrame || casePinned) && selectedCase
+                    ? PRIORITY_COLORS[selectedCase.priority]
+                    : 'text.secondary',
+                  '& .MuiSlider-mark': {
+                    bgcolor: theme.palette.accent.yellow,
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                  },
+                }}
+              />
+            </Box>
+
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 340, justifyContent: 'flex-end' }}>
+              <Typography
+                variant="body2"
+                sx={{
+                  color: (isKeyFrame || casePinned) && selectedCase ? PRIORITY_COLORS[selectedCase.priority] : 'text.secondary',
+                  minWidth: 120,
+                  fontFamily: 'monospace',
+                  fontWeight: (isKeyFrame || casePinned) ? 700 : 400,
+                }}
+              >
+                {formatHour(scrubHour ?? currentHour)}
+              </Typography>
+
+              {/* Speed Controls */}
+              <Stack direction="row" spacing={0.5}>
+                {[0.5, 1, 2, 5].map((speed) => (
+                  <Chip
+                    key={speed}
+                    label={`${speed}x`}
+                    size="small"
+                    onClick={() => setPlaybackSpeed(speed)}
+                    sx={{
+                      bgcolor:
+                        playbackSpeed === speed
+                          ? theme.palette.accent.orange
+                          : theme.palette.mode === 'dark'
+                            ? '#1f1f23'
+                            : '#e2e8f0',
+                      color:
+                        playbackSpeed === speed
+                          ? theme.palette.mode === 'dark'
+                            ? '#000'
+                            : '#fff'
+                          : 'text.secondary',
+                      fontSize: '0.65rem',
+                      height: 22,
+                      minWidth: 36,
+                      cursor: 'pointer',
+                      fontWeight: playbackSpeed === speed ? 700 : 400,
+                      '&:hover': {
+                        bgcolor:
+                          playbackSpeed === speed
+                            ? theme.palette.primary.light
+                            : theme.palette.mode === 'dark'
+                              ? '#2a2a2e'
+                              : '#cbd5e1',
+                      },
+                    }}
+                  />
+                ))}
+              </Stack>
+
+              {/* Bulk load indicator */}
+              {bulkLoadProgress !== null && bulkLoadProgress < 100 && (
+                <MuiTooltip title="Loading timeline data for smooth playback...">
+                  <Stack direction="row" alignItems="center" spacing={0.5}>
+                    <CircularProgress size={14} sx={{ color: theme.palette.accent.blue }} />
+                    <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.6rem' }}>
+                      Preloading...
+                    </Typography>
+                  </Stack>
+                </MuiTooltip>
+              )}
+              {bulkLoadProgress === 100 && (
+                <MuiTooltip title="Timeline fully loaded - playback will be smooth!">
+                  <Chip
+                    label="Ready"
+                    size="small"
+                    sx={{
+                      height: 18,
+                      fontSize: '0.55rem',
+                      bgcolor: `${theme.palette.accent.green}20`,
+                      color: theme.palette.accent.green,
+                    }}
+                  />
+                </MuiTooltip>
+              )}
+            </Stack>
+          </Stack>
+
+        <Stack direction="row" alignItems="center" spacing={2}>
+          <Typography variant="body2" sx={{ minWidth: 140, color: 'text.secondary' }}>
             Time window
           </Typography>
           <Box sx={{ flex: 1 }}>
@@ -1867,7 +2298,7 @@ const HeatmapDashboard: React.FC = () => {
               sx={{ color: theme.palette.accent.orange }}
             />
           </Box>
-          <Stack spacing={0.5} direction="row" alignItems="center" sx={{ flexShrink: 0 }}>
+          <Stack spacing={0.5} direction="row" alignItems="center" sx={{ minWidth: 340, justifyContent: 'flex-end' }}>
             <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>
               Start
             </Typography>
@@ -1957,178 +2388,55 @@ const HeatmapDashboard: React.FC = () => {
           </Stack>
         </Stack>
 
-          <Stack direction="row" alignItems="center" spacing={2}>
-            <IconButton
-              onClick={() => {
-                setScrubHour(null);
-                isScrubbingRef.current = false;
-                setIsPlaying(false);
-                setCurrentHour((h) => Math.max(timeWindow[0], h - 1));
-              }}
-              sx={{ color: 'text.secondary' }}
-            >
-              <SkipPrevious />
-            </IconButton>
-            <IconButton
-              onClick={() => setIsPlaying(!isPlaying)}
-              sx={{ color: theme.palette.accent.orange }}
-            >
-              {isPlaying ? <Pause /> : <PlayArrow />}
-            </IconButton>
-            <IconButton
-              onClick={() => {
-                setScrubHour(null);
-                isScrubbingRef.current = false;
-                setIsPlaying(false);
-                setCurrentHour((h) => Math.min(timeWindow[1], h + 1));
-              }}
-              sx={{ color: 'text.secondary' }}
-            >
-              <SkipNext />
-            </IconButton>
-
-            <Box sx={{ flex: 1, px: 2 }}>
-              <Slider
-                value={scrubHour ?? currentHour}
-                onChange={(_, v) => {
-                  if (!isScrubbingRef.current) {
-                    isScrubbingRef.current = true;
-                    setIsPlaying(false);
-                  }
-                setScrubHour(clampHourToWindow(v as number));
-                }}
-                onChangeCommitted={(_, v) => {
-                  isScrubbingRef.current = false;
-                  setIsPlaying(false);
-                  setScrubHour(null);
-                  // Commit the hour -> triggers one fetch (no spam while dragging)
-                setCurrentHour(clampHourToWindow(v as number));
-                }}
-                min={0}
-                max={71}
-                marks={keyFrames.map((kf) => ({ value: kf.hour, label: '' }))}
-                sx={{
-                  color: isKeyFrame
-                    ? PRIORITY_COLORS[selectedCase?.priority || 'medium']
-                    : 'text.secondary',
-                  '& .MuiSlider-mark': {
-                    bgcolor: theme.palette.accent.yellow,
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                  },
-                }}
-              />
-            </Box>
-
-            <Typography
-              variant="body2"
-              sx={{
-                color: isKeyFrame ? theme.palette.accent.yellow : 'text.secondary',
-                minWidth: 120,
-                fontFamily: 'monospace',
-                fontWeight: isKeyFrame ? 700 : 400,
-              }}
-            >
-              {formatHour(scrubHour ?? currentHour)}
-            </Typography>
-
-            {/* Speed Controls */}
-            <Stack direction="row" spacing={0.5} sx={{ ml: 2 }}>
-              {[0.5, 1, 2, 5].map((speed) => (
-                <Chip
-                  key={speed}
-                  label={`${speed}x`}
-                  size="small"
-                  onClick={() => setPlaybackSpeed(speed)}
-                  sx={{
-                    bgcolor:
-                      playbackSpeed === speed
-                        ? theme.palette.accent.orange
-                        : theme.palette.mode === 'dark'
-                          ? '#1f1f23'
-                          : '#e2e8f0',
-                    color:
-                      playbackSpeed === speed
-                        ? theme.palette.mode === 'dark'
-                          ? '#000'
-                          : '#fff'
-                        : 'text.secondary',
-                    fontSize: '0.65rem',
-                    height: 22,
-                    minWidth: 36,
-                    cursor: 'pointer',
-                    fontWeight: playbackSpeed === speed ? 700 : 400,
-                    '&:hover': {
-                      bgcolor:
-                        playbackSpeed === speed
-                          ? theme.palette.primary.light
-                          : theme.palette.mode === 'dark'
-                            ? '#2a2a2e'
-                            : '#cbd5e1',
-                    },
-                  }}
-                />
-              ))}
-            </Stack>
-
-            {/* Bulk load indicator */}
-            {bulkLoadProgress !== null && bulkLoadProgress < 100 && (
-              <MuiTooltip title="Loading timeline data for smooth playback...">
-                <Stack direction="row" alignItems="center" spacing={0.5} sx={{ ml: 1 }}>
-                  <CircularProgress size={14} sx={{ color: theme.palette.accent.blue }} />
-                  <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.6rem' }}>
-                    Preloading...
-                  </Typography>
-                </Stack>
-              </MuiTooltip>
-            )}
-            {bulkLoadProgress === 100 && (
-              <MuiTooltip title="Timeline fully loaded - playback will be smooth!">
-                <Chip
-                  label="Ready"
-                  size="small"
-                  sx={{
-                    ml: 1,
-                    height: 18,
-                    fontSize: '0.55rem',
-                    bgcolor: `${theme.palette.accent.green}20`,
-                    color: theme.palette.accent.green,
-                  }}
-                />
-              </MuiTooltip>
-            )}
-          </Stack>
-
           <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
             <Typography variant="caption" sx={{ color: 'text.secondary', mr: 1 }}>
               JUMP TO:
             </Typography>
-            {keyFrames.map((kf) => (
-              <Chip
-                key={kf.id}
-                label={kf.caseNumber}
-                size="small"
-                onClick={() => jumpToKeyFrame(kf)}
-                sx={{
-                  bgcolor:
-                    currentHour === kf.hour
+            {keyFrames.map((kf) => {
+              const isPinned = casePinned && selectedCase?.id === kf.id;
+              const isAtHour = currentHour === kf.hour;
+              const isActive = isPinned || isAtHour;
+              const crimeInfo = getCrimeTypeInfo(kf.description);
+              return (
+                <MuiTooltip key={kf.id} title={crimeInfo.label} arrow placement="top">
+                <Chip
+                  label={`${crimeInfo.emoji} ${kf.caseNumber}`}
+                  size="small"
+                  onClick={() => {
+                    if (isPinned) {
+                      // Clicking pinned case again unpins it
+                      setCasePinned(false);
+                    } else {
+                      jumpToKeyFrame(kf, true);
+                    }
+                  }}
+                  onDelete={isPinned ? () => setCasePinned(false) : undefined}
+                  sx={{
+                    bgcolor: isActive
                       ? `${PRIORITY_COLORS[kf.priority]}20`
                       : theme.palette.mode === 'dark'
                         ? '#1f1f23'
                         : '#f1f5f9',
-                  color: currentHour === kf.hour ? PRIORITY_COLORS[kf.priority] : 'text.secondary',
-                  fontSize: '0.65rem',
-                  height: 22,
-                  cursor: 'pointer',
-                  border: `1px solid ${currentHour === kf.hour ? PRIORITY_COLORS[kf.priority] : 'transparent'}`,
-                  '&:hover': {
-                    bgcolor: `${PRIORITY_COLORS[kf.priority]}30`,
-                    color: PRIORITY_COLORS[kf.priority],
-                  },
-                }}
-              />
-            ))}
+                    color: isActive ? PRIORITY_COLORS[kf.priority] : 'text.secondary',
+                    fontSize: '0.65rem',
+                    height: 22,
+                    cursor: 'pointer',
+                    border: `1px solid ${isActive ? PRIORITY_COLORS[kf.priority] : 'transparent'}`,
+                    boxShadow: isPinned ? `0 0 0 2px ${PRIORITY_COLORS[kf.priority]}40` : 'none',
+                    '&:hover': {
+                      bgcolor: `${PRIORITY_COLORS[kf.priority]}30`,
+                      color: PRIORITY_COLORS[kf.priority],
+                    },
+                    '& .MuiChip-deleteIcon': {
+                      fontSize: 14,
+                      color: PRIORITY_COLORS[kf.priority],
+                      '&:hover': { color: theme.palette.accent.red },
+                    },
+                  }}
+                />
+                </MuiTooltip>
+              );
+            })}
           </Stack>
         </Paper>
 
@@ -2136,7 +2444,7 @@ const HeatmapDashboard: React.FC = () => {
         <Paper
           sx={{
             position: 'absolute',
-            top: 90,
+            top: 130,
             left: 12,
             px: 1.5,
             py: 1,
@@ -2150,14 +2458,49 @@ const HeatmapDashboard: React.FC = () => {
         >
           <Stack direction="row" spacing={1.5} alignItems="center">
             <Stack direction="row" alignItems="center" spacing={0.75}>
+              {/* Double ring visual for suspects */}
               <Box
                 sx={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  bgcolor: theme.palette.accent.red,
+                  position: 'relative',
+                  width: 16,
+                  height: 16,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                 }}
-              />
+              >
+                {/* Outer glow ring */}
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    width: 16,
+                    height: 16,
+                    borderRadius: '50%',
+                    bgcolor: 'rgba(239, 68, 68, 0.15)',
+                    border: '2px solid rgba(239, 68, 68, 0.25)',
+                  }}
+                />
+                {/* Solid accent ring */}
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    width: 11,
+                    height: 11,
+                    borderRadius: '50%',
+                    border: `1.5px solid ${theme.palette.accent.orange}`,
+                  }}
+                />
+                {/* Inner dot */}
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    bgcolor: theme.palette.accent.red,
+                  }}
+                />
+              </Box>
               <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
                 Person of Interest
               </Typography>
@@ -2457,8 +2800,10 @@ const HeatmapDashboard: React.FC = () => {
                 </Stack>
               </Box>
 
-              {/* Selected Case Info */}
-              {isKeyFrame && selectedCase && (
+              {/* Selected Case Info - show when on key frame OR when case is pinned */}
+              {(isKeyFrame || casePinned) && selectedCase && (() => {
+                const caseCrimeInfo = getCrimeTypeInfo(selectedCase.description);
+                return (
                 <Paper
                   elevation={0}
                   sx={{
@@ -2469,10 +2814,20 @@ const HeatmapDashboard: React.FC = () => {
                   }}
                 >
                   <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-                    <Folder sx={{ color: PRIORITY_COLORS[selectedCase.priority], fontSize: 18 }} />
+                    <Typography sx={{ fontSize: 20 }}>{caseCrimeInfo.emoji}</Typography>
                     <Typography variant="subtitle2" sx={{ color: 'text.primary', fontWeight: 700 }}>
                       {selectedCase.caseNumber}
                     </Typography>
+                    <Chip
+                      label={caseCrimeInfo.label}
+                      size="small"
+                      sx={{
+                        height: 18,
+                        fontSize: '0.6rem',
+                        bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
+                        color: 'text.secondary',
+                      }}
+                    />
                     <Chip
                       label={selectedCase.priority.toUpperCase()}
                       size="small"
@@ -2549,7 +2904,8 @@ const HeatmapDashboard: React.FC = () => {
                     </Box>
                   )}
                 </Paper>
-              )}
+                );
+              })()}
 
               {/* Selected Hotspot Detail */}
               {selectedHotspot && (
@@ -2775,6 +3131,7 @@ const HeatmapDashboard: React.FC = () => {
                 const matchingKeyFrame = keyFrames.find(
                   (kf) => kf.caseNumber === c.caseNumber || kf.id === c.id
                 );
+                const cardCrimeInfo = getCrimeTypeInfo(c.title || c.description || '');
                 return (
                   <Card
                     key={c.id}
@@ -2802,18 +3159,23 @@ const HeatmapDashboard: React.FC = () => {
                       <Stack direction="row" alignItems="flex-start" justifyContent="space-between">
                         <Box sx={{ flex: 1 }}>
                           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                            <Folder
-                              sx={{
-                                fontSize: 14,
-                                color: PRIORITY_COLORS[c.priority?.toLowerCase() || 'medium'],
-                              }}
-                            />
+                            <span style={{ fontSize: 14 }}>{cardCrimeInfo.emoji}</span>
                             <Typography
                               variant="body2"
                               sx={{ color: 'text.primary', fontWeight: 600 }}
                             >
                               {c.caseNumber}
                             </Typography>
+                            <Chip
+                              label={cardCrimeInfo.label}
+                              size="small"
+                              sx={{
+                                height: 16,
+                                fontSize: '0.55rem',
+                                bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
+                                color: 'text.secondary',
+                              }}
+                            />
                             <Chip
                               label={c.priority || 'Medium'}
                               size="small"
@@ -3550,7 +3912,7 @@ const HeatmapDashboard: React.FC = () => {
                               width: 6,
                               height: 6,
                               borderRadius: '50%',
-                              bgcolor: '#6b7280',
+                              bgcolor: getAssociateColor(d.ownerId),
                             }}
                           />
                           <Box sx={{ flex: 1 }}>

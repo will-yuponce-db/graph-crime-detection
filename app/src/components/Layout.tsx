@@ -16,6 +16,7 @@ import {
   Description as EvidenceIcon,
   SmartToy as SmartToyIcon,
   FiberManualRecord,
+  Public as GlobeIcon,
 } from '@mui/icons-material';
 import ThemeToggle from './ThemeToggle';
 import AgentPanel from './AgentPanel';
@@ -38,6 +39,7 @@ const Layout: React.FC = () => {
     { path: '/', label: 'Case View', icon: <EvidenceIcon />, shortLabel: 'CASES' },
     { path: '/heatmap', label: 'Hotspot Explorer', icon: <MapIcon />, shortLabel: 'HOTSPOTS' },
     { path: '/graph-explorer', label: 'Network Analysis', icon: <GraphIcon />, shortLabel: 'NETWORK' },
+    { path: '/esri', label: 'ESRI GIS Integration', icon: <GlobeIcon />, shortLabel: 'ESRI GIS' },
   ];
 
   const isDark = theme.palette.mode === 'dark';

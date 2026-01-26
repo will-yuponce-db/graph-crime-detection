@@ -1,5 +1,12 @@
 import type { NavigateFunction } from 'react-router-dom';
-import type { UIAction } from './actions';
+import type {
+  UIAction,
+  RunAnalysisAction,
+  AnalyzeLinkSuggestionsAction,
+  TriageCasesAction,
+  GenerateWarrantPackageAction,
+  CheckAlibiAction,
+} from './actions';
 
 export type ExecuteActionsContext = {
   navigate: NavigateFunction;
@@ -87,10 +94,57 @@ export async function executeActions(actions: UIAction[], ctx: ExecuteActionsCon
         }
         break;
       }
+      case 'runAnalysis': {
+        const analysisAction = action as RunAnalysisAction;
+        // Navigate to the appropriate page if requested
+        if (analysisAction.navigateTo && ctx.currentPath !== analysisAction.navigateTo) {
+          const sp = new URLSearchParams();
+          if (analysisAction.entityIds?.length) {
+            sp.set('entityIds', analysisAction.entityIds.join(','));
+          }
+          if (analysisAction.city) {
+            sp.set('city', analysisAction.city);
+          }
+          if (analysisAction.caseId) {
+            sp.set('case_id', analysisAction.caseId);
+          }
+          ctx.navigate(`${analysisAction.navigateTo}?${sp.toString()}`);
+        }
+        break;
+      }
+      case 'analyzeLinkSuggestions': {
+        // Navigate to graph explorer for link context
+        void (action as AnalyzeLinkSuggestionsAction);
+        ctx.navigate('/graph-explorer');
+        break;
+      }
+      case 'triageCases': {
+        const triageAction = action as TriageCasesAction;
+        // Navigate to evidence card
+        if (triageAction.caseIds?.[0]) {
+          ctx.navigate(`/evidence-card?case_id=${triageAction.caseIds[0]}`);
+        } else {
+          ctx.navigate('/evidence-card');
+        }
+        break;
+      }
+      case 'generateWarrantPackage': {
+        const warrantAction = action as GenerateWarrantPackageAction;
+        // Navigate to evidence card with the case
+        ctx.navigate(`/evidence-card?case_id=${warrantAction.caseId}`);
+        break;
+      }
+      case 'checkAlibi': {
+        const alibiAction = action as CheckAlibiAction;
+        // Navigate to graph explorer with the entity
+        const sp = new URLSearchParams();
+        sp.set('entityIds', alibiAction.entityId);
+        ctx.navigate(`/graph-explorer?${sp.toString()}`);
+        break;
+      }
       default: {
-        // Exhaustiveness guard
-        const _never: never = action;
-        void _never;
+        // For unknown action types, log and continue
+        console.warn('Unknown action type:', (action as { type: string }).type);
       }
     }
   }

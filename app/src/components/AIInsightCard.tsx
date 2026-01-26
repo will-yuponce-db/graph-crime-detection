@@ -83,7 +83,6 @@ interface AIInsightCardProps {
   onDismiss?: () => void;
   compact?: boolean;
   defaultExpanded?: boolean;
-  showRawData?: boolean;
 }
 
 const AIInsightCard: React.FC<AIInsightCardProps> = ({
@@ -94,11 +93,9 @@ const AIInsightCard: React.FC<AIInsightCardProps> = ({
   onDismiss,
   compact = false,
   defaultExpanded = true,
-  showRawData = false,
 }) => {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(defaultExpanded);
-  const [showData, setShowData] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   
   // Chat state for interrogating insights
@@ -259,6 +256,10 @@ const AIInsightCard: React.FC<AIInsightCardProps> = ({
       TransitionComponent={SlideTransition}
       maxWidth="md"
       fullWidth
+      sx={{
+        // Ensure modal renders above Hotspot Explorer's header/timeline overlays
+        zIndex: (theme) => theme.zIndex.modal + 10,
+      }}
       PaperProps={{
         sx: {
           bgcolor: isDark ? 'rgba(10, 17, 32, 0.98)' : '#fefefe',
@@ -432,43 +433,6 @@ const AIInsightCard: React.FC<AIInsightCardProps> = ({
                 </Paper>
               ))}
             </Stack>
-          </Box>
-        )}
-
-        {/* Data Context (if available) */}
-        {showRawData && insight?.dataContext && (
-          <Box>
-            <Divider sx={{ my: 3, borderColor: 'border.main' }} />
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-              <Info sx={{ color: theme.palette.accent.cyan, fontSize: 20 }} />
-              <Typography variant="subtitle2" sx={{ color: 'text.secondary' }}>
-                Raw Data Context
-              </Typography>
-            </Stack>
-            <Paper
-              sx={{
-                p: 2,
-                bgcolor: 'background.default',
-                border: 1,
-                borderColor: 'border.main',
-                maxHeight: 300,
-                overflow: 'auto',
-              }}
-            >
-                <Typography
-                  component="pre"
-                  sx={{
-                    color: 'text.secondary',
-                    fontFamily: monoFontFamily,
-                    fontSize: '0.8rem',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                    m: 0,
-                  }}
-                >
-                {JSON.stringify(insight.dataContext, null, 2)}
-              </Typography>
-            </Paper>
           </Box>
         )}
 
@@ -1065,49 +1029,6 @@ const AIInsightCard: React.FC<AIInsightCardProps> = ({
                 ))}
               </Stack>
             </Box>
-          )}
-
-          {/* Debug: Show raw data context */}
-          {showRawData && insight.dataContext && (
-            <>
-              <Divider sx={{ my: 2, borderColor: 'border.main' }} />
-              <Box>
-                <Button
-                  size="small"
-                  variant="text"
-                  onClick={() => setShowData(!showData)}
-                  sx={{ color: 'text.secondary', fontSize: '0.7rem', mb: 1 }}
-                >
-                  {showData ? 'Hide' : 'Show'} Data Context
-                </Button>
-                <Collapse in={showData}>
-                  <Paper
-                    sx={{
-                      p: 1.5,
-                      bgcolor: 'background.default',
-                      border: 1,
-                      borderColor: 'border.main',
-                      maxHeight: 200,
-                      overflow: 'auto',
-                    }}
-                  >
-                    <Typography
-                      variant="caption"
-                      component="pre"
-                      sx={{
-                        color: 'text.secondary',
-                        fontFamily: 'monospace',
-                        fontSize: '0.65rem',
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word',
-                      }}
-                    >
-                      {JSON.stringify(insight.dataContext, null, 2)}
-                    </Typography>
-                  </Paper>
-                </Collapse>
-              </Box>
-            </>
           )}
         </Box>
       </Collapse>

@@ -8,6 +8,7 @@ import Layout from './components/Layout';
 import HeatmapDashboard from './pages/HeatmapDashboard';
 import GraphExplorer from './pages/GraphExplorer';
 import EvidenceCard from './pages/EvidenceCard';
+import ESRIIntegration from './pages/ESRIIntegration';
 
 const App: React.FC = () => {
   return (
@@ -19,6 +20,7 @@ const App: React.FC = () => {
             <Route path="heatmap" element={<HeatmapDashboard />} />
             <Route path="graph-explorer" element={<GraphExplorer />} />
             <Route path="evidence-card" element={<EvidenceCard />} />
+            <Route path="esri" element={<ESRIIntegration />} />
           </Route>
         </Routes>
       </ThemeContextProvider>

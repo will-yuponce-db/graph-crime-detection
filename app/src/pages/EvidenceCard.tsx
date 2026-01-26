@@ -1440,7 +1440,7 @@ const CaseView: React.FC = () => {
               <Button
                 variant="outlined"
                 startIcon={<Visibility />}
-                onClick={() => navigate(`/?case=${selectedCase.caseNumber}`)}
+                onClick={() => navigate(`/heatmap?case=${selectedCase.caseNumber}`)}
                 sx={{ borderColor: 'border.main', color: 'text.secondary' }}
               >
                 View on Map
