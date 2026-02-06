@@ -116,7 +116,9 @@ for table_def in SYNCED_TABLES:
                     primary_key_columns=pk_columns,
                     scheduling_policy=SYNC_MODE,
                     new_pipeline_spec=NewPipelineSpec(
-                        storage_catalog=lakebase_catalog,
+                        # Pipeline metadata (event logs) must live in a regular UC catalog,
+                        # NOT the Lakebase catalog (PG schemas can't hold Delta tables).
+                        storage_catalog=source_catalog,
                         storage_schema=source_schema,
                     ),
                 ),
