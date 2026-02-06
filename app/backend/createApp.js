@@ -633,6 +633,7 @@ function createApp(options = {}) {
           WHERE latitude IS NOT NULL
           GROUP BY h3_cell, city, state
           ORDER BY event_count DESC
+          LIMIT 500
         `),
       ]);
 
@@ -861,10 +862,11 @@ function createApp(options = {}) {
           batches.map((batch) => {
             const safeIds = batch.map((id) => `'${escapeSqlLiteral(id)}'`).join(',');
             return databricks.runCustomQuery(`
-              SELECT DISTINCT entity_id, latitude, longitude, h3_cell, city, state
+              SELECT DISTINCT ON (entity_id) entity_id, latitude, longitude, h3_cell, city, state
               FROM ${databricks.getTableName('location_events_silver')}
               WHERE entity_id IN (${safeIds})
                 AND latitude IS NOT NULL AND longitude IS NOT NULL
+              ORDER BY entity_id
             `).catch(() => []);
           })
         );
@@ -1023,10 +1025,11 @@ function createApp(options = {}) {
       if (storyIds.length > 0) {
         const safeIds = storyIds.map((id) => `'${escapeSqlLiteral(id)}'`).join(',');
         locationEvents = await databricks.runCustomQuery(`
-          SELECT DISTINCT entity_id, latitude, longitude, h3_cell, city, state
+          SELECT DISTINCT ON (entity_id) entity_id, latitude, longitude, h3_cell, city, state
           FROM ${databricks.getTableName('location_events_silver')}
           WHERE entity_id IN (${safeIds})
             AND latitude IS NOT NULL AND longitude IS NOT NULL
+          ORDER BY entity_id
         `).catch(() => []);
       }
 

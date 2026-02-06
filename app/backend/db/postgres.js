@@ -588,13 +588,15 @@ async function getEntityWithProperties(tableName, entityIdColumn, entityId) {
 // ============== Metadata ==============
 
 async function getUniqueLocations() {
-  return executeQuery(`
-    SELECT DISTINCT h3_cell, city, state,
+  return cachedQuery('unique_locs', () => executeQuery(`
+    SELECT h3_cell, city, state,
            AVG(latitude) as latitude, AVG(longitude) as longitude
     FROM ${getTableName('location_events_silver')}
     WHERE latitude IS NOT NULL AND longitude IS NOT NULL
     GROUP BY h3_cell, city, state
-  `);
+    ORDER BY COUNT(*) DESC
+    LIMIT 500
+  `));
 }
 
 async function listTables() {
