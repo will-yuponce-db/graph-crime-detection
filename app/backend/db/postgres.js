@@ -392,7 +392,7 @@ async function getCoPresenceCount() {
 async function getSocialEdges() {
   return cachedQuery('social', () => executeQuery(`
     SELECT edge_id, entity_id_1, entity_id_2, relationship_type, weight,
-           first_seen, last_seen
+           confidence, source, is_high_confidence
     FROM ${getTableName('social_edges_silver')}
     LIMIT 500
   `));
