@@ -1,10 +1,11 @@
 # Crime Graph Backend API
 
-Backend service for the Crime Network Analysis Platform, providing data persistence and Databricks SQL Warehouse integration for law enforcement and intelligence agencies.
+Backend service for the Crime Network Analysis Platform, providing data persistence and Lakebase Postgres / Databricks SQL integration for law enforcement and intelligence agencies.
 
 ## Features
 
-- **Databricks Integration**: Connect to Databricks SQL Warehouse for enterprise-scale crime network data
+- **Lakebase Postgres**: Low-latency reads from synced tables (default data source)
+- **Databricks Integration**: Databricks SQL Warehouse for AI agent / model serving
 - **SQLite Fallback**: Local database for air-gapped deployments and development
 - **RESTful API**: Simple HTTP endpoints for graph data operations
 - **Auto-seeding**: Automatically populates demo crime network data
@@ -37,18 +38,39 @@ Edit `.env` with your configuration:
 # Server Configuration
 PORT=3000
 
-# Databricks SQL Warehouse (Optional - for production)
-DATABRICKS_SERVER_HOSTNAME=your-workspace.cloud.databricks.com
+# --- Lakebase Postgres (primary data source) ---
+# In Databricks Apps, these are auto-injected when a database resource is attached.
+# For local dev, get your connection details from Lakebase UI > Connect.
+PGHOST=ep-xxx.databricks.com
+PGPORT=5432
+PGDATABASE=investigative_analytics
+PGUSER=your-email@databricks.com
+PGPASSWORD=your-oauth-token
+PGSSLMODE=require
+POSTGRES_SCHEMA=demo
+
+# --- Databricks (for AI agent / model serving) ---
+DATABRICKS_HOST=your-workspace.cloud.databricks.com
 DATABRICKS_HTTP_PATH=/sql/1.0/warehouses/your-warehouse-id
-DATABRICKS_CLIENT_ID=your-oauth-client-id
-DATABRICKS_CLIENT_SECRET=your-oauth-client-secret
-
-# Table Configuration
-DATABRICKS_TABLE_NAME=main.intelligence.crime_network_entities
-
-# SQLite (Always used as fallback)
-SQLITE_DB_PATH=./db/graph.db
+DATABRICKS_TOKEN=your-personal-access-token
+DATABRICKS_AGENT_ENDPOINT=databricks-gpt-5-2
 ```
+
+#### Database Module
+
+The backend uses `db/postgres.js` by default, which connects to Lakebase Postgres via the `pg` (node-postgres) library. The legacy `db/databricks.js` module (using `@databricks/sql`) is still available if you need to connect directly to a SQL Warehouse instead.
+
+To switch back to the Databricks connector, change the import in `createApp.js`:
+
+```javascript
+// Default (Lakebase Postgres)
+const databricks = options.databricks || require('./db/postgres');
+
+// Legacy (Databricks SQL Warehouse)
+// const databricks = options.databricks || require('./db/databricks');
+```
+
+Both modules export the same interface, so no other code changes are needed.
 
 ### Start the Server
 

@@ -16,11 +16,14 @@ The pipeline generates a complete synthetic dataset representing:
 
 | File | Purpose |
 |------|---------|
+| `databricks.yml` | Databricks Asset Bundle config (pipelines, jobs, Lakebase infra) |
 | `data_generation_dlt.py` | Main DLT pipeline with all table definitions |
 | `config.py` | Configuration constants (entity IDs, H3 cells, timestamps) |
 | `dlt_pipeline_config.json` | Pipeline deployment configuration |
 | `setup_catalog.sql` | Unity Catalog setup script |
 | `validate_data_generation.py` | Validation notebook with acceptance criteria |
+| `setup_lakebase_sync.py` | One-time notebook: creates 12 synced tables in Lakebase Postgres |
+| `trigger_lakebase_sync.py` | Triggers sync refresh for all synced tables after DLT completes |
 
 ## Data Layers
 
@@ -41,6 +44,46 @@ The pipeline generates a complete synthetic dataset representing:
 - `handoff_candidates` - Burner phone switch detection
 - `cell_device_counts` - Heatmap aggregations
 - `evidence_card_data` - Pre-computed AI evidence
+- `case_summary_with_suspects` - Case summaries with linked suspect details
+
+## Lakebase Postgres Sync
+
+The 12 app-facing tables (5 silver + 7 gold) are synced to a **Lakebase Postgres** instance for low-latency serving. This uses Databricks' built-in **synced tables** (Reverse ETL) feature.
+
+### Architecture
+
+```
+DLT Pipeline (UC tables)  -->  Synced Tables  -->  Lakebase Postgres  -->  App Backend (pg)
+     bronze/silver/gold         (managed by           (read-only            (node-postgres
+                                 Lakeflow)             replicas)             queries)
+```
+
+### How it works
+
+1. **`setup_lakebase_sync.py`** (one-time) creates a synced table for each UC table, with a primary key and `TRIGGERED` sync mode. Run via `databricks bundle run lakebase_setup_job -t dev`.
+
+2. **`trigger_lakebase_sync.py`** runs as the final task in the pipeline job. It triggers a refresh of all 12 synced table pipelines and waits for them to complete.
+
+3. Synced tables are **read-only** in Postgres. ARRAY and STRUCT columns are mapped to **JSONB**.
+
+### DAB Resources
+
+The `databricks.yml` bundle declares:
+- `database_instances.lakebase_instance` — the Lakebase Postgres instance (CU_1)
+- `database_catalogs.lakebase_catalog` — registers the instance in Unity Catalog
+- `lakebase_setup_job` — one-time job to create synced tables
+- `sync_to_lakebase` task — added to the main pipeline job after `validate_data`
+
+### Customizing
+
+To change the Lakebase instance name, database, or catalog, override the variables when deploying:
+
+```bash
+databricks bundle deploy -t dev \
+  --var lakebase_instance_name=my-custom-instance \
+  --var lakebase_database=my_database \
+  --var lakebase_catalog=my_catalog
+```
 
 ## Deployment Steps
 
