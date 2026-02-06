@@ -376,17 +376,43 @@ async function getSuspectRankings() {
   `));
 }
 
-/** Co-presence edges — disabled to stay within 2GB container. Table has 7.8M rows. */
+/** Co-presence edges for entities in the given set. Excludes time_buckets JSONB to save memory. */
 async function getCoPresenceEdges(entityIds) {
-  return [];
+  if (!entityIds || entityIds.length === 0) return [];
+  const escaped = entityIds.map(id => `'${escapeSqlLiteral(id)}'`).join(',');
+  return executeQuery(`
+    SELECT edge_id, entity_id_1, entity_id_2, h3_cell, city, state,
+           co_occurrence_count, weight, first_seen_together, last_seen_together
+    FROM ${getTableName('co_presence_edges')}
+    WHERE entity_id_1 IN (${escaped}) AND entity_id_2 IN (${escaped})
+    ORDER BY weight DESC
+    LIMIT 500
+  `);
 }
 
+/** Aggregate co-presence counts for associate scoring. Returns max 200 rows. */
 async function getCoPresenceAssociateCounts(entityIds) {
-  return [];
+  if (!entityIds || entityIds.length === 0) return [];
+  const escaped = entityIds.map(id => `'${escapeSqlLiteral(id)}'`).join(',');
+  return executeQuery(`
+    SELECT entity_id, SUM(co_occurrence_count) as connection_count, SUM(weight) as total_weight
+    FROM (
+      SELECT entity_id_2 as entity_id, co_occurrence_count, weight
+      FROM ${getTableName('co_presence_edges')}
+      WHERE entity_id_1 IN (${escaped}) AND entity_id_2 NOT IN (${escaped})
+      LIMIT 5000
+    ) sub
+    GROUP BY entity_id
+    ORDER BY connection_count DESC
+    LIMIT 200
+  `);
 }
 
 async function getCoPresenceCount() {
-  return 0;
+  const rows = await executeQuery(
+    `SELECT COUNT(*) as cnt FROM ${getTableName('co_presence_edges')} LIMIT 1`
+  );
+  return parseInt(rows[0]?.cnt || '0', 10);
 }
 
 async function getSocialEdges() {
