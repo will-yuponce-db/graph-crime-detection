@@ -1,23 +1,21 @@
 /**
- * Sample Databricks UC tables for quick change detection.
+ * Sample tables for quick change detection.
  *
  * Usage:
  *   node backend/scripts/sample_tables.js --tables cases_silver,persons_silver --limit 5 --count
  *   node backend/scripts/sample_tables.js --tables-file backend/scripts/tables.txt
  *   node backend/scripts/sample_tables.js --api http://localhost:3000 --tables cases_silver --count
  *
- * Requires env:
- *   DATABRICKS_HOST, DATABRICKS_HTTP_PATH, and one of:
- *   DATABRICKS_TOKEN or (DATABRICKS_CLIENT_ID + DATABRICKS_CLIENT_SECRET)
+ * Requires env (Lakebase Postgres):
+ *   PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD, PGSSLMODE
  *
  * Optional:
- *   DATABRICKS_CATALOG (default pubsec_geo_law)
- *   DATABRICKS_SCHEMA  (default demo)
+ *   POSTGRES_SCHEMA (default demo)
  */
 
 const path = require('path');
 const fs = require('fs');
-const databricks = require('../db/databricks');
+const databricks = require('../db/postgres');
 
 function parseArgs(argv) {
   const args = {
@@ -102,7 +100,7 @@ function truncateRow(row) {
 }
 
 function asFqn(table) {
-  return `${databricks.CATALOG}.${databricks.SCHEMA}.${table}`;
+  return databricks.getTableName(table);
 }
 
 async function apiGet(baseUrl, p) {
@@ -212,32 +210,35 @@ async function sampleTable(table, { limit, count, apiBaseUrl, includeDetail }) {
       }
     }
   } else {
-    // Describe columns (works for tables + views)
-    const desc = await tryQuery(`DESCRIBE ${fqn}`);
+    // Describe columns via information_schema (Postgres)
+    const desc = await tryQuery(
+      `SELECT column_name AS col_name, data_type, ordinal_position
+       FROM information_schema.columns
+       WHERE table_schema = '${databricks.SCHEMA}' AND table_name = '${table}'
+       ORDER BY ordinal_position`
+    );
     if (desc.ok) {
-      result.columns = desc.rows
-        .filter((r) => r && r.col_name && !String(r.col_name).startsWith('#'))
-        .map((r) => ({ name: r.col_name, type: r.data_type, comment: r.comment || null }));
+      result.columns = (desc.rows || []).map((r) => ({
+        name: r.col_name,
+        type: r.data_type,
+        comment: null,
+      }));
     } else {
       result.columnsError = desc.error;
       result.columns = [];
     }
 
-    // Table detail (best-effort; not all objects support this)
-    const detail = await tryQuery(`DESCRIBE DETAIL ${fqn}`);
+    // Table detail (Postgres: get row estimate from pg_stat)
+    const detail = await tryQuery(
+      `SELECT reltuples::bigint AS row_estimate, pg_total_relation_size(c.oid) AS size_bytes
+       FROM pg_class c JOIN pg_namespace n ON c.relnamespace = n.oid
+       WHERE n.nspname = '${databricks.SCHEMA}' AND c.relname = '${table}'`
+    );
     if (detail.ok && detail.rows && detail.rows[0]) {
       const d = detail.rows[0];
       result.detail = {
-        format: d.format || null,
-        id: d.id || null,
-        name: d.name || null,
-        description: d.description || null,
-        createdAt: d.createdAt || null,
-        lastModified: d.lastModified || null,
-        location: d.location || null,
-        numFiles: d.numFiles || null,
-        sizeInBytes: d.sizeInBytes || null,
-        properties: d.properties || null,
+        rowEstimate: d.row_estimate || null,
+        sizeInBytes: d.size_bytes || null,
       };
     } else if (!detail.ok) {
       result.detailError = detail.error;
@@ -312,7 +313,7 @@ async function main() {
   const args = parseArgs(process.argv);
   if (args.help) {
     console.log(`
-Sample UC tables (Databricks SQL).
+Sample tables (Lakebase Postgres).
 
 Options:
   --tables <csv>         Comma-separated table list (without catalog/schema)
@@ -339,7 +340,7 @@ Options:
     const listed = resp?.tables || [];
     tables = (listed || []).map((t) => t.tableName || t.table_name || t.name).filter(Boolean);
   } else {
-    // fallback: list all tables in schema (direct DBSQL)
+    // fallback: list all tables in schema (direct Postgres)
     const listed = await databricks.listTables();
     tables = (listed || []).map((t) => t.tableName || t.table_name || t.name).filter(Boolean);
   }
