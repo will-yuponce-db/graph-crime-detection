@@ -341,7 +341,7 @@ async function getCoPresenceEdges(entityIds) {
   if (!entityIds || entityIds.length === 0) return [];
   const escaped = entityIds.map(id => `'${escapeSqlLiteral(id)}'`).join(',');
   return executeQuery(
-    `SELECT * FROM ${table} WHERE entity_id_1 IN (${escaped}) AND entity_id_2 IN (${escaped}) LIMIT 5000`
+    `SELECT * FROM ${table} WHERE entity_id_1 IN (${escaped}) AND entity_id_2 IN (${escaped}) LIMIT 1000`
   );
 }
 
@@ -389,15 +389,15 @@ async function getDevicePersonLinks() {
 }
 
 async function getCellDeviceCounts() {
-  return executeQuery(`SELECT * FROM ${getTableName('cell_device_counts')} LIMIT 10000`);
+  return executeQuery(`SELECT * FROM ${getTableName('cell_device_counts')} LIMIT 2000`);
 }
 
 async function getHotspotsForHour(hour) {
-  return executeQuery(`SELECT * FROM ${getTableName('cell_device_counts')} LIMIT 10000`);
+  return executeQuery(`SELECT * FROM ${getTableName('cell_device_counts')} LIMIT 2000`);
 }
 
 async function getLocationEvents() {
-  return executeQuery(`SELECT * FROM ${getTableName('location_events_silver')} LIMIT 50000`);
+  return executeQuery(`SELECT * FROM ${getTableName('location_events_silver')} LIMIT 5000`);
 }
 
 async function getEvidenceCardData() {

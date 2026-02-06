@@ -874,7 +874,7 @@ function createApp(options = {}) {
       // 2b: Also fetch a broader sample of non-suspect entities so the map
       //     has realistic background traffic (not just all red dots)
       const existingEntityIds = new Set(locationEvents.map((e) => e.entity_id));
-      const NON_SUSPECT_TARGET = Math.max(storyEntityIds.length * 3, 500);
+      const NON_SUSPECT_TARGET = Math.min(Math.max(storyEntityIds.length, 50), 100);
       const bgEvents = await databricks.runCustomQuery(`
         SELECT DISTINCT ON (entity_id) entity_id, latitude, longitude, h3_cell, city, state
         FROM ${databricks.getTableName('location_events_silver')}
@@ -885,10 +885,12 @@ function createApp(options = {}) {
       const bgFiltered = (bgEvents || []).filter((e) => !existingEntityIds.has(e.entity_id));
       locationEvents = locationEvents.concat(bgFiltered.slice(0, NON_SUSPECT_TARGET));
 
-      // Deduplicate per entity
+      // Deduplicate per entity and cap total for memory safety
+      const MAX_MAP_ENTITIES = 150; // Demo-friendly cap
       const seenEntities = new Set();
       const uniqueEvents = (locationEvents || []).filter((event) => {
         if (!event.entity_id || seenEntities.has(event.entity_id)) return false;
+        if (seenEntities.size >= MAX_MAP_ENTITIES) return false;
         seenEntities.add(event.entity_id);
         return true;
       });
@@ -1030,7 +1032,7 @@ function createApp(options = {}) {
 
       // Also fetch non-suspect entities for realistic background traffic
       const existingIds = new Set(locationEvents.map((e) => e.entity_id));
-      const bgTarget = Math.max(storyIds.length * 3, 500);
+      const bgTarget = Math.min(Math.max(storyIds.length, 50), 100);
       const bgEvents = await databricks.runCustomQuery(`
         SELECT DISTINCT ON (entity_id) entity_id, latitude, longitude, h3_cell, city, state
         FROM ${databricks.getTableName('location_events_silver')}
@@ -1041,9 +1043,11 @@ function createApp(options = {}) {
       const bgFiltered = (bgEvents || []).filter((e) => !existingIds.has(e.entity_id));
       locationEvents = locationEvents.concat(bgFiltered.slice(0, bgTarget));
 
+      const MAX_MAP_ENTITIES = 150;
       const seenEntities = new Set();
       const uniqueEvents = (locationEvents || []).filter((event) => {
         if (!event.entity_id || seenEntities.has(event.entity_id)) return false;
+        if (seenEntities.size >= MAX_MAP_ENTITIES) return false;
         seenEntities.add(event.entity_id);
         return true;
       });
@@ -1761,7 +1765,7 @@ function createApp(options = {}) {
         databricks.getDevicePersonLinks(),
       ]);
 
-      // Filter by city if specified
+      // Filter by city if specified, cap for memory safety
       let filteredRankings = rankings || [];
       if (city) {
         filteredRankings = filteredRankings.filter((r) =>
@@ -1771,6 +1775,8 @@ function createApp(options = {}) {
       if (minScore > 0) {
         filteredRankings = filteredRankings.filter((r) => r.total_score >= minScore);
       }
+      // Cap at 200 nodes for the graph — keeps it readable and memory-safe
+      filteredRankings = filteredRankings.slice(0, 200);
 
       const rankingIds = new Set(filteredRankings.map((r) => r.entity_id));
       const rankingMap = new Map(filteredRankings.map((r) => [r.entity_id, r]));

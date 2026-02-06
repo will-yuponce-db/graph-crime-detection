@@ -5,8 +5,9 @@ command:
   - "bash"
   - "-c"
   - |
-    # Production start (clean Vite build + backend server)
-    npm run start:prod
+    # Install deps + build frontend + start backend with constrained heap
+    npm install && npm run build:clean && npm install --prefix backend
+    exec node --max-old-space-size=1536 backend/server.js
 
 env:
   # Server configuration
@@ -14,6 +15,9 @@ env:
     value: "production"
   - name: PORT
     value: "8000"
+  # Increase Node.js heap — env var is the most reliable way
+  - name: NODE_OPTIONS
+    value: "--max-old-space-size=1536"
   
   # Postgres schema where synced tables are located
   - name: POSTGRES_SCHEMA
@@ -38,8 +42,7 @@ env:
 
 resources:
   # Compute allocation
-  memory: "4Gi"
-  cpu: "2"
+  # Note: Databricks Apps use compute_size (set in UI), not raw memory/cpu
   
   # Declare resources the app needs access to
   # This grants the app's service principal permission to use these resources
