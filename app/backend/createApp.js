@@ -4518,18 +4518,13 @@ INSTRUCTIONS:
     try {
       // Prefetch the heaviest endpoints in parallel
       const baseUrl = 'http://localhost:' + (process.env.DATABRICKS_APP_PORT || process.env.PORT || '8000');
-      const fetches = [
-        // Positions bulk is the slowest - triggers location + rankings + edges queries
-        fetch(`${baseUrl}/api/demo/positions/bulk`).catch(() => null),
-        // Graph data is also heavy
-        fetch(`${baseUrl}/api/demo/graph-data`).catch(() => null),
-        // Config is needed on first page load
-        fetch(`${baseUrl}/api/demo/config`).catch(() => null),
-        // Stats
-        fetch(`${baseUrl}/api/demo/stats`).catch(() => null),
-      ];
 
-      await Promise.allSettled(fetches);
+      // Only warm lightweight endpoints at startup to avoid OOM.
+      // Heavy endpoints (positions/bulk, graph-data) warm on first user request.
+      await fetch(`${baseUrl}/api/demo/config`).catch(() => null);
+      await fetch(`${baseUrl}/api/demo/stats`).catch(() => null);
+      await fetch(`${baseUrl}/api/demo/cases`).catch(() => null);
+
       logger.info({ type: 'cache_warm', status: 'done', durationMs: Date.now() - start });
     } catch (err) {
       logger.warn({ type: 'cache_warm', status: 'failed', error: err.message });

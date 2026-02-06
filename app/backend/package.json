@@ -4,7 +4,7 @@
   "description": "Backend API for Crime Graph Analysis Platform with Lakebase Postgres",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node --max-old-space-size=3072 server.js",
     "dev": "nodemon server.js",
     "test": "node --test"
   },
