@@ -849,8 +849,11 @@ function createApp(options = {}) {
         totalEntities: storyEntityIds.length,
       });
 
-      // Step 2: Fetch location events ONLY for the ~100 story entities (not 800k rows)
+      // Step 2: Fetch location events for suspects + a sample of non-suspect entities
+      //         for a realistic mix on the map
       let locationEvents = [];
+
+      // 2a: Fetch locations for all suspect/associate entities
       if (storyEntityIds.length > 0) {
         const batchSize = 200;
         const batches = [];
@@ -871,11 +874,19 @@ function createApp(options = {}) {
         locationEvents = batchResults.flat();
       }
 
-      // Fallback: if IN-clause returned nothing, fetch generic events
-      if (locationEvents.length === 0) {
-        logger.warn({ type: 'positions_bulk_fallback', reason: 'IN clause returned 0 rows, fetching generic' });
-        locationEvents = await databricks.getLocationEvents(5000).catch(() => []);
-      }
+      // 2b: Also fetch a broader sample of non-suspect entities so the map
+      //     has realistic background traffic (not just all red dots)
+      const existingEntityIds = new Set(locationEvents.map((e) => e.entity_id));
+      const NON_SUSPECT_TARGET = Math.max(storyEntityIds.length * 3, 500);
+      const bgEvents = await databricks.runCustomQuery(`
+        SELECT DISTINCT ON (entity_id) entity_id, latitude, longitude, h3_cell, city, state
+        FROM ${databricks.getTableName('location_events_silver')}
+        WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+        ORDER BY entity_id, h3_cell
+        LIMIT ${NON_SUSPECT_TARGET + storyEntityIds.length}
+      `).catch(() => []);
+      const bgFiltered = (bgEvents || []).filter((e) => !existingEntityIds.has(e.entity_id));
+      locationEvents = locationEvents.concat(bgFiltered.slice(0, NON_SUSPECT_TARGET));
 
       // Deduplicate per entity
       const seenEntities = new Set();
@@ -1021,9 +1032,19 @@ function createApp(options = {}) {
             AND latitude IS NOT NULL AND longitude IS NOT NULL
         `).catch(() => []);
       }
-      if (locationEvents.length === 0) {
-        locationEvents = await databricks.getLocationEvents(5000).catch(() => []);
-      }
+
+      // Also fetch non-suspect entities for realistic background traffic
+      const existingIds = new Set(locationEvents.map((e) => e.entity_id));
+      const bgTarget = Math.max(storyIds.length * 3, 500);
+      const bgEvents = await databricks.runCustomQuery(`
+        SELECT DISTINCT ON (entity_id) entity_id, latitude, longitude, h3_cell, city, state
+        FROM ${databricks.getTableName('location_events_silver')}
+        WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+        ORDER BY entity_id, h3_cell
+        LIMIT ${bgTarget + storyIds.length}
+      `).catch(() => []);
+      const bgFiltered = (bgEvents || []).filter((e) => !existingIds.has(e.entity_id));
+      locationEvents = locationEvents.concat(bgFiltered.slice(0, bgTarget));
 
       const seenEntities = new Set();
       const uniqueEvents = (locationEvents || []).filter((event) => {
