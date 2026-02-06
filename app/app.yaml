@@ -38,8 +38,8 @@ env:
 
 resources:
   # Compute allocation
-  memory: "2Gi"
-  cpu: "1"
+  memory: "4Gi"
+  cpu: "2"
   
   # Declare resources the app needs access to
   # This grants the app's service principal permission to use these resources
