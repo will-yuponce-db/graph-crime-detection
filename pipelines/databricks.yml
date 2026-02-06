@@ -33,8 +33,10 @@ variables:
     default: investigative_analytics_pg
 
 # Default workspace - uses CLI auth profile
+# root_path auto-resolves to the deploying user's workspace directory
 workspace:
   profile: pubsec_buildathon
+  root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/my-envs/${bundle.target}
 
 # Shared resource definitions
 resources:
@@ -139,8 +141,6 @@ targets:
   dev:
     mode: development
     default: true
-    workspace:
-      root_path: /Workspace/Users/scott.johnson@databricks.com/pubsec-buildathon-team2/${bundle.target}
     variables:
       catalog: pubsec_geo_law
       schema: demo
@@ -152,8 +152,6 @@ targets:
   # Staging environment
   staging:
     mode: development
-    workspace:
-      root_path: /Workspace/Users/scott.johnson@databricks.com/pubsec-buildathon-team2/${bundle.target}
     variables:
       catalog: pubsec_geo_law
       schema: demo
@@ -165,8 +163,6 @@ targets:
   # Production environment
   prod:
     mode: production
-    workspace:
-      root_path: /Workspace/Users/scott.johnson@databricks.com/pubsec-buildathon-team2/${bundle.target}
     variables:
       catalog: investigative_analytics
       schema: demo
