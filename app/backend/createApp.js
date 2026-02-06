@@ -797,11 +797,10 @@ function createApp(options = {}) {
       const cached = cache.get(cacheKey);
       if (cached) return res.json({ success: true, ...cached, fromCache: true });
 
-      // Step 1: Get rankings + edges to pick story-relevant entities
-      const [rankings, socialEdges, coPresenceEdges] = await Promise.all([
+      // Step 1: Get rankings + social edges to pick story-relevant entities
+      const [rankings, socialEdges] = await Promise.all([
         databricks.getSuspectRankings().catch(() => []),
         databricks.getSocialEdges().catch(() => []),
-        databricks.getCoPresenceEdges().catch(() => []),
       ]);
 
       const rankingMap = new Map((rankings || []).map((r) => [r.entity_id, r]));
@@ -811,6 +810,9 @@ function createApp(options = {}) {
         .filter((r) => r.total_score > 0.5)
         .sort((a, b) => b.total_score - a.total_score);
       const suspectIds = new Set(topSuspects.map((r) => r.entity_id));
+
+      // Fetch co-presence scoped to suspects only
+      const coPresenceEdges = await databricks.getCoPresenceEdges(Array.from(suspectIds)).catch(() => []);
 
       // Score associates by how connected they are to our suspects
       const associateEdgeCount = new Map();
@@ -992,10 +994,9 @@ function createApp(options = {}) {
       }
 
       // Fallback: use same smart entity selection as bulk endpoint
-      const [rankings, socialEdges, coPresenceEdges] = await Promise.all([
+      const [rankings, socialEdges] = await Promise.all([
         databricks.getSuspectRankings().catch(() => []),
         databricks.getSocialEdges().catch(() => []),
-        databricks.getCoPresenceEdges().catch(() => []),
       ]);
 
       const rankingMap = new Map((rankings || []).map((r) => [r.entity_id, r]));
@@ -1004,6 +1005,9 @@ function createApp(options = {}) {
         .filter((r) => r.total_score > 0.5)
         .sort((a, b) => b.total_score - a.total_score);
       const suspectIds = new Set(topSuspects.map((r) => r.entity_id));
+
+      // Fetch co-presence scoped to suspects only
+      const coPresenceEdges = await databricks.getCoPresenceEdges(Array.from(suspectIds)).catch(() => []);
 
       const assocCount = new Map();
       for (const edge of (socialEdges || [])) {
@@ -1688,14 +1692,16 @@ function createApp(options = {}) {
       if (cached) return res.json({ success: true, relationships: cached, fromCache: true });
 
       // Get suspects first to filter edges - only show relationships between known entities
-      const [rankings, coPresence, socialEdges] = await Promise.all([
+      const [rankings, socialEdges] = await Promise.all([
         databricks.getSuspectRankings(),
-        databricks.getCoPresenceEdges(),
         databricks.getSocialEdges(),
       ]);
 
       // Build a set of known entity IDs and a map for names
       const knownEntityIds = new Set((rankings || []).map((r) => r.entity_id));
+
+      // Fetch co-presence scoped to known entities
+      const coPresence = await databricks.getCoPresenceEdges(Array.from(knownEntityIds)).catch(() => []);
       const entityNames = new Map(
         (rankings || []).map((r) => [r.entity_id, r.entity_name || `Entity ${r.entity_id}`])
       );
@@ -1757,9 +1763,9 @@ function createApp(options = {}) {
       const cached = cache.get(cacheKey);
       if (cached) return res.json({ success: true, ...cached, fromCache: true });
 
-      const [rankings, coPresence, socialEdges, devicePersonLinks] = await Promise.all([
+      // Fetch rankings first so we can scope co-presence to relevant entities
+      const [rankings, socialEdges, devicePersonLinks] = await Promise.all([
         databricks.getSuspectRankings(),
-        databricks.getCoPresenceEdges(limit),
         databricks.getSocialEdges(limit),
         databricks.getDevicePersonLinks(),
       ]);
@@ -1777,6 +1783,9 @@ function createApp(options = {}) {
 
       const rankingIds = new Set(filteredRankings.map((r) => r.entity_id));
       const rankingMap = new Map(filteredRankings.map((r) => [r.entity_id, r]));
+
+      // Fetch co-presence edges scoped to ranking entities only
+      const coPresence = await databricks.getCoPresenceEdges(Array.from(rankingIds)).catch(() => []);
 
       const nodes = filteredRankings.map((r) => {
         const customTitle = getEntityTitle('persons', r.entity_id);
@@ -2473,7 +2482,7 @@ function createApp(options = {}) {
 
       const [rankings, coPresence, cases] = await Promise.all([
         databricks.getSuspectRankings(), // Fetch all
-        databricks.getCoPresenceEdges(), // Fetch all
+        databricks.getCoPresenceEdges(personIds), // Scoped to requested persons
         databricks.getCases(), // Fetch all
       ]);
 
@@ -3113,10 +3122,10 @@ function createApp(options = {}) {
       const cached = cache.get(cacheKey);
       if (cached) return res.json({ success: true, stats: cached, fromCache: true });
 
-      const [cases, suspects, coPresence] = await Promise.all([
+      const [cases, suspects, coPresenceCount] = await Promise.all([
         databricks.getCases(), // Fetch all
         databricks.getSuspectRankings(), // Fetch all
-        databricks.getCoPresenceEdges(), // Fetch all
+        databricks.getCoPresenceCount(), // Just count, don't fetch 7M+ rows
       ]);
 
       const stats = {
@@ -3129,7 +3138,7 @@ function createApp(options = {}) {
         mediumThreatSuspects: (suspects || []).filter(
           (s) => s.total_score > 1 && s.total_score <= 1.5
         ).length,
-        totalCoLocations: (coPresence || []).length,
+        totalCoLocations: coPresenceCount || 0,
         crossJurisdictionHandoffs: 0, // Handoff alerts removed
         cities: [...new Set((suspects || []).flatMap((s) => s.linked_cities || []))],
         totalEstimatedLoss: (cases || []).reduce((sum, c) => sum + (c.estimated_loss || 0), 0),
@@ -3915,7 +3924,7 @@ Be concise and specific. Use the actual data provided.`;
 
           const [rankings, coPresence, relationships] = await Promise.all([
             databricks.getSuspectRankings(),
-            databricks.getCoPresenceEdges(),
+            databricks.getCoPresenceEdges(entityIds),
             databricks.getRelationships(),
           ]);
 
@@ -3961,10 +3970,9 @@ Be specific about what the data shows and what it might mean for the investigati
               .json({ success: false, error: 'caseId required for case_summary' });
           }
 
-          const [cases, rankings, coPresence] = await Promise.all([
+          const [cases, rankings] = await Promise.all([
             databricks.getCases(),
             databricks.getSuspectRankings(),
-            databricks.getCoPresenceEdges(),
           ]);
 
           const caseData = (cases || []).find((c) => c.case_id === caseId || c.id === caseId);
@@ -3977,6 +3985,10 @@ Be specific about what the data shows and what it might mean for the investigati
           const linkedEntities = (rankings || []).filter((r) =>
             (r.linked_cities || []).includes(caseCity)
           );
+
+          // Fetch co-presence scoped to linked entities
+          const linkedEntityIds = linkedEntities.map((e) => e.entity_id);
+          const coPresence = await databricks.getCoPresenceEdges(linkedEntityIds).catch(() => []);
 
           dataContext = {
             caseId,
@@ -4120,8 +4132,14 @@ Write as if briefing a detective on what they need to know.`;
             throw new Error(`Failed to fetch suspect rankings: ${err.message}`);
           }
 
+          const suspects = city
+            ? (rankings || []).filter((r) => (r.linked_cities || []).includes(city))
+            : (rankings || []).slice(0, 50);
+
+          const suspectIds = new Set(suspects.map((s) => s.entity_id));
+
           try {
-            coPresence = await databricks.getCoPresenceEdges();
+            coPresence = await databricks.getCoPresenceEdges(Array.from(suspectIds));
           } catch (err) {
             logger.error({
               type: 'network_patterns',
@@ -4142,11 +4160,6 @@ Write as if briefing a detective on what they need to know.`;
             throw new Error(`Failed to fetch relationships: ${err.message}`);
           }
 
-          const suspects = city
-            ? (rankings || []).filter((r) => (r.linked_cities || []).includes(city))
-            : (rankings || []).slice(0, 50);
-
-          const suspectIds = new Set(suspects.map((s) => s.entity_id));
           const relevantCoPresence = (coPresence || []).filter(
             (c) => suspectIds.has(c.entity_id_1) || suspectIds.has(c.entity_id_2)
           );
@@ -4201,7 +4214,7 @@ Use network analysis terminology appropriately.`;
 
           const [rankings, coPresence, positions] = await Promise.all([
             databricks.getSuspectRankings(),
-            databricks.getCoPresenceEdges(),
+            databricks.getCoPresenceEdges(entityIds),
             databricks.getPositionsForHour(12).catch(() => []), // midday sample
           ]);
 

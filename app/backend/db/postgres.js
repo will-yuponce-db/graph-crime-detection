@@ -332,8 +332,21 @@ async function getSuspectRankings() {
   return executeQuery(`SELECT * FROM ${getTableName('suspect_rankings')} ORDER BY total_score DESC`);
 }
 
-async function getCoPresenceEdges() {
-  return executeQuery(`SELECT * FROM ${getTableName('co_presence_edges')}`);
+async function getCoPresenceEdges(entityIds) {
+  const table = getTableName('co_presence_edges');
+  if (entityIds && entityIds.length > 0) {
+    const escaped = entityIds.map(id => `'${escapeSqlLiteral(id)}'`).join(',');
+    return executeQuery(
+      `SELECT * FROM ${table} WHERE entity_id_1 IN (${escaped}) OR entity_id_2 IN (${escaped})`
+    );
+  }
+  // Fallback: count-only or limited — never fetch 7M+ rows unfiltered
+  return executeQuery(`SELECT * FROM ${table} LIMIT 50000`);
+}
+
+async function getCoPresenceCount() {
+  const rows = await executeQuery(`SELECT COUNT(*) as cnt FROM ${getTableName('co_presence_edges')}`);
+  return parseInt(rows[0]?.cnt || '0', 10);
 }
 
 async function getSocialEdges() {
@@ -526,6 +539,7 @@ module.exports = {
   getCases,
   getSuspectRankings,
   getCoPresenceEdges,
+  getCoPresenceCount,
   getSocialEdges,
   getRelationships,
   getDevicePersonLinks,
