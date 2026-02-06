@@ -74,6 +74,60 @@ The `databricks.yml` bundle declares:
 - `lakebase_setup_job` — one-time job to create synced tables
 - `sync_to_lakebase` task — added to the main pipeline job after `validate_data`
 
+### Grant App Permissions
+
+After synced tables are created, the Databricks App's service principal needs read access to the synced schema. Connect to the Lakebase instance (e.g. via `psql` or a script using `node-postgres`) and run:
+
+```sql
+-- Replace <SP_CLIENT_ID> with the app's service principal client ID
+-- (visible in the Databricks Apps → Authorization tab, or PGUSER env var)
+GRANT USAGE ON SCHEMA demo TO "<SP_CLIENT_ID>";
+GRANT SELECT ON ALL TABLES IN SCHEMA demo TO "<SP_CLIENT_ID>";
+ALTER DEFAULT PRIVILEGES IN SCHEMA demo GRANT SELECT ON TABLES TO "<SP_CLIENT_ID>";
+```
+
+You can connect using your Databricks OAuth token as the password:
+
+```bash
+# Get your token
+databricks auth token --host https://<WORKSPACE_HOST>
+
+# Connect (use token as password when prompted)
+PGPASSWORD="<token>" psql \
+  -h <LAKEBASE_PGHOST> \
+  -p 5432 \
+  -U <your-email@databricks.com> \
+  -d investigative_analytics
+```
+
+Or use the `pg` module from the backend directory:
+
+```bash
+cd app/backend && node -e "
+const { Client } = require('pg');
+(async () => {
+  const token = JSON.parse(require('child_process').execSync(
+    'databricks auth token --host https://<WORKSPACE_HOST>'
+  ).toString()).access_token;
+  const client = new Client({
+    host: '<LAKEBASE_PGHOST>',
+    port: 5432,
+    database: 'investigative_analytics',
+    user: '<your-email@databricks.com>',
+    password: token,
+    ssl: { rejectUnauthorized: false },
+  });
+  await client.connect();
+  const sp = '<SP_CLIENT_ID>';
+  await client.query('GRANT USAGE ON SCHEMA demo TO \"' + sp + '\"');
+  await client.query('GRANT SELECT ON ALL TABLES IN SCHEMA demo TO \"' + sp + '\"');
+  await client.query('ALTER DEFAULT PRIVILEGES IN SCHEMA demo GRANT SELECT ON TABLES TO \"' + sp + '\"');
+  console.log('Grants applied successfully');
+  await client.end();
+})().catch(e => { console.error(e.message); process.exit(1); });
+"
+```
+
 ### Customizing
 
 To change the Lakebase instance name, database, or catalog, override the variables when deploying:
