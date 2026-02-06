@@ -2016,7 +2016,8 @@ def co_presence_edges():
                     F.least(F.lit(1.0), F.col("co_occurrence_count") / F.lit(5.0)))
         .withColumn("edge_id", 
                     F.concat_ws("_", F.lit("COP"), 
-                               F.col("entity_id_1"), F.col("entity_id_2")))
+                               F.col("entity_id_1"), F.col("entity_id_2"),
+                               F.col("h3_cell")))
     )
     
     return copresence
