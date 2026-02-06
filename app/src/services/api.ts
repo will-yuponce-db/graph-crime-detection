@@ -318,18 +318,6 @@ export interface EvidenceCard {
 }
 
 // New types for enhanced data
-export interface HandoffCandidate {
-  entityId: string;
-  entityName: string;
-  originCity: string;
-  destinationCity: string;
-  originState?: string | null;
-  destinationState?: string | null;
-  detectedAt?: string | null;
-  confidence?: number | null;
-  timeDeltaHours?: number | null;
-}
-
 export interface Device {
   id: string;
   deviceId: string;
@@ -1175,16 +1163,6 @@ export async function fetchEntitiesWithLinkStatus(): Promise<EntitiesWithLinkSta
 // ============== NEW DATA ENDPOINTS ==============
 
 /**
- * Fetch handoff candidates (suspects crossing jurisdictions)
- */
-export async function fetchHandoffCandidates(): Promise<HandoffCandidate[]> {
-  const res = await fetchWithRetry(`${API_BASE}/handoff-candidates`);
-  const data = await res.json();
-  if (!data.success) throw new Error(data.error);
-  return data.candidates || [];
-}
-
-/**
  * Fetch devices with optional pagination
  */
 export async function fetchDevicesPaginated(options?: {
@@ -1495,7 +1473,7 @@ export async function fetchGraphDataProgressive(options?: {
     ownsLinks: number;
   };
 }> {
-  // Request full dataset with high limit (backend now supports up to 100k rows)
+  // Request full data; UI virtualizes/loads progressively
   const result = await fetchGraphData({
     limit: 50000,
     city: options?.city,

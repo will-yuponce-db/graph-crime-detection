@@ -38,6 +38,8 @@ import {
   Cloud,
   Close,
   Download,
+  Refresh,
+  Warning,
 } from '@mui/icons-material';
 import {
   createCase,
@@ -127,6 +129,7 @@ const CaseView: React.FC = () => {
     [normalizePriority]
   );
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loadProgress, setLoadProgress] = useState<{ loaded: number; total: number | null } | null>(
     null
   );
@@ -185,35 +188,59 @@ const CaseView: React.FC = () => {
   };
 
   // Fetch cases and assignees from API with progressive loading
+  // Uses parallel fetches so assignees load even if cases fail (e.g. backend cold start)
+  const loadData = useCallback(async (retryCount = 0) => {
+    setLoadError(null);
+    const [casesResult, assigneesResult] = await Promise.allSettled([
+      fetchAllCasesProgressive({
+        batchSize: 500,
+        onProgress: (progress) => {
+          setLoadProgress({ loaded: progress.loaded, total: progress.total });
+        },
+      }),
+      fetchAssignees(true),
+    ]);
+
+    const casesData = casesResult.status === 'fulfilled' ? casesResult.value : [];
+    const assigneesData = assigneesResult.status === 'fulfilled' ? assigneesResult.value : [];
+
+    const failed = [casesResult, assigneesResult].filter((r) => r.status === 'rejected');
+    if (failed.length > 0) {
+      const err = (failed[0] as PromiseRejectedResult).reason;
+      const msg = err instanceof Error ? err.message : String(err);
+      setLoadError(msg);
+      if (retryCount === 0) {
+        await new Promise((r) => setTimeout(r, 2000));
+        return loadData(1);
+      }
+    } else {
+      setLoadError(null);
+    }
+
+    setCases(casesData.map((c) => normalizeCase(c)));
+    setAssignees(assigneesData);
+  }, [normalizeCase]);
+
   useEffect(() => {
-    const loadData = async () => {
+    let cancelled = false;
+    const run = async () => {
       try {
-        // Start both fetches - assignees is small, cases uses progressive loading
-        const assigneesPromise = fetchAssignees(true);
-
-        // Progressive load all cases
-        const casesData = await fetchAllCasesProgressive({
-          batchSize: 500,
-          onProgress: (progress) => {
-            setLoadProgress({ loaded: progress.loaded, total: progress.total });
-            // Progressively update cases as batches arrive
-            // (already handled by the accumulation in fetchAllCasesProgressive)
-          },
-        });
-
-        setCases(casesData.map((c) => normalizeCase(c)));
-
-        const assigneesData = await assigneesPromise;
-        setAssignees(assigneesData);
+        await loadData();
       } catch (err) {
-        console.error('Failed to fetch data:', err);
+        if (!cancelled) {
+          setLoadError(err instanceof Error ? err.message : 'Failed to load data');
+          console.error('Failed to fetch data:', err);
+        }
       } finally {
-        setLoading(false);
-        setLoadProgress(null);
+        if (!cancelled) {
+          setLoading(false);
+          setLoadProgress(null);
+        }
       }
     };
-    loadData();
-  }, [normalizeCase]);
+    run();
+    return () => { cancelled = true; };
+  }, [loadData]);
 
   // Handle URL param for opening specific case
   useEffect(() => {
@@ -737,6 +764,39 @@ const CaseView: React.FC = () => {
         flexDirection: 'column',
       }}
     >
+      {loadError && (
+        <Paper
+          elevation={0}
+          sx={{
+            m: 1,
+            p: 1.5,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 2,
+            bgcolor: 'error.dark',
+            color: 'error.contrastText',
+            borderRadius: 1,
+          }}
+        >
+          <Warning fontSize="small" />
+          <Typography variant="body2" sx={{ flex: 1 }}>
+            {loadError}
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<Refresh />}
+            onClick={() => {
+              setLoading(true);
+              setLoadError(null);
+              loadData().finally(() => setLoading(false));
+            }}
+            sx={{ color: 'inherit', borderColor: 'currentColor' }}
+          >
+            Retry
+          </Button>
+        </Paper>
+      )}
       {/* Header */}
       <Paper
         elevation={0}

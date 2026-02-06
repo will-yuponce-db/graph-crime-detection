@@ -14,7 +14,6 @@ import {
   Security,
   AttachMoney,
   TrendingUp,
-  FlightTakeoff,
   LocationCity,
   Groups,
 } from '@mui/icons-material';
@@ -102,14 +101,6 @@ const StatsCard: React.FC<StatsCardProps> = ({ compact = false, onStatClick }) =
       label: 'CO-LOC',
       subValue: 'proximity events',
       color: theme.palette.accent.yellow,
-    },
-    {
-      key: 'handoffs',
-      icon: <FlightTakeoff sx={{ fontSize: compact ? 16 : 20 }} />,
-      value: stats.crossJurisdictionHandoffs,
-      label: 'HANDOFFS',
-      subValue: 'cross-city',
-      color: isDark ? theme.palette.accent.purple : theme.palette.accent.purple,
     },
     {
       key: 'cities',

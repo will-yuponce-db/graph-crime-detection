@@ -472,11 +472,11 @@ function createApp(options = {}) {
   };
 
   const CACHE_TTL = {
-    GRAPH_DATA: 5 * 60 * 1000,
+    GRAPH_DATA: 10 * 60 * 1000, // 10 min
     PERSONS: 5 * 60 * 1000,
     CASES: 2 * 60 * 1000,
     CONFIG: 10 * 60 * 1000,
-    RELATIONSHIPS: 5 * 60 * 1000,
+    RELATIONSHIPS: 10 * 60 * 1000,
     HOTSPOTS: 1 * 60 * 1000,
     POSITIONS: 30 * 1000,
   };
@@ -793,37 +793,84 @@ function createApp(options = {}) {
    */
   app.get('/api/demo/positions/bulk', async (req, res) => {
     try {
-      const limit = Math.min(parseInt(req.query.limit, 10) || 1000, 10000);
-      const cacheKey = `positions-bulk-${limit}`;
+      const cacheKey = 'positions-bulk-story';
 
       const cached = cache.get(cacheKey);
       if (cached) return res.json({ success: true, ...cached, fromCache: true });
 
-      // Fetch location events once (shared across all hours)
-      let locationEvents;
-      try {
-        locationEvents = await databricks.runCustomQuery(`
-          SELECT DISTINCT 
-            entity_id, 
-            latitude, 
-            longitude, 
-            h3_cell, 
-            city, 
-            state,
-            entity_name
-          FROM ${databricks.CATALOG}.${databricks.SCHEMA}.location_events_silver
-          WHERE latitude IS NOT NULL 
-            AND longitude IS NOT NULL
-          ORDER BY entity_id
-          LIMIT ${limit}
-        `);
-      } catch (err) {
-        locationEvents = await databricks.getLocationEvents(limit);
+      // Step 1: Get all suspects and their connected associates
+      const [rankings, socialEdges, coPresenceEdges] = await Promise.all([
+        databricks.getSuspectRankings(),
+        databricks.getSocialEdges(),
+        databricks.getCoPresenceEdges(),
+      ]);
+
+      const rankingMap = new Map((rankings || []).map((r) => [r.entity_id, r]));
+
+      // Top suspects by score (capped for heatmap performance)
+      const MAX_SUSPECTS = 100;
+      const topSuspects = (rankings || [])
+        .filter((r) => r.total_score > 0.5)
+        .sort((a, b) => b.total_score - a.total_score)
+        .slice(0, MAX_SUSPECTS);
+      const suspectIds = new Set(topSuspects.map((r) => r.entity_id));
+
+      // Pick associates that are most connected to suspects (by edge count)
+      const associateEdgeCount = new Map();
+      for (const edge of (socialEdges || [])) {
+        const id1 = edge.entity_id_1;
+        const id2 = edge.entity_id_2;
+        if (suspectIds.has(id1) && !suspectIds.has(id2)) {
+          associateEdgeCount.set(id2, (associateEdgeCount.get(id2) || 0) + 1);
+        }
+        if (suspectIds.has(id2) && !suspectIds.has(id1)) {
+          associateEdgeCount.set(id1, (associateEdgeCount.get(id1) || 0) + 1);
+        }
+      }
+      for (const edge of (coPresenceEdges || [])) {
+        const id1 = edge.entity_id_1;
+        const id2 = edge.entity_id_2;
+        if (suspectIds.has(id1) && !suspectIds.has(id2)) {
+          associateEdgeCount.set(id2, (associateEdgeCount.get(id2) || 0) + (edge.co_occurrence_count || 1));
+        }
+        if (suspectIds.has(id2) && !suspectIds.has(id1)) {
+          associateEdgeCount.set(id1, (associateEdgeCount.get(id1) || 0) + (edge.co_occurrence_count || 1));
+        }
       }
 
-      // Get suspect rankings once
-      const rankings = await databricks.getSuspectRankings().catch(() => []);
-      const rankingMap = new Map((rankings || []).map((r) => [r.entity_id, r]));
+      // Top associates by connection count (cap to keep query fast)
+      const MAX_ASSOCIATES = 50;
+      const topAssociates = Array.from(associateEdgeCount.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, MAX_ASSOCIATES)
+        .map(([id]) => id);
+
+      const storyEntityIds = new Set([...suspectIds, ...topAssociates]);
+
+      // Step 2: Fetch location events only for story-relevant entities
+      const entityIdList = Array.from(storyEntityIds);
+      let locationEvents = [];
+
+      // Batch into groups of 200 for SQL IN clause safety
+      const batchSize = 200;
+      const batches = [];
+      for (let i = 0; i < entityIdList.length; i += batchSize) {
+        batches.push(entityIdList.slice(i, i + batchSize));
+      }
+
+      const batchResults = await Promise.all(
+        batches.map((batch) => {
+          const safeIds = batch.map((id) => `'${escapeSqlLiteral(id)}'`).join(',');
+          return databricks.runCustomQuery(`
+            SELECT DISTINCT entity_id, latitude, longitude, h3_cell, city, state
+            FROM ${databricks.CATALOG}.${databricks.SCHEMA}.location_events_silver
+            WHERE entity_id IN (${safeIds})
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+          `).catch(() => []);
+        })
+      );
+      locationEvents = batchResults.flat();
 
       const seenEntities = new Set();
       const uniqueEvents = (locationEvents || []).filter((event) => {
@@ -903,42 +950,68 @@ function createApp(options = {}) {
       if (!isValidHourParam(hour))
         return res.status(400).json({ success: false, error: 'Hour must be 0-71' });
 
-      const limit = Math.min(parseInt(req.query.limit, 10) || 1000, 10000);
-      const cacheKey = `positions-${hour}-${limit}`;
+      const cacheKey = `positions-${hour}-story`;
 
       const cached = cache.get(cacheKey);
       if (cached) return res.json({ success: true, hour, ...cached, fromCache: true });
 
-      // Try to get time-based location events
-      // Hour 0-23 = Day 1, 24-47 = Day 2, 48-71 = Day 3
-      const dayHour = hour % 24;
+      // Reuse the bulk cache if available (it has all entities for all hours)
+      const bulkCached = cache.get('positions-bulk-story');
+      if (bulkCached?.positionsByHour?.[hour]) {
+        const positions = bulkCached.positionsByHour[hour];
+        const result = {
+          positions,
+          count: positions.length,
+          suspectCount: positions.filter((p) => p.isSuspect).length,
+        };
+        cache.set(cacheKey, result, CACHE_TTL.POSITIONS);
+        return res.json({ success: true, hour, ...result, fromCache: true });
+      }
+
+      // Fallback: fetch story-relevant entities (suspects + top associates)
+      const [rankings, socialEdges] = await Promise.all([
+        databricks.getSuspectRankings(),
+        databricks.getSocialEdges(),
+      ]);
+
+      const rankingMap = new Map((rankings || []).map((r) => [r.entity_id, r]));
+      const topSuspects = (rankings || [])
+        .filter((r) => r.total_score > 0.5)
+        .sort((a, b) => b.total_score - a.total_score)
+        .slice(0, 100);
+      const suspectIds = new Set(topSuspects.map((r) => r.entity_id));
+
+      // Pick top associates by connection count
+      const assocCount = new Map();
+      for (const edge of (socialEdges || [])) {
+        if (suspectIds.has(edge.entity_id_1) && !suspectIds.has(edge.entity_id_2)) {
+          assocCount.set(edge.entity_id_2, (assocCount.get(edge.entity_id_2) || 0) + 1);
+        }
+        if (suspectIds.has(edge.entity_id_2) && !suspectIds.has(edge.entity_id_1)) {
+          assocCount.set(edge.entity_id_1, (assocCount.get(edge.entity_id_1) || 0) + 1);
+        }
+      }
+      const topAssocs = Array.from(assocCount.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 50)
+        .map(([id]) => id);
+
+      const storyEntityIds = new Set([...suspectIds, ...topAssocs]);
+      const entityIdList = Array.from(storyEntityIds);
+      const safeIds = entityIdList.map((id) => `'${escapeSqlLiteral(id)}'`).join(',');
 
       let locationEvents;
       try {
-        // Try querying with hour filter if the table supports it
         locationEvents = await databricks.runCustomQuery(`
-          SELECT DISTINCT 
-            entity_id, 
-            latitude, 
-            longitude, 
-            h3_cell, 
-            city, 
-            state,
-            entity_name
+          SELECT DISTINCT entity_id, latitude, longitude, h3_cell, city, state
           FROM ${databricks.CATALOG}.${databricks.SCHEMA}.location_events_silver
-          WHERE latitude IS NOT NULL 
+          WHERE entity_id IN (${safeIds})
+            AND latitude IS NOT NULL
             AND longitude IS NOT NULL
-          ORDER BY entity_id
-          LIMIT ${limit}
         `);
       } catch (err) {
-        // Fallback to basic query
-        locationEvents = await databricks.getLocationEvents(limit);
+        locationEvents = await databricks.getLocationEvents(1000);
       }
-
-      // Get suspect rankings for threat levels - fetch all for complete mapping
-      const rankings = await databricks.getSuspectRankings().catch(() => []);
-      const rankingMap = new Map((rankings || []).map((r) => [r.entity_id, r]));
 
       const seenEntities = new Set();
       const uniqueEvents = (locationEvents || []).filter((event) => {
@@ -1039,8 +1112,7 @@ function createApp(options = {}) {
             longitude, 
             h3_cell, 
             city, 
-            state,
-            entity_name
+            state
           FROM ${databricks.CATALOG}.${databricks.SCHEMA}.location_events_silver
           WHERE entity_id = '${entityId.replace(/'/g, "''")}'
             AND latitude IS NOT NULL 
@@ -1644,7 +1716,7 @@ function createApp(options = {}) {
    */
   app.get('/api/demo/graph-data', async (req, res) => {
     try {
-      const limit = Math.min(parseInt(req.query.limit, 10) || 10000, 50000);
+      const limit = Math.min(parseInt(req.query.limit, 10) || 15000, 50000);
       const city = req.query.city || null;
       const minScore = parseFloat(req.query.minScore) || 0;
 
@@ -1652,12 +1724,11 @@ function createApp(options = {}) {
       const cached = cache.get(cacheKey);
       if (cached) return res.json({ success: true, ...cached, fromCache: true });
 
-      const [rankings, coPresence, socialEdges, handoffs, devicePersonLinks] = await Promise.all([
-        databricks.getSuspectRankings(), // Fetch all
-        databricks.getCoPresenceEdges(), // Fetch all
-        databricks.getSocialEdges(), // Fetch all
-        databricks.getHandoffCandidates(), // Fetch all
-        databricks.getDevicePersonLinks(), // Fetch device-person links
+      const [rankings, coPresence, socialEdges, devicePersonLinks] = await Promise.all([
+        databricks.getSuspectRankings(),
+        databricks.getCoPresenceEdges(limit),
+        databricks.getSocialEdges(limit),
+        databricks.getDevicePersonLinks(),
       ]);
 
       // Filter by city if specified
@@ -2038,7 +2109,7 @@ function createApp(options = {}) {
     try {
       const body = req.body || {};
       const entityIds = Array.isArray(body.entityIds) ? body.entityIds.map(String) : [];
-      const limit = Math.min(Number.parseInt(body.limit, 10) || 500, 5000);
+      const limit = Math.min(Number.parseInt(body.limit, 10) || 5000, 20000);
 
       const uniqueIds = Array.from(new Set(entityIds.map((s) => s.trim()).filter(Boolean)));
       if (uniqueIds.length < 2) {
@@ -2872,59 +2943,6 @@ function createApp(options = {}) {
   // ============== NEW DATA ENDPOINTS ==============
 
   /**
-   * GET /api/demo/handoff-candidates
-   * Shows suspects detected moving between jurisdictions
-   */
-  app.get('/api/demo/handoff-candidates', async (req, res) => {
-    try {
-      const cacheKey = 'handoff-candidates';
-      const cached = cache.get(cacheKey);
-      if (cached) return res.json({ success: true, candidates: cached, fromCache: true });
-
-      // Get suspects to filter handoffs to known entities only
-      const [rankings, candidates] = await Promise.all([
-        databricks.getSuspectRankings(),
-        databricks.getHandoffCandidates(),
-      ]);
-
-      const knownEntityIds = new Set((rankings || []).map((r) => r.entity_id));
-      const entityNames = new Map(
-        (rankings || []).map((r) => [r.entity_id, r.entity_name || `Entity ${r.entity_id}`])
-      );
-
-      // Filter to known suspects and deduplicate by entity+cities
-      const seen = new Set();
-      const filtered = (candidates || [])
-        .filter((c) => knownEntityIds.has(c.entity_id))
-        .filter((c) => {
-          const key = `${c.entity_id}-${c.origin_city || c.from_city}-${c.destination_city || c.to_city}`;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-
-      const formatted = filtered.map((c) => ({
-        entityId: c.entity_id,
-        entityName: entityNames.get(c.entity_id) || c.entity_name || `Entity ${c.entity_id}`,
-        originCity: c.origin_city || c.from_city || 'Unknown',
-        destinationCity: c.destination_city || c.to_city || 'Unknown',
-        originState: c.origin_state || c.from_state || null,
-        destinationState: c.destination_state || c.to_state || null,
-        detectedAt: c.detected_at || c.timestamp || null,
-        confidence: c.confidence || c.score || null,
-        timeDeltaHours: c.time_delta_hours || c.hours_between || null,
-      }));
-
-      cache.set(cacheKey, formatted, CACHE_TTL.RELATIONSHIPS);
-      res.json({ success: true, candidates: formatted, total: formatted.length, fromCache: false });
-    } catch (error) {
-      // Return empty array if table doesn't exist or query fails
-      logger.warn({ type: 'handoff_candidates', status: 'failed', error: error.message });
-      res.json({ success: true, candidates: [], error: error.message });
-    }
-  });
-
-  /**
    * GET /api/demo/devices
    * Device tracking information with pagination
    */
@@ -3064,11 +3082,10 @@ function createApp(options = {}) {
       const cached = cache.get(cacheKey);
       if (cached) return res.json({ success: true, stats: cached, fromCache: true });
 
-      const [cases, suspects, coPresence, handoffs] = await Promise.all([
+      const [cases, suspects, coPresence] = await Promise.all([
         databricks.getCases(), // Fetch all
         databricks.getSuspectRankings(), // Fetch all
         databricks.getCoPresenceEdges(), // Fetch all
-        databricks.getHandoffCandidates().catch(() => []), // Fetch all
       ]);
 
       const stats = {
@@ -3082,7 +3099,7 @@ function createApp(options = {}) {
           (s) => s.total_score > 1 && s.total_score <= 1.5
         ).length,
         totalCoLocations: (coPresence || []).length,
-        crossJurisdictionHandoffs: (handoffs || []).length,
+        crossJurisdictionHandoffs: 0, // Handoff alerts removed
         cities: [...new Set((suspects || []).flatMap((s) => s.linked_cities || []))],
         totalEstimatedLoss: (cases || []).reduce((sum, c) => sum + (c.estimated_loss || 0), 0),
       };
@@ -4438,7 +4455,36 @@ INSTRUCTIONS:
     });
   }
 
-  return { app, cache };
+  /**
+   * Warm the cache by prefetching heavy queries in the background.
+   * Call after server starts and Databricks is connected.
+   */
+  async function warmCache() {
+    logger.info({ type: 'cache_warm', status: 'starting' });
+    const start = Date.now();
+
+    try {
+      // Prefetch the heaviest endpoints in parallel
+      const baseUrl = 'http://localhost:' + (process.env.DATABRICKS_APP_PORT || process.env.PORT || '8000');
+      const fetches = [
+        // Positions bulk is the slowest - triggers location + rankings + edges queries
+        fetch(`${baseUrl}/api/demo/positions/bulk`).catch(() => null),
+        // Graph data is also heavy
+        fetch(`${baseUrl}/api/demo/graph-data`).catch(() => null),
+        // Config is needed on first page load
+        fetch(`${baseUrl}/api/demo/config`).catch(() => null),
+        // Stats
+        fetch(`${baseUrl}/api/demo/stats`).catch(() => null),
+      ];
+
+      await Promise.allSettled(fetches);
+      logger.info({ type: 'cache_warm', status: 'done', durationMs: Date.now() - start });
+    } catch (err) {
+      logger.warn({ type: 'cache_warm', status: 'failed', error: err.message });
+    }
+  }
+
+  return { app, cache, warmCache };
 }
 
 module.exports = { createApp };

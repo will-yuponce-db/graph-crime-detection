@@ -173,13 +173,6 @@ export async function generateCaseSummary(caseId: string): Promise<Insight> {
 }
 
 /**
- * Analyze cross-jurisdiction handoff patterns
- */
-export async function analyzeHandoffs(entityId?: string): Promise<Insight> {
-  return generateInsight('handoff_analysis', { entityId });
-}
-
-/**
  * Generate timeline narration
  */
 export async function narrateTimeline(

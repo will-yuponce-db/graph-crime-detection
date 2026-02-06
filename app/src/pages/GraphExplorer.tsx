@@ -43,6 +43,7 @@ import {
   ExpandMore,
   Search,
   Timeline,
+  Refresh,
 } from '@mui/icons-material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import ForceGraph2D, { type ForceGraphMethods } from 'react-force-graph-2d';
@@ -59,7 +60,6 @@ import {
   type EntitiesWithLinkStatusResponse,
   fetchCaseDetail,
 } from '../services/api';
-import HandoffAlerts from '../components/HandoffAlerts';
 import LinkSuggestionsPanel from '../components/LinkSuggestionsPanel';
 import CreateLinkDialog from '../components/CreateLinkDialog';
 import AIInsightCard, { AIInsightButton } from '../components/AIInsightCard';
@@ -132,6 +132,7 @@ const GraphExplorer: React.FC = () => {
   const theme = useTheme();
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loadProgress, setLoadProgress] = useState<FullDataLoadProgress | null>(null);
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; links: GraphLink[] }>({
     nodes: [],
@@ -169,6 +170,10 @@ const GraphExplorer: React.FC = () => {
   const [socialLoading, setSocialLoading] = useState(false);
   const [socialError, setSocialError] = useState<string | null>(null);
   const [socialEntries, setSocialEntries] = useState<SocialLogEntry[]>([]);
+
+  // Display limits for long lists (load more on demand)
+  const [colocationDisplayCount, setColocationDisplayCount] = useState(50);
+  const [socialDisplayCount, setSocialDisplayCount] = useState(50);
 
   // Entity title editing state
   const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
@@ -253,7 +258,6 @@ const GraphExplorer: React.FC = () => {
   // Sidebar section collapse state
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     overview: true,
-    handoffs: true,
     aiIntelligence: true,
     colocation: true,
     social: true,
@@ -620,10 +624,11 @@ const GraphExplorer: React.FC = () => {
     setColocationLoading(true);
     setColocationError(null);
 
-    fetchCoLocationLog({ entityIds: ids, mode: colocationMode, limit: 5000, bucketMinutes: 60 })
+    fetchCoLocationLog({ entityIds: ids, mode: colocationMode, limit: 20000, bucketMinutes: 60 })
       .then((resp) => {
         if (cancelled) return;
         setColocationEntries(resp.entries || []);
+        setColocationDisplayCount(50);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -654,10 +659,11 @@ const GraphExplorer: React.FC = () => {
     setSocialLoading(true);
     setSocialError(null);
 
-    fetchSocialLog({ entityIds: ids, limit: 500 })
+    fetchSocialLog({ entityIds: ids, limit: 5000 })
       .then((resp) => {
         if (cancelled) return;
         setSocialEntries(resp.entries || []);
+        setSocialDisplayCount(50);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -1068,46 +1074,59 @@ const GraphExplorer: React.FC = () => {
   }, []);
 
   // Fetch graph data from API with progressive loading
+  const fetchData = useCallback(async (retryCount = 0) => {
+    setLoadError(null);
+    try {
+      const { suspects: suspectsData, graphData } = await loadAllDataProgressive({
+        onProgress: (progress) => {
+          setLoadProgress(progress);
+        },
+      });
+
+      setSuspects(
+        suspectsData.map((p) => ({
+          id: p.id,
+          name: p.name,
+          originalName: p.originalName || p.name,
+          customTitle: p.customTitle,
+          hasCustomTitle: p.hasCustomTitle || false,
+          alias: p.alias,
+          threatLevel: p.threatLevel || 'Unknown',
+          criminalHistory: p.criminalHistory,
+          linkedDevices: [],
+          linkedCities: p.linkedCities,
+          totalScore: p.totalScore,
+          isSuspect: p.isSuspect !== false,
+        }))
+      );
+
+      buildGraph(graphData || { nodes: [], links: [] });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to load graph data';
+      setLoadError(msg);
+      console.error('Failed to fetch graph data:', err);
+      if (retryCount === 0) {
+        await new Promise((r) => setTimeout(r, 2000));
+        return fetchData(1);
+      }
+    } finally {
+      setLoading(false);
+      setLoadProgress(null);
+    }
+  }, []);
+
   useEffect(() => {
-    const fetchData = async () => {
+    let cancelled = false;
+    const run = async () => {
       try {
-        // Use progressive loader for full data fetch
-        const { suspects: suspectsData, graphData } = await loadAllDataProgressive({
-          onProgress: (progress) => {
-            setLoadProgress(progress);
-          },
-        });
-
-        // Map all persons to expected format (includes suspects and associates)
-        setSuspects(
-          suspectsData.map((p) => ({
-            id: p.id,
-            name: p.name,
-            originalName: p.originalName || p.name,
-            customTitle: p.customTitle,
-            hasCustomTitle: p.hasCustomTitle || false,
-            alias: p.alias,
-            threatLevel: p.threatLevel || 'Unknown',
-            criminalHistory: p.criminalHistory,
-            linkedDevices: [], // Will be populated from entitiesData when available
-            linkedCities: p.linkedCities,
-            totalScore: p.totalScore,
-            isSuspect: p.isSuspect !== false, // Default to true for backwards compat
-          }))
-        );
-
-        // Build fixed-layout graph
-        buildGraph(graphData || { nodes: [], links: [] });
-      } catch (err) {
-        console.error('Failed to fetch graph data:', err);
-      } finally {
-        setLoading(false);
-        setLoadProgress(null);
+        await fetchData();
+      } catch {
+        // Handled in fetchData
       }
     };
-
-    fetchData();
-  }, []);
+    run();
+    return () => { cancelled = true; };
+  }, [fetchData]);
 
   const buildGraph = (apiData: {
     nodes: {
@@ -1417,7 +1436,41 @@ const GraphExplorer: React.FC = () => {
   }
 
   return (
-    <Box sx={{ height: 'calc(100vh - 64px)', display: 'flex', bgcolor: 'background.default' }}>
+    <Box sx={{ height: 'calc(100vh - 64px)', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }}>
+      {loadError && (
+        <Paper
+          elevation={0}
+          sx={{
+            m: 1,
+            p: 1.5,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 2,
+            bgcolor: 'error.dark',
+            color: 'error.contrastText',
+            borderRadius: 1,
+          }}
+        >
+          <Warning fontSize="small" />
+          <Typography variant="body2" sx={{ flex: 1 }}>
+            {loadError}
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<Refresh />}
+            onClick={() => {
+              setLoading(true);
+              setLoadError(null);
+              fetchData().finally(() => setLoading(false));
+            }}
+            sx={{ color: 'inherit', borderColor: 'currentColor' }}
+          >
+            Retry
+          </Button>
+        </Paper>
+      )}
+      <Box sx={{ flex: 1, display: 'flex', minHeight: 0 }}>
       {/* Graph Area */}
       <Box
         ref={containerCallbackRef}
@@ -2734,47 +2787,6 @@ const GraphExplorer: React.FC = () => {
 
           <Divider sx={{ mx: 2 }} />
 
-          {/* Handoff Alerts */}
-          <Box sx={{ px: 2, py: 1.5 }}>
-            <Stack
-              direction="row"
-              alignItems="center"
-              justifyContent="space-between"
-              onClick={() => toggleSection('handoffs')}
-              sx={{ cursor: 'pointer', userSelect: 'none', mb: expandedSections.handoffs ? 1.5 : 0 }}
-            >
-              <Typography
-                variant="caption"
-                sx={{
-                  color: 'text.secondary',
-                  fontSize: '0.65rem',
-                  fontWeight: 600,
-                  letterSpacing: 1.5,
-                  textTransform: 'uppercase',
-                }}
-              >
-                Handoff Alerts
-              </Typography>
-              <ExpandMore
-                sx={{
-                  fontSize: 18,
-                  color: 'text.secondary',
-                  transform: expandedSections.handoffs ? 'rotate(180deg)' : 'rotate(0deg)',
-                  transition: 'transform 0.2s',
-                }}
-              />
-            </Stack>
-            <Collapse in={expandedSections.handoffs}>
-              <HandoffAlerts
-                compact
-                maxItems={3}
-                onEntityClick={(entityId) => togglePersonSelection(entityId)}
-              />
-            </Collapse>
-          </Box>
-
-          <Divider sx={{ mx: 2 }} />
-
           {/* AI Network Intelligence */}
           <Box sx={{ px: 2, py: 1.5 }}>
             <Stack
@@ -3058,7 +3070,8 @@ const GraphExplorer: React.FC = () => {
                 </Paper>
               ) : (
                 <Stack spacing={1}>
-                  {colocationEntries.slice(0, 25).map((e, idx) => {
+                  <Box sx={{ maxHeight: 320, overflowY: 'auto' }}>
+                  {colocationEntries.slice(0, colocationDisplayCount).map((e, idx) => {
                     const timeLabel = e.time ? new Date(e.time).toLocaleString() : 'Time unknown';
                     const placeLabel =
                       [e.city, e.state].filter(Boolean).join(', ') || 'Unknown location';
@@ -3126,6 +3139,26 @@ const GraphExplorer: React.FC = () => {
                       </Paper>
                     );
                   })}
+                  {colocationEntries.length > colocationDisplayCount && (
+                    <Box sx={{ mt: 1, textAlign: 'center' }}>
+                      <Typography
+                        component="button"
+                        variant="caption"
+                        onClick={() => setColocationDisplayCount((c) => Math.min(c + 50, colocationEntries.length))}
+                        sx={{
+                          color: theme.palette.accent.yellow,
+                          cursor: 'pointer',
+                          textDecoration: 'underline',
+                          border: 'none',
+                          bgcolor: 'transparent',
+                          '&:hover': { opacity: 0.8 },
+                        }}
+                      >
+                        Load more ({colocationEntries.length - colocationDisplayCount} remaining)
+                      </Typography>
+                    </Box>
+                  )}
+                  </Box>
                 </Stack>
               )}
               </Box>
@@ -3225,7 +3258,8 @@ const GraphExplorer: React.FC = () => {
                 </Paper>
               ) : (
                 <Stack spacing={1}>
-                  {socialEntries.slice(0, 20).map((e, idx) => {
+                  <Box sx={{ maxHeight: 320, overflowY: 'auto' }}>
+                  {socialEntries.slice(0, socialDisplayCount).map((e, idx) => {
                     const typeLabel =
                       e.type === 'CONTACTED'
                         ? '📞 Call'
@@ -3315,6 +3349,26 @@ const GraphExplorer: React.FC = () => {
                       </Paper>
                     );
                   })}
+                  {socialEntries.length > socialDisplayCount && (
+                    <Box sx={{ mt: 1, textAlign: 'center' }}>
+                      <Typography
+                        component="button"
+                        variant="caption"
+                        onClick={() => setSocialDisplayCount((c) => Math.min(c + 50, socialEntries.length))}
+                        sx={{
+                          color: theme.palette.accent.purple,
+                          cursor: 'pointer',
+                          textDecoration: 'underline',
+                          border: 'none',
+                          bgcolor: 'transparent',
+                          '&:hover': { opacity: 0.8 },
+                        }}
+                      >
+                        Load more ({socialEntries.length - socialDisplayCount} remaining)
+                      </Typography>
+                    </Box>
+                  )}
+                  </Box>
                 </Stack>
               )}
               </Box>
@@ -4174,6 +4228,7 @@ const GraphExplorer: React.FC = () => {
           </>
         )}
       </Dialog>
+      </Box>
     </Box>
   );
 };

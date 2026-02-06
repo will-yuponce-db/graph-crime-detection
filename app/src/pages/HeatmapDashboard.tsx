@@ -60,6 +60,7 @@ import {
   Gavel,
   Phone,
   Hub,
+  Refresh,
 } from '@mui/icons-material';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -103,7 +104,6 @@ interface LinkedDevice {
 interface SuspectWithDevices extends Suspect {
   linkedDevices?: LinkedDevice[];
 }
-import HandoffAlerts from '../components/HandoffAlerts';
 import AIInsightCard, { AIInsightButton } from '../components/AIInsightCard';
 import { analyzeHotspotAnomalies, narrateTimeline, type Insight } from '../services/insights';
 
@@ -263,6 +263,7 @@ const HeatmapDashboard: React.FC = () => {
   const theme = useTheme();
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [bulkLoadProgress, setBulkLoadProgress] = useState<number | null>(null); // null = not started, 0-100 = loading, 100 = done
   const [currentHour, setCurrentHour] = useState(25);
   const [timeWindow, setTimeWindow] = useState<[number, number]>([0, 71]);
@@ -799,7 +800,7 @@ const HeatmapDashboard: React.FC = () => {
   const topActiveCells = useMemo(() => {
     const entries = Array.from(activityByCell.entries());
     entries.sort((a, b) => b[1] - a[1]);
-    return entries.slice(0, 250);
+    return entries.slice(0, 1000); // Cap for map performance; data is complete
   }, [activityByCell]);
 
   const maxCellActivity = useMemo(() => {
@@ -861,56 +862,87 @@ const HeatmapDashboard: React.FC = () => {
       : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
 
   // Phase 1: Load essential data immediately (show map fast)
+  // Uses Promise.allSettled so partial data loads even if some requests fail (e.g. backend cold start)
+  const loadEssentialData = useCallback(async (retryCount = 0) => {
+    setLoadError(null);
+    const results = await Promise.allSettled([
+      fetchConfig(),
+      fetchCases(),
+      fetchSuspects(),
+      fetchRelationships(),
+      fetchPositions(currentHour),
+      fetchHotspots(currentHour, { startHour: timeWindow[0], endHour: timeWindow[1] }),
+      fetchEntitiesWithLinkStatus().catch(() => ({ persons: [], devices: [], stats: {} })),
+    ]);
+
+    const config = results[0].status === 'fulfilled' ? results[0].value : { towers: [], keyFrames: [], timeRange: { min: 0, max: 71 }, totalHours: 72 };
+    const casesData = results[1].status === 'fulfilled' ? results[1].value : [];
+    const suspectsData = results[2].status === 'fulfilled' ? results[2].value : [];
+    const relationshipsData = results[3].status === 'fulfilled' ? results[3].value : [];
+    const currentPositions = results[4].status === 'fulfilled' ? results[4].value : [];
+    const currentHotspots = results[5].status === 'fulfilled' ? results[5].value : [];
+    const entitiesLinkStatus = results[6].status === 'fulfilled' ? results[6].value : { persons: [], devices: [], stats: {} };
+
+    const failedCount = results.filter((r) => r.status === 'rejected').length;
+    if (failedCount > 0) {
+      const errMsg = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+      const msg = errMsg?.reason instanceof Error ? errMsg.reason.message : String(errMsg?.reason ?? 'Unknown error');
+      setLoadError(`${failedCount} request(s) failed. ${msg}`);
+      // Retry once after 2s on first load (handles backend cold start)
+      if (retryCount === 0 && failedCount >= 1) {
+        await new Promise((r) => setTimeout(r, 2000));
+        return loadEssentialData(1);
+      }
+    } else {
+      setLoadError(null);
+    }
+
+    const linkMap = new Map<string, LinkedDevice[]>();
+    for (const person of entitiesLinkStatus.persons || []) {
+      if (person.linkedDevices && person.linkedDevices.length > 0) {
+        linkMap.set(person.id, person.linkedDevices as LinkedDevice[]);
+      }
+    }
+    setDeviceLinkMap(linkMap);
+
+    const suspectsWithDevices: SuspectWithDevices[] = (suspectsData || []).map((s) => ({
+      ...s,
+      linkedDevices: linkMap.get(s.id) || [],
+    }));
+
+    setTowers(config.towers || []);
+    setKeyFrames(config.keyFrames || []);
+    setCases(casesData || []);
+    setSuspects(suspectsWithDevices);
+    setRelationships(relationshipsData || []);
+    setPositions(currentPositions || []);
+    setHotspots(currentHotspots || []);
+
+    positionsCacheRef.current.set(currentHour, currentPositions || []);
+    hotspotsCacheRef.current.set(
+      getHotspotCacheKey(currentHour, timeWindow),
+      currentHotspots || []
+    );
+  }, [currentHour, timeWindow, getHotspotCacheKey]);
+
   useEffect(() => {
-    const loadEssentialData = async () => {
+    let cancelled = false;
+    const run = async () => {
       try {
-        // Load config + current hour data first for quick initial render
-        const [config, casesData, suspectsData, relationshipsData, currentPositions, currentHotspots, entitiesLinkStatus] = await Promise.all([
-          fetchConfig(),
-          fetchCases(),
-          fetchSuspects(),
-          fetchRelationships(),
-          fetchPositions(currentHour),
-          fetchHotspots(currentHour, { startHour: timeWindow[0], endHour: timeWindow[1] }),
-          fetchEntitiesWithLinkStatus().catch(() => ({ persons: [], devices: [], stats: {} })),
-        ]);
-        
-        // Build a map of person ID -> linked devices
-        const linkMap = new Map<string, LinkedDevice[]>();
-        for (const person of entitiesLinkStatus.persons || []) {
-          if (person.linkedDevices && person.linkedDevices.length > 0) {
-            linkMap.set(person.id, person.linkedDevices as LinkedDevice[]);
-          }
-        }
-        setDeviceLinkMap(linkMap);
-        
-        // Merge linked devices info with suspects
-        const suspectsWithDevices: SuspectWithDevices[] = (suspectsData || []).map((s) => ({
-          ...s,
-          linkedDevices: linkMap.get(s.id) || [],
-        }));
-        
-        setTowers(config.towers || []);
-        setKeyFrames(config.keyFrames || []);
-        setCases(casesData || []);
-        setSuspects(suspectsWithDevices);
-        setRelationships(relationshipsData || []);
-        setPositions(currentPositions || []);
-        setHotspots(currentHotspots || []);
-        
-        // Cache the current hour
-        positionsCacheRef.current.set(currentHour, currentPositions || []);
-        hotspotsCacheRef.current.set(
-          getHotspotCacheKey(currentHour, timeWindow),
-          currentHotspots || []
-        );
+        await loadEssentialData();
+        if (!cancelled) setLoadError(null);
       } catch (err) {
-        console.error('Failed to fetch essential data:', err);
+        if (!cancelled) {
+          const msg = err instanceof Error ? err.message : 'Failed to load data';
+          setLoadError(msg);
+          console.error('Failed to fetch essential data:', err);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
-    loadEssentialData();
+    run();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -921,7 +953,7 @@ const HeatmapDashboard: React.FC = () => {
     const loadBulkData = async () => {
       setBulkLoadProgress(0);
       try {
-        const bulkPositions = await fetchPositionsBulk({ limit: 1000 });
+        const bulkPositions = await fetchPositionsBulk({ limit: 5000 });
         
         // Populate the cache with all 72 hours
         if (bulkPositions.positionsByHour) {
@@ -1283,9 +1315,44 @@ const HeatmapDashboard: React.FC = () => {
       sx={{
         height: 'calc(100vh - 64px)',
         display: 'flex',
+        flexDirection: 'column',
         bgcolor: 'background.default',
       }}
     >
+      {loadError && (
+        <Paper
+          elevation={0}
+          sx={{
+            m: 1,
+            p: 1.5,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 2,
+            bgcolor: 'error.dark',
+            color: 'error.contrastText',
+            borderRadius: 1,
+          }}
+        >
+          <Warning fontSize="small" />
+          <Typography variant="body2" sx={{ flex: 1 }}>
+            {loadError}
+          </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<Refresh />}
+            onClick={() => {
+              setLoading(true);
+              setLoadError(null);
+              loadEssentialData().finally(() => setLoading(false));
+            }}
+            sx={{ color: 'inherit', borderColor: 'currentColor' }}
+          >
+            Retry
+          </Button>
+        </Paper>
+      )}
+      <Box sx={{ flex: 1, display: 'flex', minHeight: 0 }}>
       {/* Global CSS for trail animations */}
       <style>{`
         @keyframes trailPulse {
@@ -2721,11 +2788,6 @@ const HeatmapDashboard: React.FC = () => {
                 </Box>
               </Paper>
 
-              {/* Cross-Jurisdiction Handoff Alerts */}
-              <Box sx={{ p: 1.5, borderBottom: 1, borderColor: 'border.main' }}>
-                <HandoffAlerts compact maxItems={3} />
-              </Box>
-
               {/* AI Data Intelligence */}
               <Box sx={{ p: 1.5, borderBottom: 1, borderColor: 'border.main' }}>
                 <Stack spacing={1.5}>
@@ -3952,6 +4014,7 @@ const HeatmapDashboard: React.FC = () => {
             Analyze Network
           </Button>
         </Box>
+      </Box>
       </Box>
     </Box>
   );

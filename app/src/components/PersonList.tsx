@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   Avatar,
   Box,
@@ -15,6 +15,7 @@ import {
 } from '@mui/material';
 import { People, Edit, Undo, ExpandMore, Check, Close } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
+import { useVirtualizer } from '@tanstack/react-virtual';
 
 export interface PersonListSuspect {
   id: string;
@@ -30,6 +31,90 @@ export interface PersonListSuspect {
   linkedDevices?: { deviceId: string; relationship: string; source: string }[];
   hasCustomTitle?: boolean;
   totalScore?: number;
+}
+
+const CARD_ESTIMATE_HEIGHT = 140;
+
+function AssociatesVirtualList<T extends PersonListSuspect>({
+  associates,
+  renderCard,
+  theme,
+}: {
+  associates: T[];
+  renderCard: (s: T, index: number, color: string, isAssociate?: boolean) => React.ReactNode;
+  theme: ReturnType<typeof useTheme>;
+}) {
+  const parentRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: associates.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => CARD_ESTIMATE_HEIGHT,
+    overscan: 5,
+  });
+
+  return (
+    <Box sx={{ mt: 3 }}>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
+        <Typography
+          variant="caption"
+          sx={{
+            color: 'text.secondary',
+            letterSpacing: 1.5,
+            fontSize: '0.65rem',
+            fontWeight: 600,
+            textTransform: 'uppercase',
+          }}
+        >
+          Associates
+        </Typography>
+        <Chip
+          label={associates.length}
+          size="small"
+          sx={{
+            height: 18,
+            minWidth: 18,
+            bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
+            color: 'text.secondary',
+            fontSize: '0.65rem',
+            fontWeight: 600,
+            borderRadius: '9px',
+            '& .MuiChip-label': { px: 0.5 },
+          }}
+        />
+      </Stack>
+      <Box
+        ref={parentRef}
+        sx={{
+          maxHeight: 400,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+        }}
+      >
+        <Box
+          sx={{
+            height: virtualizer.getTotalSize(),
+            position: 'relative',
+            width: '100%',
+          }}
+        >
+          {virtualizer.getVirtualItems().map((virtualRow) => (
+            <Box
+              key={virtualRow.key}
+              sx={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+            >
+              {renderCard(associates[virtualRow.index], virtualRow.index, '#6b7280', true)}
+            </Box>
+          ))}
+        </Box>
+      </Box>
+    </Box>
+  );
 }
 
 interface PersonListProps<T extends PersonListSuspect = PersonListSuspect> {
@@ -339,38 +424,11 @@ const PersonList = <T extends PersonListSuspect>({
         {personsOfInterest.map((s, i) => renderCard(s, i, theme.palette.accent.red))}
 
         {associates.length > 0 && (
-          <Box sx={{ mt: 3 }}>
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-              <Typography
-                variant="caption"
-                sx={{
-                  color: 'text.secondary',
-                  letterSpacing: 1.5,
-                  fontSize: '0.65rem',
-                  fontWeight: 600,
-                  textTransform: 'uppercase',
-                }}
-              >
-                Associates
-              </Typography>
-              <Chip
-                label={associates.length}
-                size="small"
-                sx={{
-                  height: 18,
-                  minWidth: 18,
-                  bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
-                  color: 'text.secondary',
-                  fontSize: '0.65rem',
-                  fontWeight: 600,
-                  borderRadius: '9px',
-                  '& .MuiChip-label': { px: 0.5 },
-                }}
-              />
-            </Stack>
-
-            {associates.slice(0, 20).map((s, i) => renderCard(s, i, '#6b7280', true))}
-          </Box>
+          <AssociatesVirtualList
+            associates={associates}
+            renderCard={renderCard}
+            theme={theme}
+          />
         )}
       </Collapse>
     </Box>

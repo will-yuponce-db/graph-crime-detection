@@ -268,18 +268,18 @@ async function getSuspectRankings(limit = 10000) {
 
 /**
  * Get co-presence edges (suspects seen together)
- * @param {number} limit - Max rows (default 50000 for full network)
+ * @param {number} limit - Max rows (default 15000)
  */
-async function getCoPresenceEdges(limit = 50000) {
+async function getCoPresenceEdges(limit = 15000) {
   const sql = `SELECT * FROM ${getTableName('co_presence_edges')} LIMIT ${limit}`;
   return executeQuery(sql);
 }
 
 /**
  * Get social edges (communication/relationship links)
- * @param {number} limit - Max rows (default 50000 for full network)
+ * @param {number} limit - Max rows (default 15000)
  */
-async function getSocialEdges(limit = 50000) {
+async function getSocialEdges(limit = 15000) {
   const sql = `SELECT * FROM ${getTableName('social_edges_silver')} LIMIT ${limit}`;
   return executeQuery(sql);
 }
@@ -352,9 +352,9 @@ async function getEntityCaseOverlap(limit = 10000) {
 
 /**
  * Get handoff candidates (suspects that may have handed off between locations)
- * @param {number} limit - Max rows (default 5000)
+ * @param {number} limit - Max rows (default 2000; table is slow at 5k+)
  */
-async function getHandoffCandidates(limit = 5000) {
+async function getHandoffCandidates(limit = 2000) {
   const sql = `SELECT * FROM ${getTableName('handoff_candidates')} LIMIT ${limit}`;
   return executeQuery(sql);
 }

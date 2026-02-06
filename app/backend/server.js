@@ -2,8 +2,8 @@
  * Backend entrypoint.
  *
  * - Wires up the Express app (routes live in `createApp`)
- * - Initializes Databricks connection (best-effort)
- * - Starts listening
+ * - Waits for Databricks connection before accepting requests
+ * - Starts listening only after init completes (or timeout)
  */
 
 require('dotenv').config();
@@ -29,18 +29,26 @@ const PORT = parseInt(process.env.DATABRICKS_APP_PORT || process.env.PORT || '80
 // Host: Databricks requires 0.0.0.0, local dev can use localhost
 const HOST = isDatabricksApp ? '0.0.0.0' : process.env.HOST || '0.0.0.0';
 
-const { app } = createApp({ logger, databricks });
+// Wait for Databricks before accepting requests (avoids first-load race)
+const INIT_TIMEOUT_MS = parseInt(process.env.DATABRICKS_INIT_TIMEOUT_MS || '15000', 10);
 
-// Initialize Databricks connection on startup
-(async () => {
-  try {
-    await databricks.initDatabricks();
-    logger.info({ type: 'databricks_init', status: 'connected' });
-  } catch (error) {
-    logger.error({ type: 'databricks_init', status: 'failed', error: error.message });
-    // Don't exit - allow health check to report status
+async function waitForDatabricks() {
+  const deadline = Date.now() + INIT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      await databricks.initDatabricks();
+      const tables = await databricks.listTables();
+      return { ok: true, tableCount: tables?.length ?? 0 };
+    } catch (err) {
+      logger.warn({ type: 'databricks_init', status: 'retrying', error: err.message });
+      await new Promise((r) => setTimeout(r, 2000));
+    }
   }
-})();
+  logger.warn({ type: 'databricks_init', status: 'timeout', timeoutMs: INIT_TIMEOUT_MS });
+  return { ok: false, tableCount: 0 };
+}
+
+const { app, warmCache } = createApp({ logger, databricks });
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
@@ -49,38 +57,42 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
-// Start server
-app.listen(PORT, HOST, async () => {
-  let tableCount = 0;
-  try {
-    const tables = await databricks.listTables();
-    tableCount = tables.length;
-  } catch {
-    // Databricks not connected yet
+// Start server only after Databricks is ready (or timeout)
+(async () => {
+  const { ok, tableCount = 0 } = await waitForDatabricks();
+  if (ok) {
+    logger.info({ type: 'databricks_init', status: 'connected', tableCount });
   }
 
-  const serverInfo = {
-    type: 'server_started',
-    host: HOST,
-    port: PORT,
-    localUrl: `http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`,
-    database: {
-      type: 'Databricks',
-      catalog: databricks.CATALOG,
-      schema: databricks.SCHEMA,
-      tableCount,
-    },
-  };
-
-  if (isDatabricksApp) {
-    serverInfo.databricks = {
-      appName: DATABRICKS_CONFIG.appName,
-      appUrl: DATABRICKS_CONFIG.appUrl,
-      host: DATABRICKS_CONFIG.host,
-      workspaceId: DATABRICKS_CONFIG.workspaceId,
+  app.listen(PORT, HOST, () => {
+    const serverInfo = {
+      type: 'server_started',
+      host: HOST,
+      port: PORT,
+      localUrl: `http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`,
+      database: {
+        type: 'Databricks',
+        catalog: databricks.CATALOG,
+        schema: databricks.SCHEMA,
+        tableCount,
+      },
     };
-  }
 
-  logger.info(serverInfo);
-});
+    if (isDatabricksApp) {
+      serverInfo.databricks = {
+        appName: DATABRICKS_CONFIG.appName,
+        appUrl: DATABRICKS_CONFIG.appUrl,
+        host: DATABRICKS_CONFIG.host,
+        workspaceId: DATABRICKS_CONFIG.workspaceId,
+      };
+    }
+
+    logger.info(serverInfo);
+
+    // Warm cache in background after server is listening
+    if (ok) {
+      warmCache().catch(() => {});
+    }
+  });
+})();
 
