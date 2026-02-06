@@ -88,6 +88,8 @@ async function _getOAuthToken() {
     scope: 'all-apis',
   }).toString();
 
+  logger.info({ type: 'postgres_credential', status: 'oauth_requesting', url: tokenUrl });
+
   const resp = await _httpsRequest(tokenUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) },
@@ -95,10 +97,11 @@ async function _getOAuthToken() {
   });
 
   if (resp.statusCode < 200 || resp.statusCode >= 300) {
-    throw new Error(`OAuth token request failed (${resp.statusCode}): ${resp.body}`);
+    throw new Error(`OAuth token request failed (${resp.statusCode}): ${resp.body.substring(0, 200)}`);
   }
 
   const data = JSON.parse(resp.body);
+  logger.info({ type: 'postgres_credential', status: 'oauth_success' });
   return data.access_token;
 }
 
@@ -205,8 +208,6 @@ function initPool() {
  * uses it directly.
  */
 async function initDatabricks() {
-  if (pool) return;
-
   const hasStaticPassword = !!(
     process.env.PGPASSWORD ||
     process.env.POSTGRES_PASSWORD ||
@@ -214,47 +215,66 @@ async function initDatabricks() {
   );
 
   if (hasStaticPassword) {
-    _createPool(null);
+    if (!pool) _createPool(null);
     return;
   }
 
-  // No static password — generate a Lakebase credential
-  try {
-    const credential = await _generateDatabaseCredential();
-    if (credential) {
-      _createPool(credential);
-
-      // Schedule credential refresh before expiry (recreate pool with new token)
-      const refreshMs = _dbCredential
-        ? Math.max((_dbCredential.expiresAt - Date.now()) - 5 * 60 * 1000, 60 * 1000)
-        : 50 * 60 * 1000;
-      setTimeout(async () => {
-        try {
-          logger.info({ type: 'postgres_credential', status: 'refreshing' });
-          if (pool) {
-            await pool.end();
-            pool = null;
-          }
-          _dbCredential = null;
-          await initDatabricks();
-        } catch (err) {
-          logger.error({ type: 'postgres_credential', status: 'refresh_failed', error: err.message });
-        }
-      }, refreshMs).unref();
-
-      return;
-    }
-  } catch (err) {
-    logger.warn({ type: 'postgres_credential', status: 'failed', error: err.message });
+  // No static password — need to generate a Lakebase credential.
+  // If we already have a pool with a valid credential, skip.
+  if (pool && _dbCredential && _dbCredential.expiresAt > Date.now() + 5 * 60 * 1000) {
+    return;
   }
 
-  // Fallback: create pool anyway
-  logger.warn({
-    type: 'postgres_init',
-    status: 'no_password',
-    hint: 'Set PGPASSWORD or ensure DATABRICKS_CLIENT_ID/SECRET and DATABRICKS_HOST are available',
-  });
-  _createPool(null);
+  // Destroy stale pool (if any) so we can recreate with fresh credential
+  if (pool) {
+    try { await pool.end(); } catch { /* ignore */ }
+    pool = null;
+  }
+
+  // Log available env vars for debugging (first call only)
+  if (!_dbCredential) {
+    logger.info({
+      type: 'postgres_credential',
+      status: 'attempting',
+      hasDatabricksHost: !!process.env.DATABRICKS_HOST,
+      hasDatabricksToken: !!process.env.DATABRICKS_TOKEN,
+      hasClientId: !!process.env.DATABRICKS_CLIENT_ID,
+      hasClientSecret: !!process.env.DATABRICKS_CLIENT_SECRET,
+      databricksHost: (process.env.DATABRICKS_HOST || '').substring(0, 40),
+    });
+  }
+
+  // Generate credential — let errors propagate so the retry loop in
+  // waitForDatabase() catches them and tries again.
+  const credential = await _generateDatabaseCredential();
+
+  if (!credential) {
+    throw new Error(
+      'No Lakebase credential generated. Ensure DATABRICKS_HOST and ' +
+      'DATABRICKS_CLIENT_ID/SECRET (or DATABRICKS_TOKEN) are set, ' +
+      'or set PGPASSWORD directly.'
+    );
+  }
+
+  _createPool(credential);
+
+  // Schedule credential refresh before expiry
+  const refreshMs = _dbCredential
+    ? Math.max((_dbCredential.expiresAt - Date.now()) - 5 * 60 * 1000, 60 * 1000)
+    : 50 * 60 * 1000;
+  setTimeout(async () => {
+    try {
+      logger.info({ type: 'postgres_credential', status: 'refreshing' });
+      if (pool) {
+        await pool.end();
+        pool = null;
+      }
+      _dbCredential = null;
+      await initDatabricks();
+    } catch (err) {
+      logger.error({ type: 'postgres_credential', status: 'refresh_failed', error: err.message });
+    }
+  }, refreshMs).unref();
 }
 
 /**

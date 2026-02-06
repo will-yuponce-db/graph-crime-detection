@@ -29,7 +29,8 @@ const PORT = parseInt(process.env.DATABRICKS_APP_PORT || process.env.PORT || '80
 const HOST = isDatabricksApp ? '0.0.0.0' : process.env.HOST || '0.0.0.0';
 
 // Wait for Postgres before accepting requests (avoids first-load race)
-const INIT_TIMEOUT_MS = parseInt(process.env.DB_INIT_TIMEOUT_MS || process.env.DATABRICKS_INIT_TIMEOUT_MS || '15000', 10);
+// Increased default to 30s to allow time for Lakebase credential generation
+const INIT_TIMEOUT_MS = parseInt(process.env.DB_INIT_TIMEOUT_MS || process.env.DATABRICKS_INIT_TIMEOUT_MS || '30000', 10);
 
 async function waitForDatabase() {
   const deadline = Date.now() + INIT_TIMEOUT_MS;
