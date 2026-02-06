@@ -14,6 +14,14 @@
 
 # COMMAND ----------
 
+# MAGIC %pip install --upgrade databricks-sdk
+
+# COMMAND ----------
+
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
 dbutils.widgets.text("lakebase_catalog", "investigative_analytics_pg")
 dbutils.widgets.text("source_schema", "demo")
 
@@ -166,10 +174,13 @@ print(f"  Failed:    {failed_count}")
 print(f"  Total:     {len(results)}")
 
 if failed_count > 0:
+    error_details = "; ".join([f"{r['table']}: {r['error']}" for r in results if r["status"] == "failed"])
     print(f"\nFailed tables:")
     for r in results:
         if r["status"] == "failed":
             print(f"  - {r['table']}: {r['error']}")
-    raise Exception(f"{failed_count} synced table refresh(es) failed")
+    dbutils.notebook.exit(f"FAILED: {error_details}")
+    raise Exception(f"{failed_count} synced table refresh(es) failed: {error_details}")
 else:
     print(f"\nAll synced table refreshes completed successfully!")
+    dbutils.notebook.exit(f"SUCCESS: {triggered_count} triggered, {skipped_count} skipped")

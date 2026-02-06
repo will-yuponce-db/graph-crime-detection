@@ -15,6 +15,14 @@
 
 # COMMAND ----------
 
+# MAGIC %pip install --upgrade databricks-sdk
+
+# COMMAND ----------
+
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
 dbutils.widgets.text("source_catalog", "pubsec_geo_law")
 dbutils.widgets.text("source_schema", "demo")
 dbutils.widgets.text("lakebase_catalog", "investigative_analytics_pg")
@@ -83,6 +91,10 @@ w = WorkspaceClient()
 
 results = []
 
+# Use SNAPSHOT mode because DLT materialized views don't support Change Data Feed
+# (which is required for TRIGGERED/CONTINUOUS modes)
+SYNC_MODE = SyncedTableSchedulingPolicy.SNAPSHOT
+
 for table_def in SYNCED_TABLES:
     table_name = table_def["name"]
     pk_columns = table_def["pk"]
@@ -93,7 +105,7 @@ for table_def in SYNCED_TABLES:
     print(f"\nCreating synced table: {dest_fqn}")
     print(f"  Source: {source_fqn}")
     print(f"  Primary key: {pk_columns}")
-    print(f"  Sync mode: TRIGGERED")
+    print(f"  Sync mode: SNAPSHOT")
 
     try:
         synced_table = w.database.create_synced_database_table(
@@ -102,7 +114,7 @@ for table_def in SYNCED_TABLES:
                 spec=SyncedTableSpec(
                     source_table_full_name=source_fqn,
                     primary_key_columns=pk_columns,
-                    scheduling_policy=SyncedTableSchedulingPolicy.TRIGGERED,
+                    scheduling_policy=SYNC_MODE,
                     new_pipeline_spec=NewPipelineSpec(
                         storage_catalog=lakebase_catalog,
                         storage_schema=source_schema,
@@ -143,12 +155,15 @@ print(f"  Already existed: {len(exists)}")
 print(f"  Failed: {len(failed)}")
 
 if failed:
+    error_details = "; ".join([f"{r['table']}: {r['error']}" for r in failed])
     print(f"\nFailed tables:")
     for r in failed:
         print(f"  - {r['table']}: {r['error']}")
-    raise Exception(f"{len(failed)} synced table(s) failed to create")
+    dbutils.notebook.exit(f"FAILED: {error_details}")
+    raise Exception(f"{len(failed)} synced table(s) failed to create: {error_details}")
 else:
     print(f"\nAll {len(SYNCED_TABLES)} synced tables are ready!")
+    dbutils.notebook.exit(f"SUCCESS: {len(created)} created, {len(exists)} already existed")
 
 # COMMAND ----------
 
