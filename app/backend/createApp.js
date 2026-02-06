@@ -806,13 +806,10 @@ function createApp(options = {}) {
 
       const rankingMap = new Map((rankings || []).map((r) => [r.entity_id, r]));
 
-      // Top 50 suspects by score
-      const MAX_SUSPECTS = 50;
-      const MAX_ASSOCIATES = 50;
+      // All suspects by score
       const topSuspects = (rankings || [])
         .filter((r) => r.total_score > 0.5)
-        .sort((a, b) => b.total_score - a.total_score)
-        .slice(0, MAX_SUSPECTS);
+        .sort((a, b) => b.total_score - a.total_score);
       const suspectIds = new Set(topSuspects.map((r) => r.entity_id));
 
       // Score associates by how connected they are to our suspects
@@ -838,10 +835,9 @@ function createApp(options = {}) {
         }
       }
 
-      // Top 50 associates by connection count
+      // All associates by connection count
       const topAssociateIds = Array.from(associateEdgeCount.entries())
         .sort((a, b) => b[1] - a[1])
-        .slice(0, MAX_ASSOCIATES)
         .map(([id]) => id);
 
       const storyEntityIds = [...Array.from(suspectIds), ...topAssociateIds];
@@ -995,8 +991,7 @@ function createApp(options = {}) {
 
       const topSuspects = (rankings || [])
         .filter((r) => r.total_score > 0.5)
-        .sort((a, b) => b.total_score - a.total_score)
-        .slice(0, 50);
+        .sort((a, b) => b.total_score - a.total_score);
       const suspectIds = new Set(topSuspects.map((r) => r.entity_id));
 
       const assocCount = new Map();
@@ -1013,7 +1008,7 @@ function createApp(options = {}) {
           assocCount.set(edge.entity_id_1, (assocCount.get(edge.entity_id_1) || 0) + (edge.co_occurrence_count || 1));
       }
       const topAssocIds = Array.from(assocCount.entries())
-        .sort((a, b) => b[1] - a[1]).slice(0, 50).map(([id]) => id);
+        .sort((a, b) => b[1] - a[1]).map(([id]) => id);
 
       const storyIds = [...Array.from(suspectIds), ...topAssocIds];
       let locationEvents = [];
