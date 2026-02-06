@@ -20,8 +20,7 @@ env:
     value: "demo"
   
   # Databricks Unity Catalog configuration (retained for agent / AI features)
-  - name: DATABRICKS_HOST
-    value: "fe-vm-industry-solutions-buildathon.cloud.databricks.com"
+  # DATABRICKS_HOST is auto-injected by the platform — do NOT set it here
   - name: DATABRICKS_HTTP_PATH
     value: "/sql/1.0/warehouses/288a7ec183eea397"
   - name: DATABRICKS_CATALOG
