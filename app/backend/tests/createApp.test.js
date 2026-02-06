@@ -13,8 +13,9 @@ function makeTmpDir() {
 function makeStubDatabricks() {
   let lastSql = null;
   const stub = {
-    CATALOG: 'cat',
+    CATALOG: 'sch',
     SCHEMA: 'sch',
+    getTableName: (table) => `"sch"."${table}"`,
     getCases: async (limit) => {
       const count = Math.min(limit || 100, 8);
       return Array.from({ length: count }).map((_, i) => ({
@@ -35,7 +36,7 @@ function makeStubDatabricks() {
     runCustomQuery: async (sql) => {
       lastSql = sql;
       // location_events_silver query used by /config
-      if (sql.toUpperCase().includes('FROM CAT.SCH.LOCATION_EVENTS_SILVER')) {
+      if (sql.toUpperCase().includes('FROM "SCH"."LOCATION_EVENTS_SILVER')) {
         return [
           {
             h3_cell: '8928308280fffff',
@@ -47,7 +48,7 @@ function makeStubDatabricks() {
         ];
       }
       // suspect_rankings query used by /persons/:id
-      if (sql.toUpperCase().includes('FROM CAT.SCH.SUSPECT_RANKINGS')) {
+      if (sql.toUpperCase().includes('FROM "SCH"."SUSPECT_RANKINGS')) {
         return [];
       }
       return [];
@@ -317,7 +318,7 @@ test('GET /api/demo/cases/:id/detail falls back to entity ID for generic placeho
   // Simulate entities with generic placeholder names like "Unknown Suspect #4"
   databricks.runCustomQuery = async (sql) => {
     const u = String(sql || '').toUpperCase();
-    if (u.includes('FROM CAT.SCH.CASES_SILVER')) {
+    if (u.includes('FROM "SCH"."CASES_SILVER')) {
       return [
         {
           case_id: 'CASE_TEST',
@@ -333,23 +334,23 @@ test('GET /api/demo/cases/:id/detail falls back to entity ID for generic placeho
         },
       ];
     }
-    if (u.includes('FROM CAT.SCH.CASE_SUMMARY_WITH_SUSPECTS')) {
+    if (u.includes('FROM "SCH"."CASE_SUMMARY_WITH_SUSPECTS')) {
       return []; // Force fallback to entity_case_overlap path
     }
-    if (u.includes('FROM CAT.SCH.ENTITY_CASE_OVERLAP')) {
+    if (u.includes('FROM "SCH"."ENTITY_CASE_OVERLAP')) {
       return [
         { entity_id: 'E_10294', case_id: 'CASE_TEST', overlap_score: 0.95 },
         { entity_id: 'E_10627', case_id: 'CASE_TEST', overlap_score: 0.85 },
       ];
     }
-    if (u.includes('FROM CAT.SCH.SUSPECT_RANKINGS')) {
+    if (u.includes('FROM "SCH"."SUSPECT_RANKINGS')) {
       // Return generic placeholder names that should be replaced with entity IDs
       return [
         { entity_id: 'E_10294', entity_name: 'Unknown Suspect #4', total_score: 1.2 },
         { entity_id: 'E_10627', entity_name: 'Unknown Suspect #4', total_score: 0.8 },
       ];
     }
-    if (u.includes('FROM CAT.SCH.EVIDENCE_CARD_DATA')) {
+    if (u.includes('FROM "SCH"."EVIDENCE_CARD_DATA')) {
       return [];
     }
     return [];
@@ -386,14 +387,14 @@ test('POST /api/demo/colocation-log returns grouped colocations (best-effort wit
 
   databricks.runCustomQuery = async (sql) => {
     const u = String(sql || '').toUpperCase();
-    if (u.includes('FROM CAT.SCH.SUSPECT_RANKINGS')) {
+    if (u.includes('FROM "SCH"."SUSPECT_RANKINGS')) {
       return [
         { entity_id: 'A', entity_name: 'Alice' },
         { entity_id: 'B', entity_name: 'Bob' },
         { entity_id: 'C', entity_name: 'Carol' },
       ];
     }
-    if (u.includes('FROM CAT.SCH.LOCATION_EVENTS_SILVER')) {
+    if (u.includes('FROM "SCH"."LOCATION_EVENTS_SILVER')) {
       // Return three location rows:
       // - A + B co-present at same h3/city/state
       // - C alone somewhere else

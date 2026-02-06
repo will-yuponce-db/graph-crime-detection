@@ -22,6 +22,15 @@ variables:
   notification_email:
     description: Email for job notifications
     default: "scott.johnson@databricks.com"
+  lakebase_instance_name:
+    description: Name of the Lakebase Postgres instance
+    default: investigative-analytics-pg
+  lakebase_database:
+    description: Postgres database name inside the Lakebase instance
+    default: investigative_analytics
+  lakebase_catalog:
+    description: UC database catalog name for the Lakebase instance
+    default: investigative_analytics_pg
 
 # Default workspace - uses CLI auth profile
 workspace:
@@ -29,6 +38,19 @@ workspace:
 
 # Shared resource definitions
 resources:
+  # Lakebase Postgres infrastructure
+  database_instances:
+    lakebase_instance:
+      name: ${var.lakebase_instance_name}
+      capacity: CU_1
+
+  database_catalogs:
+    lakebase_catalog:
+      database_instance_name: ${resources.database_instances.lakebase_instance.name}
+      name: ${var.lakebase_catalog}
+      database_name: ${var.lakebase_database}
+      create_database_if_not_exists: true
+
   pipelines:
     investigative_analytics_pipeline:
       name: "Investigative Analytics - ${bundle.target}"
@@ -48,7 +70,7 @@ resources:
   jobs:
     demo_pipeline_job:
       name: "Investigative Analytics Pipeline - ${bundle.target}"
-      description: "Generates demo data and validates output for the investigative analytics demo"
+      description: "Generates demo data, validates output, and syncs to Lakebase Postgres"
       environments:
         - environment_key: serverless_env
           spec:
@@ -67,12 +89,49 @@ resources:
               catalog: ${var.catalog}
               schema: ${var.schema}
           environment_key: serverless_env
+        - task_key: sync_to_lakebase
+          depends_on:
+            - task_key: validate_data
+          notebook_task:
+            notebook_path: ./trigger_lakebase_sync.py
+            base_parameters:
+              lakebase_catalog: ${var.lakebase_catalog}
+              source_schema: ${var.schema}
+          environment_key: serverless_env
       email_notifications:
         on_failure:
           - ${var.notification_email}
       tags:
         project: investigative-analytics
         environment: ${bundle.target}
+
+    # One-time job to create synced tables in Lakebase
+    # Run manually: databricks bundle run lakebase_setup_job -t dev
+    lakebase_setup_job:
+      name: "Lakebase Sync Setup - ${bundle.target}"
+      description: "One-time job to create synced tables from UC to Lakebase Postgres"
+      environments:
+        - environment_key: serverless_env
+          spec:
+            client: "1"
+      tasks:
+        - task_key: create_synced_tables
+          notebook_task:
+            notebook_path: ./setup_lakebase_sync.py
+            base_parameters:
+              source_catalog: ${var.catalog}
+              source_schema: ${var.schema}
+              lakebase_catalog: ${var.lakebase_catalog}
+              lakebase_database: ${var.lakebase_database}
+              lakebase_instance: ${var.lakebase_instance_name}
+          environment_key: serverless_env
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      tags:
+        project: investigative-analytics
+        environment: ${bundle.target}
+        purpose: lakebase-setup
 
 # Environment-specific targets
 targets:

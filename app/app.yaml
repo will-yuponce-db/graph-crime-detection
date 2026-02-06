@@ -1,5 +1,5 @@
 # Databricks Apps Configuration
-# This app connects to Unity Catalog: pubsec_geo_law.demo
+# This app reads from Lakebase Postgres (synced from UC: pubsec_geo_law.demo)
 
 command:
   - "bash"
@@ -15,7 +15,11 @@ env:
   - name: PORT
     value: "8000"
   
-  # Databricks Unity Catalog configuration
+  # Postgres schema where synced tables are located
+  - name: POSTGRES_SCHEMA
+    value: "demo"
+  
+  # Databricks Unity Catalog configuration (retained for agent / AI features)
   - name: DATABRICKS_HOST
     value: "fe-vm-industry-solutions-buildathon.cloud.databricks.com"
   - name: DATABRICKS_HTTP_PATH
@@ -30,6 +34,8 @@ env:
     value: "databricks-gpt-5-2"
   
   # Databricks Apps automatically injects DATABRICKS_TOKEN for the app's service principal
+  # PGHOST, PGPORT, PGDATABASE, PGUSER, PGSSLMODE are auto-injected when
+  # a database resource is attached below.
 
 resources:
   # Compute allocation
@@ -38,6 +44,15 @@ resources:
   
   # Declare resources the app needs access to
   # This grants the app's service principal permission to use these resources
+  
+  # Lakebase Postgres database (primary data source)
+  database:
+    - name: lakebase-db
+      database_instance_name: "investigative-analytics-pg"
+      database_name: "investigative_analytics"
+      permission: CAN_CONNECT_AND_CREATE
+
+  # SQL Warehouse (retained for agent / AI model serving queries)
   sql_warehouse:
     - name: sql-warehouse
       id: "288a7ec183eea397"
@@ -47,6 +62,4 @@ resources:
     - name: agent-endpoint
       endpoint_name: "databricks-gpt-5-2"
       permission: CAN_QUERY
-
-
 

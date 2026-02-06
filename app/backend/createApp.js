@@ -296,7 +296,7 @@ function validateAndSanitizeActions(actions, { maxActions }) {
 
 function createApp(options = {}) {
   const logger = options.logger || require('./utils/logger');
-  const databricks = options.databricks || require('./db/databricks');
+  const databricks = options.databricks || require('./db/postgres');
 
   const app = express();
   app.use(cors());
@@ -629,7 +629,7 @@ function createApp(options = {}) {
           SELECT h3_cell, city, state, 
                  AVG(latitude) as latitude, AVG(longitude) as longitude,
                  COUNT(*) as event_count
-          FROM ${databricks.CATALOG}.${databricks.SCHEMA}.location_events_silver
+          FROM ${databricks.getTableName('location_events_silver')}
           WHERE latitude IS NOT NULL
           GROUP BY h3_cell, city, state
           ORDER BY event_count DESC
@@ -698,11 +698,11 @@ function createApp(options = {}) {
 
       // Query with filters at the database level for better performance
       let sql = `
-        SELECT * FROM ${databricks.CATALOG}.${databricks.SCHEMA}.suspect_rankings
+        SELECT * FROM ${databricks.getTableName('suspect_rankings')}
         WHERE total_score >= ${minScore}
       `;
       if (city) {
-        sql += ` AND array_contains(linked_cities, '${escapeSqlLiteral(city)}')`;
+        sql += ` AND linked_cities @> '"${escapeSqlLiteral(city)}"'::jsonb`;
       }
       sql += ` ORDER BY total_score DESC LIMIT ${limit + 1} OFFSET ${offset}`;
 
@@ -756,7 +756,7 @@ function createApp(options = {}) {
       const entityId = req.params.id;
       const safeId = escapeSqlLiteral(entityId);
       const rankings = await databricks.runCustomQuery(`
-        SELECT * FROM ${databricks.CATALOG}.${databricks.SCHEMA}.suspect_rankings
+        SELECT * FROM ${databricks.getTableName('suspect_rankings')}
         WHERE entity_id = '${safeId}'
         LIMIT 1
       `);
@@ -867,7 +867,7 @@ function createApp(options = {}) {
             const safeIds = batch.map((id) => `'${escapeSqlLiteral(id)}'`).join(',');
             return databricks.runCustomQuery(`
               SELECT DISTINCT entity_id, latitude, longitude, h3_cell, city, state
-              FROM ${databricks.CATALOG}.${databricks.SCHEMA}.location_events_silver
+              FROM ${databricks.getTableName('location_events_silver')}
               WHERE entity_id IN (${safeIds})
                 AND latitude IS NOT NULL AND longitude IS NOT NULL
             `).catch(() => []);
@@ -1022,7 +1022,7 @@ function createApp(options = {}) {
         const safeIds = storyIds.map((id) => `'${escapeSqlLiteral(id)}'`).join(',');
         locationEvents = await databricks.runCustomQuery(`
           SELECT DISTINCT entity_id, latitude, longitude, h3_cell, city, state
-          FROM ${databricks.CATALOG}.${databricks.SCHEMA}.location_events_silver
+          FROM ${databricks.getTableName('location_events_silver')}
           WHERE entity_id IN (${safeIds})
             AND latitude IS NOT NULL AND longitude IS NOT NULL
         `).catch(() => []);
@@ -1131,7 +1131,7 @@ function createApp(options = {}) {
             h3_cell, 
             city, 
             state
-          FROM ${databricks.CATALOG}.${databricks.SCHEMA}.location_events_silver
+          FROM ${databricks.getTableName('location_events_silver')}
           WHERE entity_id = '${entityId.replace(/'/g, "''")}'
             AND latitude IS NOT NULL 
             AND longitude IS NOT NULL
@@ -1413,7 +1413,7 @@ function createApp(options = {}) {
             .runCustomQuery(
               `
             SELECT case_id, entity_id, overlap_score
-            FROM ${databricks.CATALOG}.${databricks.SCHEMA}.entity_case_overlap
+            FROM ${databricks.getTableName('entity_case_overlap')}
             WHERE case_id IN (${caseIds})
             ORDER BY overlap_score DESC
           `
@@ -1446,7 +1446,7 @@ function createApp(options = {}) {
               poi_count,
               witness_count,
               victim_count
-            FROM ${databricks.CATALOG}.${databricks.SCHEMA}.case_summary_with_suspects
+            FROM ${databricks.getTableName('case_summary_with_suspects')}
             WHERE case_id IN (${caseIds})
           `
             )
@@ -1999,7 +1999,7 @@ function createApp(options = {}) {
 
       const sql = `
         SELECT ${selectCols.join(', ')}
-        FROM ${databricks.CATALOG}.${databricks.SCHEMA}.location_events_silver
+        FROM ${databricks.getTableName('location_events_silver')}
         WHERE entity_id IN (${safeIds})
           AND latitude IS NOT NULL
           AND longitude IS NOT NULL
@@ -2014,7 +2014,7 @@ function createApp(options = {}) {
         try {
           const nameRows = await databricks.runCustomQuery(`
             SELECT entity_id, entity_name
-            FROM ${databricks.CATALOG}.${databricks.SCHEMA}.suspect_rankings
+            FROM ${databricks.getTableName('suspect_rankings')}
             WHERE entity_id IN (${safeIds})
           `);
           (nameRows || []).forEach((r) => {
@@ -2226,7 +2226,7 @@ function createApp(options = {}) {
 
       const safeCaseId = escapeSqlLiteral(caseId);
       const rows = await databricks.runCustomQuery(`
-        SELECT * FROM ${databricks.CATALOG}.${databricks.SCHEMA}.cases_silver
+        SELECT * FROM ${databricks.getTableName('cases_silver')}
         WHERE case_id = '${safeCaseId}'
         LIMIT 1
       `);
@@ -2262,7 +2262,7 @@ function createApp(options = {}) {
       try {
         const summaryRows = await databricks.runCustomQuery(`
           SELECT *
-          FROM ${databricks.CATALOG}.${databricks.SCHEMA}.case_summary_with_suspects
+          FROM ${databricks.getTableName('case_summary_with_suspects')}
           WHERE case_id = '${safeCaseId}'
           LIMIT 1
         `);
@@ -2332,7 +2332,7 @@ function createApp(options = {}) {
       try {
         overlaps = await databricks.runCustomQuery(`
           SELECT *
-          FROM ${databricks.CATALOG}.${databricks.SCHEMA}.entity_case_overlap
+          FROM ${databricks.getTableName('entity_case_overlap')}
           WHERE case_id = '${safeCaseId}'
         `);
       } catch (err) {
@@ -2353,7 +2353,7 @@ function createApp(options = {}) {
         try {
           const rankingRows = await databricks.runCustomQuery(`
             SELECT entity_id, entity_name, alias, total_score, linked_cities, properties
-            FROM ${databricks.CATALOG}.${databricks.SCHEMA}.suspect_rankings
+            FROM ${databricks.getTableName('suspect_rankings')}
             WHERE entity_id IN (${quotedEntityIds})
           `);
           (rankingRows || []).forEach((r) => {
@@ -2375,7 +2375,7 @@ function createApp(options = {}) {
         try {
           const evidenceRows = await databricks.runCustomQuery(`
             SELECT *
-            FROM ${databricks.CATALOG}.${databricks.SCHEMA}.evidence_card_data
+            FROM ${databricks.getTableName('evidence_card_data')}
             WHERE entity_id IN (${quotedEntityIds})
           `);
           (evidenceRows || []).forEach((row) => {
@@ -3019,7 +3019,7 @@ function createApp(options = {}) {
         databricks
           .runCustomQuery(
             `
-          SELECT * FROM ${databricks.CATALOG}.${databricks.SCHEMA}.evidence_card_data
+          SELECT * FROM ${databricks.getTableName('evidence_card_data')}
           WHERE entity_id = '${safeId}'
           LIMIT 1
         `
@@ -3028,7 +3028,7 @@ function createApp(options = {}) {
         databricks
           .runCustomQuery(
             `
-          SELECT * FROM ${databricks.CATALOG}.${databricks.SCHEMA}.suspect_rankings
+          SELECT * FROM ${databricks.getTableName('suspect_rankings')}
           WHERE entity_id = '${safeId}'
           LIMIT 1
         `
@@ -3037,7 +3037,7 @@ function createApp(options = {}) {
         databricks
           .runCustomQuery(
             `
-          SELECT * FROM ${databricks.CATALOG}.${databricks.SCHEMA}.entity_case_overlap
+          SELECT * FROM ${databricks.getTableName('entity_case_overlap')}
           WHERE entity_id = '${safeId}'
           ORDER BY overlap_score DESC
           LIMIT 20
@@ -3154,13 +3154,34 @@ function createApp(options = {}) {
   app.get('/api/databricks/tables/:name/detail', async (req, res) => {
     try {
       const table = req.params.name;
-      const fqn = `${databricks.CATALOG}.${databricks.SCHEMA}.${table}`;
+      const fqn = databricks.getTableName(table);
       try {
-        const details = await databricks.executeQuery(`DESCRIBE DETAIL ${fqn}`);
+        // Query column metadata from information_schema (Postgres equivalent of DESCRIBE)
+        const details = await databricks.executeQuery(`
+          SELECT column_name as col_name, data_type, ordinal_position,
+                 CASE WHEN is_nullable = 'YES' THEN 'true' ELSE 'false' END as nullable,
+                 column_default
+          FROM information_schema.columns
+          WHERE table_schema = '${databricks.SCHEMA}'
+            AND table_name = '${escapeSqlLiteral(table)}'
+          ORDER BY ordinal_position
+        `);
         return res.json({ success: true, table, fqn, kind: 'detail', details });
       } catch (err) {
-        // Common for UC objects that are views
-        const extended = await databricks.executeQuery(`DESCRIBE EXTENDED ${fqn}`);
+        // Fallback: try pg_catalog
+        const extended = await databricks.executeQuery(`
+          SELECT a.attname as col_name,
+                 pg_catalog.format_type(a.atttypid, a.atttypmod) as data_type,
+                 a.attnum as ordinal_position
+          FROM pg_catalog.pg_attribute a
+          JOIN pg_catalog.pg_class c ON a.attrelid = c.oid
+          JOIN pg_catalog.pg_namespace n ON c.relnamespace = n.oid
+          WHERE n.nspname = '${databricks.SCHEMA}'
+            AND c.relname = '${escapeSqlLiteral(table)}'
+            AND a.attnum > 0
+            AND NOT a.attisdropped
+          ORDER BY a.attnum
+        `);
         return res.json({
           success: true,
           table,
@@ -3377,7 +3398,7 @@ function createApp(options = {}) {
           .runCustomQuery(
             `SELECT old_entity_id, new_entity_id, h3_cell, old_last_bucket, new_first_bucket,
                     time_diff_minutes, shared_partner_count, handoff_score, rank
-             FROM ${databricks.CATALOG}.${databricks.SCHEMA}.handoff_candidates
+             FROM ${databricks.getTableName('handoff_candidates')}
              WHERE handoff_score >= 0.7 AND rank <= 3
              ORDER BY handoff_score DESC
              LIMIT 100`
@@ -3386,13 +3407,13 @@ function createApp(options = {}) {
         databricks
           .runCustomQuery(
             `SELECT device_id, person_id, relationship, confidence, notes
-             FROM ${databricks.CATALOG}.${databricks.SCHEMA}.person_device_links_silver`
+             FROM ${databricks.getTableName('person_device_links_silver')}`
           )
           .catch(() => []),
         databricks
           .runCustomQuery(
             `SELECT person_id, display_name, alias, role, risk_level
-             FROM ${databricks.CATALOG}.${databricks.SCHEMA}.persons_silver`
+             FROM ${databricks.getTableName('persons_silver')}`
           )
           .catch(() => []),
       ]);
@@ -3606,13 +3627,13 @@ function createApp(options = {}) {
         databricks
           .runCustomQuery(
             `SELECT person_id, display_name, alias, role, risk_level, criminal_history, is_suspect
-             FROM ${databricks.CATALOG}.${databricks.SCHEMA}.persons_silver`
+             FROM ${databricks.getTableName('persons_silver')}`
           )
           .catch(() => []),
         databricks
           .runCustomQuery(
             `SELECT DISTINCT entity_id, linked_cases, linked_cities, total_score, rank
-             FROM ${databricks.CATALOG}.${databricks.SCHEMA}.suspect_rankings
+             FROM ${databricks.getTableName('suspect_rankings')}
              ORDER BY total_score DESC
              LIMIT 500`
           )
@@ -3620,7 +3641,7 @@ function createApp(options = {}) {
         databricks
           .runCustomQuery(
             `SELECT device_id, person_id, relationship, confidence, is_current
-             FROM ${databricks.CATALOG}.${databricks.SCHEMA}.person_device_links_silver`
+             FROM ${databricks.getTableName('person_device_links_silver')}`
           )
           .catch(() => []),
       ]);
