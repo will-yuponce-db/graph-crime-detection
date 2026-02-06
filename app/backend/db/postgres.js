@@ -12,7 +12,39 @@
  */
 
 const { Pool } = require('pg');
+const https = require('https');
 const logger = require('../utils/logger');
+
+/**
+ * Make an HTTPS request (works on all Node.js versions, unlike fetch).
+ * @param {string} url - Full URL
+ * @param {object} options - { method, headers, body }
+ * @returns {Promise<{statusCode: number, body: string}>}
+ */
+function _httpsRequest(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const req = https.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: parsed.pathname + parsed.search,
+        method: options.method || 'GET',
+        headers: options.headers || {},
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          resolve({ statusCode: res.statusCode, body: Buffer.concat(chunks).toString() });
+        });
+      }
+    );
+    req.on('error', reject);
+    if (options.body) req.write(options.body);
+    req.end();
+  });
+}
 
 // Schema where synced tables land (matches the UC source schema)
 const SCHEMA = process.env.POSTGRES_SCHEMA || process.env.DATABRICKS_SCHEMA || 'demo';
@@ -49,23 +81,24 @@ async function _getOAuthToken() {
   }
 
   const tokenUrl = `https://${host}/oidc/v1/token`;
-  const resp = await fetch(tokenUrl, {
+  const body = new URLSearchParams({
+    grant_type: 'client_credentials',
+    client_id: clientId,
+    client_secret: clientSecret,
+    scope: 'all-apis',
+  }).toString();
+
+  const resp = await _httpsRequest(tokenUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: clientId,
-      client_secret: clientSecret,
-      scope: 'all-apis',
-    }),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) },
+    body,
   });
 
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`OAuth token request failed (${resp.status}): ${text}`);
+  if (resp.statusCode < 200 || resp.statusCode >= 300) {
+    throw new Error(`OAuth token request failed (${resp.statusCode}): ${resp.body}`);
   }
 
-  const data = await resp.json();
+  const data = JSON.parse(resp.body);
   return data.access_token;
 }
 
@@ -87,21 +120,22 @@ async function _generateDatabaseCredential() {
   if (!oauthToken) return null;
 
   const apiUrl = `https://${host}/api/2.0/database/generate-database-credential`;
-  const resp = await fetch(apiUrl, {
+  const reqBody = JSON.stringify({});
+  const resp = await _httpsRequest(apiUrl, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${oauthToken}`,
       'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(reqBody),
     },
-    body: JSON.stringify({}),
+    body: reqBody,
   });
 
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`generate-database-credential failed (${resp.status}): ${text}`);
+  if (resp.statusCode < 200 || resp.statusCode >= 300) {
+    throw new Error(`generate-database-credential failed (${resp.statusCode}): ${resp.body}`);
   }
 
-  const data = await resp.json();
+  const data = JSON.parse(resp.body);
   const token = data.token || data.credential || data.password;
   const expirationTime = data.expiration_time;
 
