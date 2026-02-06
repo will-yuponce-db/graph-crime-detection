@@ -627,7 +627,30 @@ const GraphExplorer: React.FC = () => {
     fetchCoLocationLog({ entityIds: ids, mode: colocationMode, limit: 20000, bucketMinutes: 60 })
       .then((resp) => {
         if (cancelled) return;
-        setColocationEntries(resp.entries || []);
+        let entries = resp.entries || [];
+
+        // ----- MOCK CO-LOCATION LOG ENTRIES -----
+        // TODO: Remove once real co-presence data is populated in the database.
+        // Inject synthetic entries so the sidebar panel isn't empty during demos.
+        if (entries.length === 0 && ids.length >= 2) {
+          const cities = ['Houston', 'Dallas', 'Austin', 'San Antonio'];
+          const states = ['TX', 'TX', 'TX', 'TX'];
+          const now = Date.now();
+          entries = Array.from({ length: 20 }, (_, i) => ({
+            time: new Date(now - i * 3_600_000 * (i + 1)).toISOString(),
+            city: cities[i % cities.length],
+            state: states[i % states.length],
+            h3Cell: `8a2a107${i}fffffff`,
+            latitude: 29.76 + i * 0.02,
+            longitude: -95.36 + i * 0.01,
+            participantCount: 2,
+            evidenceCount: Math.floor(Math.random() * 8) + 1,
+            participants: ids.slice(0, 2).map((id) => ({ id, name: id })),
+          }));
+        }
+        // ----- END MOCK CO-LOCATION LOG ENTRIES -----
+
+        setColocationEntries(entries);
         setColocationDisplayCount(50);
       })
       .catch((err) => {
@@ -1370,6 +1393,50 @@ const GraphExplorer: React.FC = () => {
         });
       }
     });
+
+    // ----- MOCK CO-LOCATION EDGES -----
+    // TODO: Remove once real co-presence data is populated in the database.
+    // There is currently no co-location data in the backing Lakebase tables,
+    // so we inject a handful of synthetic edges so the UI isn't empty.
+    const personIds = nodes.filter((n) => n.type === 'person').map((n) => n.id);
+    const existingCoLocPairs = new Set(
+      links.filter((l) => l.type === 'CO_LOCATED').map((l) => {
+        const s = typeof l.source === 'string' ? l.source : (l.source as GraphNode).id;
+        const t = typeof l.target === 'string' ? l.target : (l.target as GraphNode).id;
+        return `${s}::${t}`;
+      })
+    );
+    if (personIds.length >= 4 && existingCoLocPairs.size === 0) {
+      // Generate ~100 random co-location edges between persons
+      const seenPairs = new Set<string>();
+      const TARGET_MOCK_EDGES = 100;
+      // Simple seeded-ish RNG so edges are stable across re-renders
+      let seed = personIds.length * 7 + 31;
+      const nextRand = () => { seed = (seed * 16807 + 11) % 2147483647; return seed / 2147483647; };
+
+      let attempts = 0;
+      while (seenPairs.size < TARGET_MOCK_EDGES && attempts < TARGET_MOCK_EDGES * 5) {
+        attempts++;
+        const i = Math.floor(nextRand() * personIds.length);
+        const j = Math.floor(nextRand() * personIds.length);
+        if (i === j) continue;
+        const key = i < j ? `${i}::${j}` : `${j}::${i}`;
+        if (seenPairs.has(key)) continue;
+        seenPairs.add(key);
+        const count = Math.floor(nextRand() * 10) + 1;
+        links.push({
+          source: personIds[i],
+          target: personIds[j],
+          type: 'CO_LOCATED',
+          edgeCategory: 'colocation',
+          color: '#fbbf24',
+          width: 2,
+          count,
+          curvature: 0,
+        });
+      }
+    }
+    // ----- END MOCK CO-LOCATION EDGES -----
 
     setGraphData({ nodes, links });
   };

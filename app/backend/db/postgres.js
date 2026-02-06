@@ -378,8 +378,9 @@ async function getSuspectRankings() {
 
 /** Co-presence edges for entities in the given set. Excludes time_buckets JSONB to save memory. */
 async function getCoPresenceEdges(entityIds) {
-  if (!entityIds || entityIds.length === 0) return [];
-  const escaped = entityIds.map(id => `'${escapeSqlLiteral(id)}'`).join(',');
+  const ids = Array.isArray(entityIds) ? entityIds : Array.from(entityIds || []);
+  if (ids.length === 0) return [];
+  const escaped = ids.map(id => `'${escapeSqlLiteral(id)}'`).join(',');
   return executeQuery(`
     SELECT edge_id, entity_id_1, entity_id_2, h3_cell, city, state,
            co_occurrence_count, weight, first_seen_together, last_seen_together
@@ -392,8 +393,9 @@ async function getCoPresenceEdges(entityIds) {
 
 /** Aggregate co-presence counts for associate scoring. Returns max 200 rows. */
 async function getCoPresenceAssociateCounts(entityIds) {
-  if (!entityIds || entityIds.length === 0) return [];
-  const escaped = entityIds.map(id => `'${escapeSqlLiteral(id)}'`).join(',');
+  const ids = Array.isArray(entityIds) ? entityIds : Array.from(entityIds || []);
+  if (ids.length === 0) return [];
+  const escaped = ids.map(id => `'${escapeSqlLiteral(id)}'`).join(',');
   return executeQuery(`
     SELECT entity_id, SUM(co_occurrence_count) as connection_count, SUM(weight) as total_weight
     FROM (
