@@ -1158,7 +1158,7 @@ const GraphExplorer: React.FC = () => {
     // Add ALL suspects with positions in expanding rings
     if (suspectNodes.length >= 1) {
       // Position all suspects in concentric rings
-      const suspectsPerRing = 12; // suspects per ring
+      const suspectsPerRing = 20; // suspects per ring
       suspectNodes.forEach((suspect, i) => {
         const ringIndex = Math.floor(i / suspectsPerRing);
         const posInRing = i % suspectsPerRing;
@@ -1167,7 +1167,7 @@ const GraphExplorer: React.FC = () => {
           suspectNodes.length - ringIndex * suspectsPerRing
         );
         const angle = (posInRing / ringCount) * Math.PI * 2 - Math.PI / 2;
-        const radius = 80 + ringIndex * 60; // Expanding rings
+        const radius = 200 + ringIndex * 150; // Expanding rings
 
         // Size based on score/rank (top suspects are bigger)
         const size = Math.max(6, 12 - Math.floor(i / 10));
@@ -1251,7 +1251,7 @@ const GraphExplorer: React.FC = () => {
     };
 
     if (associateNodes.length > 0) {
-      const associatesPerRing = 14;
+      const associatesPerRing = 20;
       associateNodes.forEach((assoc, i) => {
         const ringIndex = Math.floor(i / associatesPerRing);
         const posInRing = i % associatesPerRing;
@@ -1260,7 +1260,7 @@ const GraphExplorer: React.FC = () => {
           associateNodes.length - ringIndex * associatesPerRing
         );
         const angle = (posInRing / ringCount) * Math.PI * 2 + Math.PI / 14; // Offset from suspects
-        const radius = associateBaseRadius + ringIndex * 50;
+        const radius = associateBaseRadius + ringIndex * 120;
 
         nodes.push({
           id: assoc.id,
@@ -1297,18 +1297,18 @@ const GraphExplorer: React.FC = () => {
         if (ownerPos) {
           // Position device slightly offset from owner
           const offsetAngle = (i * Math.PI) / 4 + Math.PI / 8; // Spread devices around owner
-          const offsetRadius = 25;
+          const offsetRadius = 50;
           fx = ownerPos.x + Math.cos(offsetAngle) * offsetRadius;
           fy = ownerPos.y + Math.sin(offsetAngle) * offsetRadius;
         } else {
           // Position in outer ring if no owner found
-          const deviceBaseRadius = associateBaseRadius + associateRings * 50 + 40;
+          const deviceBaseRadius = associateBaseRadius + associateRings * 120 + 80;
           const devicesPerRing = 20;
           const ringIndex = Math.floor(i / devicesPerRing);
           const posInRing = i % devicesPerRing;
           const ringCount = Math.min(devicesPerRing, deviceNodes.length - ringIndex * devicesPerRing);
           const angle = (posInRing / ringCount) * Math.PI * 2;
-          const radius = deviceBaseRadius + ringIndex * 40;
+          const radius = deviceBaseRadius + ringIndex * 80;
           fx = cx + Math.cos(angle) * radius;
           fy = cy + Math.sin(angle) * radius;
         }
@@ -1642,7 +1642,7 @@ const GraphExplorer: React.FC = () => {
           cooldownTicks={0}
           enableNodeDrag={true}
           warmupTicks={0}
-          minZoom={0.3}
+          minZoom={0.1}
           maxZoom={5}
           onNodeHover={(node) => {
             hoveredNodeRef.current = node ? (node as GraphNode).id : null;
