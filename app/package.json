@@ -19,7 +19,7 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "preview": "vite preview",
     "start": "npm install --prefix backend && concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
-    "start:prod": "npm install && npm run build:clean && npm install --prefix backend && NODE_ENV=production node --max-old-space-size=3072 backend/server.js"
+    "start:prod": "npm install --prefix backend && NODE_OPTIONS='--max-old-space-size=1536' NODE_ENV=production node backend/server.js"
   },
   "lint-staged": {
     "*.{ts,tsx,js,jsx}": [

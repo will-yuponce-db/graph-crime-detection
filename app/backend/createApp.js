@@ -698,13 +698,15 @@ function createApp(options = {}) {
 
       // Query with filters at the database level for better performance
       let sql = `
-        SELECT * FROM ${databricks.getTableName('suspect_rankings')}
+        SELECT entity_id, entity_name, alias, case_count, unique_cases, states_count,
+               linked_cases, linked_cities, total_score, rank, properties
+        FROM ${databricks.getTableName('suspect_rankings')}
         WHERE total_score >= ${minScore}
       `;
       if (city) {
         sql += ` AND linked_cities @> '"${escapeSqlLiteral(city)}"'::jsonb`;
       }
-      sql += ` ORDER BY total_score DESC OFFSET ${offset}`;
+      sql += ` ORDER BY total_score DESC LIMIT ${limit + 1} OFFSET ${offset}`;
 
       const rankings = await databricks.runCustomQuery(sql).catch(async () => {
         // Fallback to basic query if advanced query fails
@@ -756,7 +758,9 @@ function createApp(options = {}) {
       const entityId = req.params.id;
       const safeId = escapeSqlLiteral(entityId);
       const rankings = await databricks.runCustomQuery(`
-        SELECT * FROM ${databricks.getTableName('suspect_rankings')}
+        SELECT entity_id, entity_name, alias, case_count, unique_cases, states_count,
+               linked_cases, linked_cities, total_score, rank, properties
+        FROM ${databricks.getTableName('suspect_rankings')}
         WHERE entity_id = '${safeId}'
         LIMIT 1
       `);
@@ -2249,7 +2253,10 @@ function createApp(options = {}) {
 
       const safeCaseId = escapeSqlLiteral(caseId);
       const rows = await databricks.runCustomQuery(`
-        SELECT * FROM ${databricks.getTableName('cases_silver')}
+        SELECT case_id, case_type, city, state, address, status, priority,
+               narrative, estimated_loss, latitude, longitude, h3_cell,
+               incident_start, incident_end
+        FROM ${databricks.getTableName('cases_silver')}
         WHERE case_id = '${safeCaseId}'
         LIMIT 1
       `);
@@ -2284,7 +2291,8 @@ function createApp(options = {}) {
       // First try: the richer case summary table with linked suspects/persons (best story)
       try {
         const summaryRows = await databricks.runCustomQuery(`
-          SELECT *
+          SELECT case_id, total_persons_linked, explicit_suspects, detected_at_scene,
+                 suspect_count, poi_count, witness_count, victim_count, linked_persons
           FROM ${databricks.getTableName('case_summary_with_suspects')}
           WHERE case_id = '${safeCaseId}'
           LIMIT 1
@@ -2354,9 +2362,10 @@ function createApp(options = {}) {
       let overlaps = [];
       try {
         overlaps = await databricks.runCustomQuery(`
-          SELECT *
+          SELECT entity_id, case_id, case_type, city, state, h3_cell, overlap_score
           FROM ${databricks.getTableName('entity_case_overlap')}
           WHERE case_id = '${safeCaseId}'
+          LIMIT 500
         `);
       } catch (err) {
         logger.warn({ type: 'case_detail_overlap', status: 'failed', caseId, error: err.message });
@@ -2397,9 +2406,11 @@ function createApp(options = {}) {
       if (entityIds.length > 0) {
         try {
           const evidenceRows = await databricks.runCustomQuery(`
-            SELECT *
+            SELECT device_id, person_id, display_name, alias, criminal_history,
+                   risk_level, rank, total_score, linked_cases, linked_cities, states_count
             FROM ${databricks.getTableName('evidence_card_data')}
             WHERE entity_id IN (${quotedEntityIds})
+            LIMIT 200
           `);
           (evidenceRows || []).forEach((row) => {
             if (!row?.entity_id) return;
@@ -3041,29 +3052,29 @@ function createApp(options = {}) {
       const [evidenceRows, rankingRows, caseOverlaps] = await Promise.all([
         databricks
           .runCustomQuery(
-            `
-          SELECT * FROM ${databricks.getTableName('evidence_card_data')}
-          WHERE entity_id = '${safeId}'
-          LIMIT 1
-        `
+            `SELECT device_id, person_id, display_name, alias, criminal_history,
+                    risk_level, rank, total_score, linked_cases, linked_cities, states_count
+             FROM ${databricks.getTableName('evidence_card_data')}
+             WHERE entity_id = '${safeId}'
+             LIMIT 1`
           )
           .catch(() => []),
         databricks
           .runCustomQuery(
-            `
-          SELECT * FROM ${databricks.getTableName('suspect_rankings')}
-          WHERE entity_id = '${safeId}'
-          LIMIT 1
-        `
+            `SELECT entity_id, entity_name, alias, case_count, unique_cases, states_count,
+                    linked_cases, linked_cities, total_score, rank, properties
+             FROM ${databricks.getTableName('suspect_rankings')}
+             WHERE entity_id = '${safeId}'
+             LIMIT 1`
           )
           .catch(() => []),
         databricks
           .runCustomQuery(
-            `
-          SELECT * FROM ${databricks.getTableName('entity_case_overlap')}
-          WHERE entity_id = '${safeId}'
-          ORDER BY overlap_score DESC
-        `
+            `SELECT entity_id, case_id, case_type, city, state, h3_cell, overlap_score
+             FROM ${databricks.getTableName('entity_case_overlap')}
+             WHERE entity_id = '${safeId}'
+             ORDER BY overlap_score DESC
+             LIMIT 100`
           )
           .catch(() => []),
       ]);
@@ -3422,19 +3433,22 @@ function createApp(options = {}) {
                     time_diff_minutes, shared_partner_count, handoff_score, rank
              FROM ${databricks.getTableName('handoff_candidates')}
              WHERE handoff_score >= 0.7 AND rank <= 3
-             ORDER BY handoff_score DESC`
+             ORDER BY handoff_score DESC
+             LIMIT 500`
           )
           .catch(() => []),
         databricks
           .runCustomQuery(
             `SELECT device_id, person_id, relationship, confidence, notes
-             FROM ${databricks.getTableName('person_device_links_silver')}`
+             FROM ${databricks.getTableName('person_device_links_silver')}
+             LIMIT 500`
           )
           .catch(() => []),
         databricks
           .runCustomQuery(
             `SELECT person_id, display_name, alias, role, risk_level
-             FROM ${databricks.getTableName('persons_silver')}`
+             FROM ${databricks.getTableName('persons_silver')}
+             LIMIT 500`
           )
           .catch(() => []),
       ]);
@@ -3648,20 +3662,23 @@ function createApp(options = {}) {
         databricks
           .runCustomQuery(
             `SELECT person_id, display_name, alias, role, risk_level, criminal_history, is_suspect
-             FROM ${databricks.getTableName('persons_silver')}`
+             FROM ${databricks.getTableName('persons_silver')}
+             LIMIT 500`
           )
           .catch(() => []),
         databricks
           .runCustomQuery(
             `SELECT DISTINCT entity_id, linked_cases, linked_cities, total_score, rank
              FROM ${databricks.getTableName('suspect_rankings')}
-             ORDER BY total_score DESC`
+             ORDER BY total_score DESC
+             LIMIT 500`
           )
           .catch(() => []),
         databricks
           .runCustomQuery(
             `SELECT device_id, person_id, relationship, confidence, is_current
-             FROM ${databricks.getTableName('person_device_links_silver')}`
+             FROM ${databricks.getTableName('person_device_links_silver')}
+             LIMIT 500`
           )
           .catch(() => []),
       ]);

@@ -57,6 +57,18 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
+// Memory monitor — log heap usage every 15s so we can diagnose OOM
+setInterval(() => {
+  const mem = process.memoryUsage();
+  logger.info({
+    type: 'memory',
+    rss_mb: Math.round(mem.rss / 1048576),
+    heap_used_mb: Math.round(mem.heapUsed / 1048576),
+    heap_total_mb: Math.round(mem.heapTotal / 1048576),
+    external_mb: Math.round(mem.external / 1048576),
+  });
+}, 15000).unref();
+
 // Start server only after Postgres is ready (or timeout)
 (async () => {
   const { ok, tableCount = 0 } = await waitForDatabase();

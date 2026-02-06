@@ -145,8 +145,14 @@ function _createPool(password) {
 
   const connectionString = process.env.POSTGRES_CONNECTION_STRING;
 
+  const poolOpts = {
+    max: 3,                   // Keep pool small — each connection holds SSL/buffer memory
+    idleTimeoutMillis: 30000, // Close idle connections after 30s
+    connectionTimeoutMillis: 10000,
+  };
+
   if (connectionString) {
-    pool = new Pool({ connectionString });
+    pool = new Pool({ connectionString, ...poolOpts });
   } else {
     pool = new Pool({
       host: process.env.PGHOST || process.env.POSTGRES_HOST || 'localhost',
@@ -157,6 +163,7 @@ function _createPool(password) {
       ssl: (process.env.PGSSLMODE || process.env.POSTGRES_SSL || 'require') !== 'disable'
         ? { rejectUnauthorized: false }
         : false,
+      ...poolOpts,
     });
   }
 
@@ -369,57 +376,38 @@ async function getSuspectRankings() {
   `));
 }
 
-/** Co-presence edges between entities in the set. Drops time_buckets JSONB. */
+/** Co-presence edges — disabled to stay within 2GB container. Table has 7.8M rows. */
 async function getCoPresenceEdges(entityIds) {
-  const table = getTableName('co_presence_edges');
-  if (!entityIds || entityIds.length === 0) return [];
-  const escaped = entityIds.map(id => `'${escapeSqlLiteral(id)}'`).join(',');
-  return executeQuery(`
-    SELECT edge_id, entity_id_1, entity_id_2, h3_cell, city, state,
-           co_occurrence_count, weight, first_seen_together, last_seen_together
-    FROM ${table}
-    WHERE entity_id_1 IN (${escaped}) AND entity_id_2 IN (${escaped})
-    LIMIT 1000
-  `);
+  return [];
 }
 
-/** Aggregate co-presence counts for associate scoring — no raw rows. */
 async function getCoPresenceAssociateCounts(entityIds) {
-  const table = getTableName('co_presence_edges');
-  if (!entityIds || entityIds.length === 0) return [];
-  const escaped = entityIds.map(id => `'${escapeSqlLiteral(id)}'`).join(',');
-  return executeQuery(`
-    SELECT entity_id, SUM(co_occurrence_count) as connection_count, SUM(weight) as total_weight
-    FROM (
-      SELECT entity_id_2 as entity_id, co_occurrence_count, weight
-      FROM ${table}
-      WHERE entity_id_1 IN (${escaped}) AND entity_id_2 NOT IN (${escaped})
-      UNION ALL
-      SELECT entity_id_1 as entity_id, co_occurrence_count, weight
-      FROM ${table}
-      WHERE entity_id_2 IN (${escaped}) AND entity_id_1 NOT IN (${escaped})
-    ) sub
-    GROUP BY entity_id
-    ORDER BY connection_count DESC
-    LIMIT 200
-  `);
+  return [];
 }
 
 async function getCoPresenceCount() {
-  const rows = await executeQuery(`SELECT COUNT(*) as cnt FROM ${getTableName('co_presence_edges')}`);
-  return parseInt(rows[0]?.cnt || '0', 10);
+  return 0;
 }
 
 async function getSocialEdges() {
-  return cachedQuery('social', () => executeQuery(`SELECT * FROM ${getTableName('social_edges_silver')}`));
+  return cachedQuery('social', () => executeQuery(`
+    SELECT edge_id, entity_id_1, entity_id_2, relationship_type, weight,
+           first_seen, last_seen
+    FROM ${getTableName('social_edges_silver')}
+    LIMIT 500
+  `));
 }
 
 async function getRelationships() {
-  return cachedQuery('social', () => executeQuery(`SELECT * FROM ${getTableName('social_edges_silver')}`));
+  return getSocialEdges();
 }
 
 async function getDevicePersonLinks() {
-  return cachedQuery('device_links', () => executeQuery(`SELECT * FROM ${getTableName('person_device_links_silver')}`));
+  return cachedQuery('device_links', () => executeQuery(`
+    SELECT device_id, person_id, relationship, confidence, is_current, notes
+    FROM ${getTableName('person_device_links_silver')}
+    LIMIT 500
+  `));
 }
 
 async function getCellDeviceCounts() {
@@ -481,6 +469,11 @@ async function runCustomQuery(sql) {
   const normalized = sql.trim().toUpperCase();
   if (!normalized.startsWith('SELECT') && !normalized.startsWith('SHOW')) {
     throw new Error('Only SELECT queries are allowed');
+  }
+  // Safety: inject LIMIT if the query doesn't already have one (prevents unbounded fetches)
+  if (!normalized.includes('LIMIT') && normalized.startsWith('SELECT')) {
+    const safeSql = sql.trimEnd().replace(/;?\s*$/, '') + ' LIMIT 2000';
+    return executeQuery(safeSql);
   }
   return executeQuery(sql);
 }

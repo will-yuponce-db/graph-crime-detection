@@ -5,9 +5,9 @@ command:
   - "bash"
   - "-c"
   - |
-    # Install deps + build frontend + start backend with constrained heap
-    npm install && npm run build:clean && npm install --prefix backend
-    exec node --max-old-space-size=1536 backend/server.js
+    # Platform already builds frontend (vite build). Only install backend deps + start.
+    npm install --prefix backend
+    exec env NODE_OPTIONS='--max-old-space-size=1536' node backend/server.js
 
 env:
   # Server configuration
