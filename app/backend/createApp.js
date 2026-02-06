@@ -3129,11 +3129,11 @@ function createApp(options = {}) {
     }
   });
 
-  // ============== DATABRICKS DIRECT ENDPOINTS ==============
+  // ============== DATABASE DIRECT ENDPOINTS ==============
   app.get('/api/databricks/tables', async (req, res) => {
     try {
       const tables = await databricks.listTables();
-      res.json({ success: true, catalog: databricks.CATALOG, schema: databricks.SCHEMA, tables });
+      res.json({ success: true, schema: databricks.SCHEMA, tables });
     } catch (error) {
       res.status(500).json({ success: false, error: error.message });
     }
@@ -3782,44 +3782,42 @@ function createApp(options = {}) {
   });
 
   // ============== HEALTH CHECK ==============
-  const DATABRICKS_CONFIG = {
+  const APP_CONFIG = {
     appName: process.env.DATABRICKS_APP_NAME,
     appUrl: process.env.DATABRICKS_APP_URL,
     host: process.env.DATABRICKS_HOST,
     workspaceId: process.env.DATABRICKS_WORKSPACE_ID,
-    clientId: process.env.DATABRICKS_CLIENT_ID,
   };
-  const isDatabricksApp = !!DATABRICKS_CONFIG.appName;
+  const isDatabricksApp = !!APP_CONFIG.appName;
 
   app.get('/health', async (req, res) => {
-    let databricksStatus = 'disconnected';
+    let dbStatus = 'disconnected';
     let tableCount = 0;
     try {
       const tables = await databricks.listTables();
-      databricksStatus = 'connected';
+      dbStatus = 'connected';
       tableCount = tables.length;
     } catch (error) {
-      databricksStatus = `error: ${error.message}`;
+      dbStatus = `error: ${error.message}`;
     }
 
     const response = {
-      status: databricksStatus === 'connected' ? 'ok' : 'degraded',
+      status: dbStatus === 'connected' ? 'ok' : 'degraded',
       environment: process.env.NODE_ENV || 'development',
       timestamp: nowIso(),
       database: {
-        type: 'Databricks',
-        catalog: databricks.CATALOG,
+        type: 'Lakebase Postgres',
         schema: databricks.SCHEMA,
-        status: databricksStatus,
+        status: dbStatus,
         tableCount,
       },
     };
     if (isDatabricksApp) {
-      response.databricks = {
-        appName: DATABRICKS_CONFIG.appName,
-        appUrl: DATABRICKS_CONFIG.appUrl,
-        host: DATABRICKS_CONFIG.host,
-        workspaceId: DATABRICKS_CONFIG.workspaceId,
+      response.app = {
+        appName: APP_CONFIG.appName,
+        appUrl: APP_CONFIG.appUrl,
+        host: APP_CONFIG.host,
+        workspaceId: APP_CONFIG.workspaceId,
       };
     }
     res.json(response);

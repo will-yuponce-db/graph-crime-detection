@@ -2,26 +2,25 @@
  * Backend entrypoint.
  *
  * - Wires up the Express app (routes live in `createApp`)
- * - Waits for Databricks connection before accepting requests
+ * - Waits for Postgres (Lakebase) connection before accepting requests
  * - Starts listening only after init completes (or timeout)
  */
 
 require('dotenv').config();
 
 const logger = require('./utils/logger');
-const databricks = require('./db/databricks');
+const db = require('./db/postgres');
 const { createApp } = require('./createApp');
 
-// Databricks Apps environment configuration
-const DATABRICKS_CONFIG = {
+// Databricks Apps environment configuration (for app identity, not SQL)
+const APP_CONFIG = {
   appName: process.env.DATABRICKS_APP_NAME,
   appUrl: process.env.DATABRICKS_APP_URL,
   host: process.env.DATABRICKS_HOST,
   workspaceId: process.env.DATABRICKS_WORKSPACE_ID,
-  clientId: process.env.DATABRICKS_CLIENT_ID,
 };
 
-const isDatabricksApp = !!DATABRICKS_CONFIG.appName;
+const isDatabricksApp = !!APP_CONFIG.appName;
 
 // Port: Databricks sets DATABRICKS_APP_PORT and PORT (both 8000)
 const PORT = parseInt(process.env.DATABRICKS_APP_PORT || process.env.PORT || '8000', 10);
@@ -29,39 +28,39 @@ const PORT = parseInt(process.env.DATABRICKS_APP_PORT || process.env.PORT || '80
 // Host: Databricks requires 0.0.0.0, local dev can use localhost
 const HOST = isDatabricksApp ? '0.0.0.0' : process.env.HOST || '0.0.0.0';
 
-// Wait for Databricks before accepting requests (avoids first-load race)
-const INIT_TIMEOUT_MS = parseInt(process.env.DATABRICKS_INIT_TIMEOUT_MS || '15000', 10);
+// Wait for Postgres before accepting requests (avoids first-load race)
+const INIT_TIMEOUT_MS = parseInt(process.env.DB_INIT_TIMEOUT_MS || process.env.DATABRICKS_INIT_TIMEOUT_MS || '15000', 10);
 
-async function waitForDatabricks() {
+async function waitForDatabase() {
   const deadline = Date.now() + INIT_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {
-      await databricks.initDatabricks();
-      const tables = await databricks.listTables();
+      await db.initDatabricks();
+      const tables = await db.listTables();
       return { ok: true, tableCount: tables?.length ?? 0 };
     } catch (err) {
-      logger.warn({ type: 'databricks_init', status: 'retrying', error: err.message });
+      logger.warn({ type: 'db_init', status: 'retrying', error: err.message });
       await new Promise((r) => setTimeout(r, 2000));
     }
   }
-  logger.warn({ type: 'databricks_init', status: 'timeout', timeoutMs: INIT_TIMEOUT_MS });
+  logger.warn({ type: 'db_init', status: 'timeout', timeoutMs: INIT_TIMEOUT_MS });
   return { ok: false, tableCount: 0 };
 }
 
-const { app, warmCache } = createApp({ logger, databricks });
+const { app, warmCache } = createApp({ logger, databricks: db });
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
   logger.info({ type: 'server_shutdown', signal: 'SIGINT' });
-  await databricks.closeDatabricks();
+  await db.closeDatabricks();
   process.exit(0);
 });
 
-// Start server only after Databricks is ready (or timeout)
+// Start server only after Postgres is ready (or timeout)
 (async () => {
-  const { ok, tableCount = 0 } = await waitForDatabricks();
+  const { ok, tableCount = 0 } = await waitForDatabase();
   if (ok) {
-    logger.info({ type: 'databricks_init', status: 'connected', tableCount });
+    logger.info({ type: 'db_init', status: 'connected', tableCount });
   }
 
   app.listen(PORT, HOST, () => {
@@ -71,19 +70,18 @@ process.on('SIGINT', async () => {
       port: PORT,
       localUrl: `http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}`,
       database: {
-        type: 'Databricks',
-        catalog: databricks.CATALOG,
-        schema: databricks.SCHEMA,
+        type: 'Lakebase Postgres',
+        schema: db.SCHEMA,
         tableCount,
       },
     };
 
     if (isDatabricksApp) {
-      serverInfo.databricks = {
-        appName: DATABRICKS_CONFIG.appName,
-        appUrl: DATABRICKS_CONFIG.appUrl,
-        host: DATABRICKS_CONFIG.host,
-        workspaceId: DATABRICKS_CONFIG.workspaceId,
+      serverInfo.app = {
+        appName: APP_CONFIG.appName,
+        appUrl: APP_CONFIG.appUrl,
+        host: APP_CONFIG.host,
+        workspaceId: APP_CONFIG.workspaceId,
       };
     }
 
@@ -95,4 +93,3 @@ process.on('SIGINT', async () => {
     }
   });
 })();
-

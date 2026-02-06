@@ -42,21 +42,17 @@ workspace:
 # Shared resource definitions
 resources:
   # Lakebase Postgres infrastructure
-  # NOTE: Uncomment these if your workspace has available database instance quota.
-  # If the workspace already has a Lakebase instance, reuse it by setting the
-  # lakebase_instance_name variable to match the existing instance name.
-  #
-  # database_instances:
-  #   lakebase_instance:
-  #     name: ${var.lakebase_instance_name}
-  #     capacity: CU_1
-  #
-  # database_catalogs:
-  #   lakebase_catalog:
-  #     database_instance_name: ${resources.database_instances.lakebase_instance.name}
-  #     name: ${var.lakebase_catalog}
-  #     database_name: ${var.lakebase_database}
-  #     create_database_if_not_exists: true
+  database_instances:
+    lakebase_instance:
+      name: ${var.lakebase_instance_name}
+      capacity: CU_1
+
+  database_catalogs:
+    lakebase_catalog:
+      database_instance_name: ${resources.database_instances.lakebase_instance.name}
+      name: ${var.lakebase_catalog}
+      database_name: ${var.lakebase_database}
+      create_database_if_not_exists: true
 
   pipelines:
     investigative_analytics_pipeline:
