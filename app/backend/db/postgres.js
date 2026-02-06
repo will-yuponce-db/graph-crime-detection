@@ -324,52 +324,52 @@ function getTableName(table) {
 
 // ============== Query Functions ==============
 
-async function getCases(limit = 10000) {
-  return executeQuery(`SELECT * FROM ${getTableName('cases_silver')} LIMIT ${limit}`);
+async function getCases() {
+  return executeQuery(`SELECT * FROM ${getTableName('cases_silver')}`);
 }
 
-async function getSuspectRankings(limit = 10000) {
-  return executeQuery(`SELECT * FROM ${getTableName('suspect_rankings')} ORDER BY total_score DESC LIMIT ${limit}`);
+async function getSuspectRankings() {
+  return executeQuery(`SELECT * FROM ${getTableName('suspect_rankings')} ORDER BY total_score DESC`);
 }
 
-async function getCoPresenceEdges(limit = 15000) {
-  return executeQuery(`SELECT * FROM ${getTableName('co_presence_edges')} LIMIT ${limit}`);
+async function getCoPresenceEdges() {
+  return executeQuery(`SELECT * FROM ${getTableName('co_presence_edges')}`);
 }
 
-async function getSocialEdges(limit = 15000) {
-  return executeQuery(`SELECT * FROM ${getTableName('social_edges_silver')} LIMIT ${limit}`);
+async function getSocialEdges() {
+  return executeQuery(`SELECT * FROM ${getTableName('social_edges_silver')}`);
 }
 
-async function getRelationships(limit = 50000) {
-  return executeQuery(`SELECT * FROM ${getTableName('social_edges_silver')} LIMIT ${limit}`);
+async function getRelationships() {
+  return executeQuery(`SELECT * FROM ${getTableName('social_edges_silver')}`);
 }
 
-async function getDevicePersonLinks(limit = 1000) {
-  return executeQuery(`SELECT * FROM ${getTableName('person_device_links_silver')} LIMIT ${limit}`);
+async function getDevicePersonLinks() {
+  return executeQuery(`SELECT * FROM ${getTableName('person_device_links_silver')}`);
 }
 
-async function getCellDeviceCounts(limit = 5000) {
-  return executeQuery(`SELECT * FROM ${getTableName('cell_device_counts')} LIMIT ${limit}`);
+async function getCellDeviceCounts() {
+  return executeQuery(`SELECT * FROM ${getTableName('cell_device_counts')}`);
 }
 
-async function getHotspotsForHour(hour, limit = 5000) {
-  return executeQuery(`SELECT * FROM ${getTableName('cell_device_counts')} LIMIT ${limit}`);
+async function getHotspotsForHour(hour) {
+  return executeQuery(`SELECT * FROM ${getTableName('cell_device_counts')}`);
 }
 
-async function getLocationEvents(limit = 10000) {
-  return executeQuery(`SELECT * FROM ${getTableName('location_events_silver')} LIMIT ${limit}`);
+async function getLocationEvents() {
+  return executeQuery(`SELECT * FROM ${getTableName('location_events_silver')}`);
 }
 
-async function getEvidenceCardData(limit = 5000) {
-  return executeQuery(`SELECT * FROM ${getTableName('evidence_card_data')} LIMIT ${limit}`);
+async function getEvidenceCardData() {
+  return executeQuery(`SELECT * FROM ${getTableName('evidence_card_data')}`);
 }
 
-async function getEntityCaseOverlap(limit = 10000) {
-  return executeQuery(`SELECT * FROM ${getTableName('entity_case_overlap')} LIMIT ${limit}`);
+async function getEntityCaseOverlap() {
+  return executeQuery(`SELECT * FROM ${getTableName('entity_case_overlap')}`);
 }
 
-async function getHandoffCandidates(limit = 2000) {
-  return executeQuery(`SELECT * FROM ${getTableName('handoff_candidates')} LIMIT ${limit}`);
+async function getHandoffCandidates() {
+  return executeQuery(`SELECT * FROM ${getTableName('handoff_candidates')}`);
 }
 
 async function runCustomQuery(sql) {
@@ -482,14 +482,13 @@ async function getEntityWithProperties(tableName, entityIdColumn, entityId) {
 
 // ============== Metadata ==============
 
-async function getUniqueLocations(limit = 50) {
+async function getUniqueLocations() {
   return executeQuery(`
     SELECT DISTINCT h3_cell, city, state,
            AVG(latitude) as latitude, AVG(longitude) as longitude
     FROM ${getTableName('location_events_silver')}
     WHERE latitude IS NOT NULL AND longitude IS NOT NULL
     GROUP BY h3_cell, city, state
-    LIMIT ${limit}
   `);
 }
 

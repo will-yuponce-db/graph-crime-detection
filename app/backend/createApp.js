@@ -633,7 +633,6 @@ function createApp(options = {}) {
           WHERE latitude IS NOT NULL
           GROUP BY h3_cell, city, state
           ORDER BY event_count DESC
-          LIMIT 500
         `),
       ]);
 
@@ -704,7 +703,7 @@ function createApp(options = {}) {
       if (city) {
         sql += ` AND linked_cities @> '"${escapeSqlLiteral(city)}"'::jsonb`;
       }
-      sql += ` ORDER BY total_score DESC LIMIT ${limit + 1} OFFSET ${offset}`;
+      sql += ` ORDER BY total_score DESC OFFSET ${offset}`;
 
       const rankings = await databricks.runCustomQuery(sql).catch(async () => {
         // Fallback to basic query if advanced query fails
@@ -2003,7 +2002,6 @@ function createApp(options = {}) {
         WHERE entity_id IN (${safeIds})
           AND latitude IS NOT NULL
           AND longitude IS NOT NULL
-        LIMIT ${limit}
       `;
 
       const rows = await databricks.runCustomQuery(sql);
@@ -3040,7 +3038,6 @@ function createApp(options = {}) {
           SELECT * FROM ${databricks.getTableName('entity_case_overlap')}
           WHERE entity_id = '${safeId}'
           ORDER BY overlap_score DESC
-          LIMIT 20
         `
           )
           .catch(() => []),
@@ -3400,8 +3397,7 @@ function createApp(options = {}) {
                     time_diff_minutes, shared_partner_count, handoff_score, rank
              FROM ${databricks.getTableName('handoff_candidates')}
              WHERE handoff_score >= 0.7 AND rank <= 3
-             ORDER BY handoff_score DESC
-             LIMIT 100`
+             ORDER BY handoff_score DESC`
           )
           .catch(() => []),
         databricks
@@ -3634,8 +3630,7 @@ function createApp(options = {}) {
           .runCustomQuery(
             `SELECT DISTINCT entity_id, linked_cases, linked_cities, total_score, rank
              FROM ${databricks.getTableName('suspect_rankings')}
-             ORDER BY total_score DESC
-             LIMIT 500`
+             ORDER BY total_score DESC`
           )
           .catch(() => []),
         databricks
