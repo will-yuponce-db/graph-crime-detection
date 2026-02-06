@@ -797,10 +797,11 @@ function createApp(options = {}) {
       const cached = cache.get(cacheKey);
       if (cached) return res.json({ success: true, ...cached, fromCache: true });
 
-      // Step 1: Get rankings + social edges to pick story-relevant entities
-      const [rankings, socialEdges] = await Promise.all([
+      // Step 1: Get rankings + edges to pick story-relevant entities
+      const [rankings, socialEdges, coPresenceAssocs] = await Promise.all([
         databricks.getSuspectRankings().catch(() => []),
         databricks.getSocialEdges().catch(() => []),
+        // We'll fill this after we know suspectIds — see below
       ]);
 
       const rankingMap = new Map((rankings || []).map((r) => [r.entity_id, r]));
@@ -811,10 +812,7 @@ function createApp(options = {}) {
         .sort((a, b) => b.total_score - a.total_score);
       const suspectIds = new Set(topSuspects.map((r) => r.entity_id));
 
-      // Fetch co-presence scoped to suspects only
-      const coPresenceEdges = await databricks.getCoPresenceEdges(Array.from(suspectIds)).catch(() => []);
-
-      // Score associates by how connected they are to our suspects
+      // Score associates: social edges (in-memory, small table) + co-presence (SQL aggregation)
       const associateEdgeCount = new Map();
       for (const edge of (socialEdges || [])) {
         const id1 = edge.entity_id_1;
@@ -826,15 +824,12 @@ function createApp(options = {}) {
           associateEdgeCount.set(id1, (associateEdgeCount.get(id1) || 0) + 1);
         }
       }
-      for (const edge of (coPresenceEdges || [])) {
-        const id1 = edge.entity_id_1;
-        const id2 = edge.entity_id_2;
-        if (suspectIds.has(id1) && !suspectIds.has(id2)) {
-          associateEdgeCount.set(id2, (associateEdgeCount.get(id2) || 0) + (edge.co_occurrence_count || 1));
-        }
-        if (suspectIds.has(id2) && !suspectIds.has(id1)) {
-          associateEdgeCount.set(id1, (associateEdgeCount.get(id1) || 0) + (edge.co_occurrence_count || 1));
-        }
+
+      // Co-presence associate counts — aggregated in SQL, returns top 200
+      const cpAssocs = await databricks.getCoPresenceAssociateCounts(Array.from(suspectIds)).catch(() => []);
+      for (const row of (cpAssocs || [])) {
+        associateEdgeCount.set(row.entity_id,
+          (associateEdgeCount.get(row.entity_id) || 0) + parseInt(row.connection_count || 0, 10));
       }
 
       // All associates by connection count
@@ -1006,9 +1001,7 @@ function createApp(options = {}) {
         .sort((a, b) => b.total_score - a.total_score);
       const suspectIds = new Set(topSuspects.map((r) => r.entity_id));
 
-      // Fetch co-presence scoped to suspects only
-      const coPresenceEdges = await databricks.getCoPresenceEdges(Array.from(suspectIds)).catch(() => []);
-
+      // Score associates via social edges + co-presence SQL aggregation
       const assocCount = new Map();
       for (const edge of (socialEdges || [])) {
         if (suspectIds.has(edge.entity_id_1) && !suspectIds.has(edge.entity_id_2))
@@ -1016,11 +1009,9 @@ function createApp(options = {}) {
         if (suspectIds.has(edge.entity_id_2) && !suspectIds.has(edge.entity_id_1))
           assocCount.set(edge.entity_id_1, (assocCount.get(edge.entity_id_1) || 0) + 1);
       }
-      for (const edge of (coPresenceEdges || [])) {
-        if (suspectIds.has(edge.entity_id_1) && !suspectIds.has(edge.entity_id_2))
-          assocCount.set(edge.entity_id_2, (assocCount.get(edge.entity_id_2) || 0) + (edge.co_occurrence_count || 1));
-        if (suspectIds.has(edge.entity_id_2) && !suspectIds.has(edge.entity_id_1))
-          assocCount.set(edge.entity_id_1, (assocCount.get(edge.entity_id_1) || 0) + (edge.co_occurrence_count || 1));
+      const cpAssocs = await databricks.getCoPresenceAssociateCounts(Array.from(suspectIds)).catch(() => []);
+      for (const row of (cpAssocs || [])) {
+        assocCount.set(row.entity_id, (assocCount.get(row.entity_id) || 0) + parseInt(row.connection_count || 0, 10));
       }
       const topAssocIds = Array.from(assocCount.entries())
         .sort((a, b) => b[1] - a[1]).map(([id]) => id);
@@ -1766,7 +1757,7 @@ function createApp(options = {}) {
       // Fetch rankings first so we can scope co-presence to relevant entities
       const [rankings, socialEdges, devicePersonLinks] = await Promise.all([
         databricks.getSuspectRankings(),
-        databricks.getSocialEdges(limit),
+        databricks.getSocialEdges(),
         databricks.getDevicePersonLinks(),
       ]);
 

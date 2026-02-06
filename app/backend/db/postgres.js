@@ -332,16 +332,43 @@ async function getSuspectRankings() {
   return executeQuery(`SELECT * FROM ${getTableName('suspect_rankings')} ORDER BY total_score DESC`);
 }
 
+/**
+ * Get co-presence edges where BOTH entities are in the given set.
+ * Perfect for graph visualization — only shows mutual connections.
+ */
 async function getCoPresenceEdges(entityIds) {
   const table = getTableName('co_presence_edges');
-  if (entityIds && entityIds.length > 0) {
-    const escaped = entityIds.map(id => `'${escapeSqlLiteral(id)}'`).join(',');
-    return executeQuery(
-      `SELECT * FROM ${table} WHERE entity_id_1 IN (${escaped}) OR entity_id_2 IN (${escaped})`
-    );
-  }
-  // Fallback: count-only or limited — never fetch 7M+ rows unfiltered
-  return executeQuery(`SELECT * FROM ${table} LIMIT 50000`);
+  if (!entityIds || entityIds.length === 0) return [];
+  const escaped = entityIds.map(id => `'${escapeSqlLiteral(id)}'`).join(',');
+  return executeQuery(
+    `SELECT * FROM ${table} WHERE entity_id_1 IN (${escaped}) AND entity_id_2 IN (${escaped}) LIMIT 5000`
+  );
+}
+
+/**
+ * Count co-presence connections per entity for associate scoring.
+ * Aggregates in SQL so we never pull millions of raw rows.
+ * Returns [{entity_id, connection_count, total_weight}].
+ */
+async function getCoPresenceAssociateCounts(entityIds) {
+  const table = getTableName('co_presence_edges');
+  if (!entityIds || entityIds.length === 0) return [];
+  const escaped = entityIds.map(id => `'${escapeSqlLiteral(id)}'`).join(',');
+  return executeQuery(`
+    SELECT entity_id, SUM(co_occurrence_count) as connection_count, SUM(weight) as total_weight
+    FROM (
+      SELECT entity_id_2 as entity_id, co_occurrence_count, weight
+      FROM ${table}
+      WHERE entity_id_1 IN (${escaped}) AND entity_id_2 NOT IN (${escaped})
+      UNION ALL
+      SELECT entity_id_1 as entity_id, co_occurrence_count, weight
+      FROM ${table}
+      WHERE entity_id_2 IN (${escaped}) AND entity_id_1 NOT IN (${escaped})
+    ) sub
+    GROUP BY entity_id
+    ORDER BY connection_count DESC
+    LIMIT 200
+  `);
 }
 
 async function getCoPresenceCount() {
@@ -362,15 +389,15 @@ async function getDevicePersonLinks() {
 }
 
 async function getCellDeviceCounts() {
-  return executeQuery(`SELECT * FROM ${getTableName('cell_device_counts')}`);
+  return executeQuery(`SELECT * FROM ${getTableName('cell_device_counts')} LIMIT 10000`);
 }
 
 async function getHotspotsForHour(hour) {
-  return executeQuery(`SELECT * FROM ${getTableName('cell_device_counts')}`);
+  return executeQuery(`SELECT * FROM ${getTableName('cell_device_counts')} LIMIT 10000`);
 }
 
 async function getLocationEvents() {
-  return executeQuery(`SELECT * FROM ${getTableName('location_events_silver')}`);
+  return executeQuery(`SELECT * FROM ${getTableName('location_events_silver')} LIMIT 50000`);
 }
 
 async function getEvidenceCardData() {
@@ -378,11 +405,11 @@ async function getEvidenceCardData() {
 }
 
 async function getEntityCaseOverlap() {
-  return executeQuery(`SELECT * FROM ${getTableName('entity_case_overlap')}`);
+  return executeQuery(`SELECT * FROM ${getTableName('entity_case_overlap')} LIMIT 5000`);
 }
 
 async function getHandoffCandidates() {
-  return executeQuery(`SELECT * FROM ${getTableName('handoff_candidates')}`);
+  return executeQuery(`SELECT * FROM ${getTableName('handoff_candidates')} LIMIT 5000`);
 }
 
 async function runCustomQuery(sql) {
@@ -539,6 +566,7 @@ module.exports = {
   getCases,
   getSuspectRankings,
   getCoPresenceEdges,
+  getCoPresenceAssociateCounts,
   getCoPresenceCount,
   getSocialEdges,
   getRelationships,
