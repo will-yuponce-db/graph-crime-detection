@@ -106,9 +106,10 @@ async function _getOAuthToken() {
 }
 
 /**
- * Generate a short-lived Lakebase database credential (PG password).
- * POST /api/2.0/database/generate-database-credential
- * Tokens are cached and refreshed 5 minutes before expiry.
+ * Get a Lakebase-compatible PG password.
+ * Uses the OAuth access token directly — Lakebase accepts Databricks
+ * OAuth tokens for PostgreSQL authentication.
+ * Tokens are cached and refreshed 5 minutes before expiry (~1h lifetime).
  */
 async function _generateDatabaseCredential() {
   // Return cached credential if still valid (with 5-min buffer)
@@ -116,43 +117,22 @@ async function _generateDatabaseCredential() {
     return _dbCredential.token;
   }
 
-  const host = (process.env.DATABRICKS_HOST || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
-  if (!host) return null;
-
   const oauthToken = await _getOAuthToken();
   if (!oauthToken) return null;
 
-  const apiUrl = `https://${host}/api/2.0/database/generate-database-credential`;
-  const reqBody = JSON.stringify({});
-  const resp = await _httpsRequest(apiUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${oauthToken}`,
-      'Content-Type': 'application/json',
-      'Content-Length': Buffer.byteLength(reqBody),
-    },
-    body: reqBody,
-  });
-
-  if (resp.statusCode < 200 || resp.statusCode >= 300) {
-    throw new Error(`generate-database-credential failed (${resp.statusCode}): ${resp.body}`);
-  }
-
-  const data = JSON.parse(resp.body);
-  const token = data.token || data.credential || data.password;
-  const expirationTime = data.expiration_time;
-
+  // OAuth access tokens work directly as PG passwords for Lakebase
   _dbCredential = {
-    token,
-    expiresAt: expirationTime ? new Date(expirationTime).getTime() : Date.now() + 55 * 60 * 1000,
+    token: oauthToken,
+    expiresAt: Date.now() + 55 * 60 * 1000, // OAuth tokens ~1h, refresh at 55m
   };
 
   logger.info({
     type: 'postgres_credential',
     status: 'generated',
-    expiresIn: `${Math.round((_dbCredential.expiresAt - Date.now()) / 60000)}m`,
+    method: 'oauth_token',
+    expiresIn: '55m',
   });
-  return token;
+  return oauthToken;
 }
 
 // ============== Pool Management ==============
