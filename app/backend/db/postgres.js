@@ -323,33 +323,46 @@ function getTableName(table) {
 }
 
 // ============== Query Functions ==============
+// IMPORTANT: Never SELECT * — always pick only needed columns.
+// Tables like co_presence_edges have huge JSONB arrays (time_buckets)
+// that blow up memory if fetched.
 
 async function getCases() {
-  return executeQuery(`SELECT * FROM ${getTableName('cases_silver')}`);
+  return executeQuery(`
+    SELECT case_id, case_type, city, state, address, status, priority,
+           narrative, estimated_loss, latitude, longitude, h3_cell,
+           incident_start, incident_end
+    FROM ${getTableName('cases_silver')}
+  `);
 }
 
 async function getSuspectRankings() {
-  return executeQuery(`SELECT * FROM ${getTableName('suspect_rankings')} ORDER BY total_score DESC`);
+  return executeQuery(`
+    SELECT entity_id, case_count, unique_cases, states_count,
+           linked_cases, linked_cities,
+           total_copresence_weight, total_social_weight,
+           recurrence_score, cross_jurisdiction_score, network_score,
+           total_score, rank
+    FROM ${getTableName('suspect_rankings')}
+    ORDER BY total_score DESC
+  `);
 }
 
-/**
- * Get co-presence edges where BOTH entities are in the given set.
- * Perfect for graph visualization — only shows mutual connections.
- */
+/** Co-presence edges between entities in the set. Drops time_buckets JSONB. */
 async function getCoPresenceEdges(entityIds) {
   const table = getTableName('co_presence_edges');
   if (!entityIds || entityIds.length === 0) return [];
   const escaped = entityIds.map(id => `'${escapeSqlLiteral(id)}'`).join(',');
-  return executeQuery(
-    `SELECT * FROM ${table} WHERE entity_id_1 IN (${escaped}) AND entity_id_2 IN (${escaped}) LIMIT 1000`
-  );
+  return executeQuery(`
+    SELECT edge_id, entity_id_1, entity_id_2, h3_cell, city, state,
+           co_occurrence_count, weight, first_seen_together, last_seen_together
+    FROM ${table}
+    WHERE entity_id_1 IN (${escaped}) AND entity_id_2 IN (${escaped})
+    LIMIT 1000
+  `);
 }
 
-/**
- * Count co-presence connections per entity for associate scoring.
- * Aggregates in SQL so we never pull millions of raw rows.
- * Returns [{entity_id, connection_count, total_weight}].
- */
+/** Aggregate co-presence counts for associate scoring — no raw rows. */
 async function getCoPresenceAssociateCounts(entityIds) {
   const table = getTableName('co_presence_edges');
   if (!entityIds || entityIds.length === 0) return [];
@@ -377,6 +390,7 @@ async function getCoPresenceCount() {
 }
 
 async function getSocialEdges() {
+  // Only 6 rows — safe to fetch all columns
   return executeQuery(`SELECT * FROM ${getTableName('social_edges_silver')}`);
 }
 
@@ -385,31 +399,65 @@ async function getRelationships() {
 }
 
 async function getDevicePersonLinks() {
+  // Only 9 rows — safe to fetch all columns
   return executeQuery(`SELECT * FROM ${getTableName('person_device_links_silver')}`);
 }
 
 async function getCellDeviceCounts() {
-  return executeQuery(`SELECT * FROM ${getTableName('cell_device_counts')} LIMIT 2000`);
+  // Drop entity_ids JSONB array — huge per row
+  return executeQuery(`
+    SELECT h3_cell, time_bucket, city, state, device_count,
+           center_lat, center_lon, is_high_activity, activity_category
+    FROM ${getTableName('cell_device_counts')}
+    LIMIT 2000
+  `);
 }
 
 async function getHotspotsForHour(hour) {
-  return executeQuery(`SELECT * FROM ${getTableName('cell_device_counts')} LIMIT 2000`);
+  return executeQuery(`
+    SELECT h3_cell, time_bucket, city, state, device_count,
+           center_lat, center_lon, is_high_activity, activity_category
+    FROM ${getTableName('cell_device_counts')}
+    LIMIT 2000
+  `);
 }
 
 async function getLocationEvents() {
-  return executeQuery(`SELECT * FROM ${getTableName('location_events_silver')} LIMIT 5000`);
+  // Select only columns used by endpoints — skip source_system, ingestion_timestamp, etc.
+  return executeQuery(`
+    SELECT entity_id, latitude, longitude, h3_cell, city, state, bucket_hour
+    FROM ${getTableName('location_events_silver')}
+    WHERE latitude IS NOT NULL
+    LIMIT 5000
+  `);
 }
 
 async function getEvidenceCardData() {
-  return executeQuery(`SELECT * FROM ${getTableName('evidence_card_data')}`);
+  // Drop geo_evidence JSONB — can be large
+  return executeQuery(`
+    SELECT device_id, person_id, display_name, alias, criminal_history,
+           risk_level, rank, total_score, linked_cases, linked_cities, states_count
+    FROM ${getTableName('evidence_card_data')}
+  `);
 }
 
 async function getEntityCaseOverlap() {
-  return executeQuery(`SELECT * FROM ${getTableName('entity_case_overlap')} LIMIT 5000`);
+  return executeQuery(`
+    SELECT entity_id, case_id, case_type, city, state, h3_cell, overlap_score
+    FROM ${getTableName('entity_case_overlap')}
+    LIMIT 5000
+  `);
 }
 
 async function getHandoffCandidates() {
-  return executeQuery(`SELECT * FROM ${getTableName('handoff_candidates')} LIMIT 5000`);
+  // Drop shared_partners JSONB array — huge per row
+  return executeQuery(`
+    SELECT old_entity_id, new_entity_id, h3_cell, old_last_bucket, new_first_bucket,
+           time_diff_minutes, shared_partner_count, spatial_score,
+           temporal_score, partner_score, handoff_score, rank
+    FROM ${getTableName('handoff_candidates')}
+    LIMIT 1000
+  `);
 }
 
 async function runCustomQuery(sql) {
