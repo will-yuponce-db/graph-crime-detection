@@ -1371,28 +1371,6 @@ const GraphExplorer: React.FC = () => {
       }
     });
 
-    // Check if we have CO_LOCATED links between suspects from API
-    const hasCoLocatedLinks = links.some((l) => l.type === 'CO_LOCATED');
-    const suspectNodesList = nodes.filter((n) => n.isSuspect);
-
-    // Always ensure CO_LOCATED links between suspects if we have multiple suspects
-    if (!hasCoLocatedLinks && suspectNodesList.length >= 2) {
-      // Create CO_LOCATED connections between suspects
-      for (let i = 0; i < suspectNodesList.length - 1; i++) {
-        for (let j = i + 1; j < suspectNodesList.length; j++) {
-          links.push({
-            source: suspectNodesList[i].id,
-            target: suspectNodesList[j].id,
-            type: 'CO_LOCATED',
-            edgeCategory: 'colocation',
-            color: '#fbbf24',
-            width: 2,
-            count: Math.floor(Math.random() * 8) + 3, // Random co-location count 3-10
-          });
-        }
-      }
-    }
-
     setGraphData({ nodes, links });
   };
 
