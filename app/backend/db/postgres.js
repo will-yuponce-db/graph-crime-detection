@@ -322,22 +322,43 @@ function getTableName(table) {
   return `"${SCHEMA}"."${table}"`;
 }
 
+// ============== Query-Level Cache ==============
+// Prevents 6+ parallel endpoints from each fetching their own copy
+// of the same data (e.g. suspect_rankings called by every endpoint).
+const _queryCache = new Map();
+const QUERY_CACHE_TTL = 30_000; // 30 seconds
+
+function cachedQuery(key, queryFn) {
+  const entry = _queryCache.get(key);
+  if (entry && Date.now() - entry.ts < QUERY_CACHE_TTL) return entry.promise;
+  const promise = queryFn().then(rows => {
+    // Replace entry with resolved value so memory is predictable
+    _queryCache.set(key, { promise: Promise.resolve(rows), ts: Date.now() });
+    return rows;
+  }).catch(err => {
+    _queryCache.delete(key);
+    throw err;
+  });
+  _queryCache.set(key, { promise, ts: Date.now() });
+  return promise;
+}
+
 // ============== Query Functions ==============
 // IMPORTANT: Never SELECT * — always pick only needed columns.
 // Tables like co_presence_edges have huge JSONB arrays (time_buckets)
 // that blow up memory if fetched.
 
 async function getCases() {
-  return executeQuery(`
+  return cachedQuery('cases', () => executeQuery(`
     SELECT case_id, case_type, city, state, address, status, priority,
            narrative, estimated_loss, latitude, longitude, h3_cell,
            incident_start, incident_end
     FROM ${getTableName('cases_silver')}
-  `);
+  `));
 }
 
 async function getSuspectRankings() {
-  return executeQuery(`
+  return cachedQuery('rankings', () => executeQuery(`
     SELECT entity_id, case_count, unique_cases, states_count,
            linked_cases, linked_cities,
            total_copresence_weight, total_social_weight,
@@ -345,7 +366,7 @@ async function getSuspectRankings() {
            total_score, rank
     FROM ${getTableName('suspect_rankings')}
     ORDER BY total_score DESC
-  `);
+  `));
 }
 
 /** Co-presence edges between entities in the set. Drops time_buckets JSONB. */
@@ -390,27 +411,24 @@ async function getCoPresenceCount() {
 }
 
 async function getSocialEdges() {
-  // Only 6 rows — safe to fetch all columns
-  return executeQuery(`SELECT * FROM ${getTableName('social_edges_silver')}`);
+  return cachedQuery('social', () => executeQuery(`SELECT * FROM ${getTableName('social_edges_silver')}`));
 }
 
 async function getRelationships() {
-  return executeQuery(`SELECT * FROM ${getTableName('social_edges_silver')}`);
+  return cachedQuery('social', () => executeQuery(`SELECT * FROM ${getTableName('social_edges_silver')}`));
 }
 
 async function getDevicePersonLinks() {
-  // Only 9 rows — safe to fetch all columns
-  return executeQuery(`SELECT * FROM ${getTableName('person_device_links_silver')}`);
+  return cachedQuery('device_links', () => executeQuery(`SELECT * FROM ${getTableName('person_device_links_silver')}`));
 }
 
 async function getCellDeviceCounts() {
-  // Drop entity_ids JSONB array — huge per row
-  return executeQuery(`
+  return cachedQuery('cell_counts', () => executeQuery(`
     SELECT h3_cell, time_bucket, city, state, device_count,
            center_lat, center_lon, is_high_activity, activity_category
     FROM ${getTableName('cell_device_counts')}
     LIMIT 2000
-  `);
+  `));
 }
 
 async function getHotspotsForHour(hour) {
@@ -433,12 +451,11 @@ async function getLocationEvents() {
 }
 
 async function getEvidenceCardData() {
-  // Drop geo_evidence JSONB — can be large
-  return executeQuery(`
+  return cachedQuery('evidence', () => executeQuery(`
     SELECT device_id, person_id, display_name, alias, criminal_history,
            risk_level, rank, total_score, linked_cases, linked_cities, states_count
     FROM ${getTableName('evidence_card_data')}
-  `);
+  `));
 }
 
 async function getEntityCaseOverlap() {
