@@ -44,7 +44,7 @@ import {
 } from '@mui/icons-material';
 import { monoFontFamily } from '../theme/theme';
 
-const ESRI_URL = 'https://koop-esri-237438879023004.aws.databricksapps.com/pubsec-demo.html';
+const ESRI_URL = 'https://koop-esri-7474656154065925.aws.databricksapps.com/pubsec-demo.html';
 
 const ESRIIntegration: React.FC = () => {
   const theme = useTheme();
